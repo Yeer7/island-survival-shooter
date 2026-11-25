@@ -27,10 +27,11 @@ import { Altar, Cave } from './world/cave';
 import { SaveData, SaveStore } from './core/save';
 import { Screens } from './ui/screens';
 import { Village } from './world/village';
+import { Effigies, trailSpots } from './world/effigies';
 import { GrassField } from './world/grass';
 import { Water } from './world/water';
 
-type HitKind = 'tree' | 'case' | 'animal' | 'enemy' | 'terrain' | 'water' | 'hard';
+type HitKind = 'tree' | 'case' | 'effigy' | 'animal' | 'enemy' | 'terrain' | 'water' | 'hard';
 interface RayHit {
   kind: HitKind;
   t: number;
@@ -85,6 +86,7 @@ export class Game implements CombatWorld {
   readonly forest: Forest;
   readonly props: Props;
   readonly village: Village;
+  readonly effigies: Effigies;
   readonly cave: Cave;
   readonly altar: Altar;
   readonly beach: Beach;
@@ -181,8 +183,9 @@ export class Game implements CombatWorld {
     this.scene.add(this.dock.group);
     this.base = new BaseSite(this.terrain, this.colliders);
     this.scene.add(this.base.group);
-    this.village = new Village(this.terrain, this.colliders);
+    this.village = new Village(this.terrain, this.colliders, lib, this.crash.center);
     this.scene.add(this.village.group, this.village.fire.points, this.village.smoke.points, this.village.fireLight);
+    for (const e of this.village.fx) this.scene.add(e.points);
     // Village crates open exactly like the luggage at the crash site.
     for (const c of this.village.crates) {
       this.crash.suitcases.push(c);
@@ -219,7 +222,37 @@ export class Game implements CombatWorld {
     this.scene.add(this.forest.group);
     this.props = new Props(this.terrain, this.colliders, exclusions, this.forest, lib);
     this.scene.add(this.props.group);
-    this.grass = new GrassField(this.terrain, lib, [{ x: this.crash.center.x, z: this.crash.center.z, r: 20 }]);
+    // Breakable effigies: round the village and along the trails between landmarks.
+    const crashC = this.crash.center;
+    const villageC = this.village.center;
+    const mouth = this.cave.mouth;
+    const altarC = this.altar.center;
+    const trail = trailSpots(
+      this.terrain,
+      this.colliders,
+      [
+        { a: crashC, b: villageC, count: 3 },
+        { a: villageC, b: mouth, count: 2 },
+        { a: crashC, b: mouth, count: 2 },
+        { a: crashC, b: altarC, count: 2 },
+      ],
+      [{ x: mouth.x, z: mouth.z, r0: 8, r1: 15, count: 2 }],
+      [
+        { x: crashC.x, z: crashC.z, r: 28 },
+        { x: villageC.x, z: villageC.z, r: this.village.radius },
+        { x: mouth.x, z: mouth.z, r: 7 },
+        { x: this.cave.arena.x, z: this.cave.arena.z, r: 14 },
+        { x: altarC.x, z: altarC.z, r: this.altar.radius + 3 },
+        { x: this.dock.start.x, z: this.dock.start.z, r: 10 },
+      ],
+      this.village.effigySpots,
+    );
+    this.effigies = new Effigies(this.terrain, this.colliders, lib, [...this.village.effigySpots, ...trail]);
+    this.scene.add(this.effigies.group);
+    this.grass = new GrassField(this.terrain, lib, [
+      { x: this.crash.center.x, z: this.crash.center.z, r: 20 },
+      { x: this.village.center.x, z: this.village.center.z, r: 21 },
+    ]);
     this.scene.add(this.grass.mesh);
     this.props.smallRocks.forEach((r, i) => this.pickups.addInstanced('rock', i, r.x, r.y, r.z));
     this.props.smallSticks.forEach((r, i) => this.pickups.addInstanced('stick', i, r.x, r.y, r.z));
@@ -359,6 +392,7 @@ export class Game implements CombatWorld {
     this.vm.setAspect(w / h);
     for (const e of [...this.crash.smoke, ...this.crash.fire]) e.setViewportHeight(h * ratio);
     this.sparks.setViewportHeight(h * ratio);
+    this.village.setViewportHeight(h * ratio);
     this.burnFx.setViewportHeight(h * ratio);
     for (const p of this.base.placed) {
       p.fire?.setViewportHeight(h * ratio);
@@ -439,7 +473,8 @@ export class Game implements CombatWorld {
     this.updateBurning(dt);
     this.crash.update(dt, this.sky.ambient);
     this.base.update(dt, this.time, this.sky.ambient);
-    this.village.update(dt, this.sky.ambient);
+    this.village.update(dt, this.sky.ambient, this.player.pos);
+    this.effigies.update(dt, this.time, this.player.pos);
     this.updateZones();
     this.tribe.update(dt, { player: this.player.pos, alive: !this.vitals.dead, night: this.sky.night > 0.5, day: this.sky.day, zones: this.zones, indoors: this.indoors });
     this.updateCooking(dt);
@@ -1095,6 +1130,8 @@ export class Game implements CombatWorld {
     if (tree) best = { kind: 'tree', t: tree.t, index: tree.tree, metal: false };
     const c = this.crash.raycastCases(o, d, best ? best.t : maxDist, inflate * 0.6);
     if (c) best = { kind: 'case', t: c.t, index: c.index, metal: false };
+    const ef = this.effigies.raycast(o, d, best ? best.t : maxDist, inflate * 0.5);
+    if (ef) best = { kind: 'effigy', t: ef.t, index: ef.index, metal: false };
     const an = this.wildlife.raycast(o, d, best ? best.t : maxDist, inflate * 0.7);
     if (an) best = { kind: 'animal', t: an.t, index: an.index, metal: false };
     const en = this.tribe.raycast(o, d, best ? best.t : maxDist, inflate * 0.7);
@@ -1178,7 +1215,7 @@ export class Game implements CombatWorld {
     const floor = this.terrain.height(p.x, p.z) + 0.02;
     const flame = this.inv.selected === 'flameAxe';
     const fiery = flame || this.inv.selected === 'torch';
-    const solid = hit.kind === 'tree' || hit.kind === 'case' || hit.kind === 'animal' || hit.kind === 'enemy' || hit.kind === 'hard';
+    const solid = hit.kind === 'tree' || hit.kind === 'case' || hit.kind === 'effigy' || hit.kind === 'animal' || hit.kind === 'enemy' || hit.kind === 'hard';
     if (solid) this.impactFeel(hit.kind === 'enemy' || flame);
     if (fiery && solid) {
       // Burning weapons throw sparks off whatever they strike.
@@ -1203,6 +1240,10 @@ export class Game implements CombatWorld {
         this.hitCase(hit.index, spec.luggage, p, n);
         this.hud.hitMarker('white');
         this.player.addTrauma(0.12);
+        break;
+      case 'effigy':
+        // Axes and the spear take one of its two "lives" per blow; the torch half of one.
+        this.hitEffigy(hit.index, this.inv.selected === 'torch' ? 0.5 : 1, p, n);
         break;
       case 'animal':
         this.hitAnimal(hit.index, spec.animal, p, n);
@@ -1263,6 +1304,15 @@ export class Game implements CombatWorld {
         this.sound.arrowHit('flesh');
         this.pickups.addArrow(this.v4.set(tip.x, floor + 0.03, tip.z), new THREE.Quaternion().setFromEuler(new THREE.Euler(0, Math.random() * 6, Math.PI / 2)));
         break;
+      case 'effigy': {
+        this.hitEffigy(hit!.index, 0.5, tip, n);
+        this.sound.arrowHit('wood');
+        const e = this.effigies.list[hit!.index];
+        const ax = e.pos.x + (Math.random() - 0.5) * 0.8;
+        const az = e.pos.z + (Math.random() - 0.5) * 0.8;
+        this.pickups.addArrow(this.v4.set(ax, this.terrain.height(ax, az) + 0.03, az), new THREE.Quaternion().setFromEuler(new THREE.Euler(0, Math.random() * 6, Math.PI / 2)));
+        break;
+      }
       case 'case':
         this.hitCase(hit!.index, 25, tip, n);
         this.sound.arrowHit('wood');
@@ -1344,6 +1394,44 @@ export class Game implements CombatWorld {
       this.pickups.add(type, this.v1.set(x, this.terrain.height(x, z), z), 1);
     });
     this.hud.toast('🧳 Mala aberta');
+  }
+
+  /** A blow on an effigy: wobble and chips, and on the last blow it topples and drops cloth and sticks. */
+  private hitEffigy(i: number, power: number, p: THREE.Vector3, n: THREE.Vector3): void {
+    const e = this.effigies.list[i];
+    if (e.broken) return;
+    const res = this.effigies.hit(i, power, this.player.pos);
+    const floor = e.pos.y + 0.02;
+    this.debris.burst(p, n, 9, 0xc9a070, { speed: 3, size: 0.06, floor });
+    this.debris.burst(p, n, 4, 0xd6c7a1, { speed: 2, size: 0.07, floor, life: 1.1 });
+    this.hud.hitMarker('white');
+    this.sound.hitConfirm(false);
+    if (!res.broken) {
+      this.hud.showTargetHealth(res.left);
+      this.sound.effigyHit();
+      this.player.addTrauma(0.1);
+      return;
+    }
+    this.hud.showTargetHealth(0);
+    this.sound.effigyBreak();
+    this.player.addTrauma(0.2);
+    const mid = this.effigies.middle(i, this.v1);
+    this.debris.burst(mid, this.v3.set(0, 1, 0), 22, 0xb08a5a, { speed: 3.6, size: 0.08, floor, life: 1.4 });
+    this.debris.burst(mid, this.v3.set(0, 1, 0), 10, 0x8e2a1e, { speed: 2.4, size: 0.08, floor, life: 1.6 });
+    this.debris.burst(mid, this.v3.set(0, 1, 0), 8, 0xd6c7a1, { speed: 2.4, size: 0.08, floor, life: 1.6 });
+    this.debris.burst(mid.setY(e.pos.y + 2), this.v3.set(0, 1, 0), 8, 0xe9dfca, { speed: 2.8, size: 0.05, floor, life: 1.2 });
+    // Drops: 1-2 cloth and 2-3 sticks on the ground round its foot.
+    const cloth = 1 + (Math.random() < 0.5 ? 1 : 0);
+    const sticks = 2 + (Math.random() < 0.5 ? 1 : 0);
+    const items: ItemType[] = [...Array(cloth).fill('cloth'), ...Array(sticks).fill('stick')];
+    items.forEach((type, k) => {
+      const a = (k / items.length) * Math.PI * 2 + Math.random() * 0.6;
+      const d = 0.55 + Math.random() * 0.45;
+      const x = e.pos.x + Math.sin(a) * d;
+      const z = e.pos.z + Math.cos(a) * d;
+      this.pickups.add(type, this.v2.set(x, this.terrain.height(x, z), z), 1);
+    });
+    this.hud.toast(`🪵 Efígie derrubada: ${cloth} pano${cloth > 1 ? 's' : ''} e ${sticks} gravetos`);
   }
 
   private onTreeFallStart(_t: Tree): void {
@@ -1739,6 +1827,7 @@ export class Game implements CombatWorld {
       stats: { kills: this.tribe.kills, hunted: this.stats.hunted },
       tutorialDone: this.tutorialDone,
       escaped: this.escaped,
+      effigies: this.effigies.brokenIds(),
     };
     if (SaveStore.save(data)) this.hud.toast('💾 Jogo salvo');
   }
@@ -1771,6 +1860,7 @@ export class Game implements CombatWorld {
     this.tribe.kills = d.stats.kills;
     this.stats.hunted = d.stats.hunted;
     this.escaped = d.escaped;
+    if (d.effigies) this.effigies.restore(d.effigies);
     if (d.tutorialDone) {
       this.tutorialDone = true;
       this.hud.setTutorial(0, 0, null);

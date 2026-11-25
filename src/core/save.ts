@@ -25,6 +25,8 @@ export interface SaveData {
   stats: { kills: number; hunted: number };
   tutorialDone: boolean;
   escaped: boolean;
+  /** Ids of the effigies already knocked down (optional: older saves have none). */
+  effigies?: number[];
 }
 
 const KEY = 'iss.save.v1';

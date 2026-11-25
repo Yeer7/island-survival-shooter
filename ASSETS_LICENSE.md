@@ -33,6 +33,15 @@ Run `npm run lint:assets` to check every `.glb`/`.gltf`/`.fbx` and texture (pars
 | `survivalpack/Bandages.fbx` | Bandages (Pano drop) | Quaternius — Survival Pack (Sept 2020) | https://quaternius.com/packs/survival.html | CC0 1.0 | None |
 | `survivalpack/Can_Red.fbx` | Can_Red (Comida drop, red label) | Quaternius — Survival Pack (Sept 2020) | https://quaternius.com/packs/survival.html | CC0 1.0 | None |
 | `survivalpack/Backpack.fbx` | Backpack (reserved for the backpack in phase 3C) | Quaternius — Survival Pack (Sept 2020) | https://quaternius.com/packs/survival.html | CC0 1.0 | None |
+| `survivalpack/Tent.fbx` | Tent (village hide tents) | Quaternius — Survival Pack (Sept 2020) | https://quaternius.com/packs/survival.html | CC0 1.0 | None (recoloured in code as tanned hide on wooden poles) |
+| `survivalpack/Pot.fbx` | Pot (village cooking pots) | Quaternius — Survival Pack (Sept 2020) | https://quaternius.com/packs/survival.html | CC0 1.0 | None (flat colours converted to PBR in code) |
+| `survivalpack/WoodenTorch.fbx` | WoodenTorch (village torches; flames are particles in code) | Quaternius — Survival Pack (Sept 2020) | https://quaternius.com/packs/survival.html | CC0 1.0 | None (recoloured in code) |
+| `survivalpack/WoodLog.fbx` | WoodLog (log benches round the village fire) | Quaternius — Survival Pack (Sept 2020) | https://quaternius.com/packs/survival.html | CC0 1.0 | None (recoloured in code) |
+| `village/skull.glb` | Skull (effigies, door posts, gates, skull pile) | Quaternius | https://poly.pizza/m/YgmRBtFlcF | CC0 1.0 | None (tinted bone-white in code) |
+| `village/bone.glb` | Bone (effigies, hanging bones, scattered bones) | Quaternius | https://poly.pizza/m/uMs0lDp1u3 | CC0 1.0 | None (tinted bone-white in code) |
+| `village/crate.glb` | Crate (lootable village crates) | Quaternius | https://poly.pizza/m/3VGWnZPXmG | CC0 1.0 | None |
+| `village/barrel.glb` | Barrel (village barrels) | Quaternius | https://poly.pizza/m/ONdghDBByN | CC0 1.0 | None |
+| `village/cauldron.glb` | Cauldron (the cannibals' pot over the fire) | Quaternius | https://poly.pizza/m/QaWJOPa6Gt | CC0 1.0 | None (stew recoloured in code) |
 | `nature/fern.glb` | Fern | Quaternius | https://poly.pizza/m/jqcanvH7D6 | CC0 1.0 | Textures resized to 256 px |
 | `enemies/tribal_human.glb` | Animated Human (Idle/Walk/Run/Punch/Death) — night cannibals, village guards and the Tribal Chief (skin tint, mask, club, skirt and headdress added in code) | Quaternius | https://poly.pizza/m/c3Ibh9I3udk | CC0 1.0 | None |
 | `enemies/cave_skeleton.glb` | Skeleton (Idle/Running/Attack/Death) — Cave Guardian, scaled to 3.6 m, tinted, glowing eyes added in code | Quaternius | https://poly.pizza/m/wODZYCgX5Z | CC0 1.0 | None |
@@ -58,6 +67,9 @@ Poly Pizza pages list each Quaternius model as "CC0 1.0 / Public Domain"; the Ke
 - **Cannibal props** (carved mask texture, clubs, spear, skirt, chief headdress) are made in code and attached to the CC0 rig's bones (`src/world/cannibals.ts`).
 - **Sea turtles, washed-up barrels/crates, shells**: built in code (`src/world/animals.ts`, `src/world/beach.ts`).
 - **North cave (tunnel, stalactites, bridge), east altar, escape sailboat, crash-site dirt patch, coconut, relic, Alpha heart and tactical flashlight drops**: built in code.
+- **Cannibal village structures** (chief's round hut and the smaller hut with stake walls, wattle panels and tiered thatch roofs, the A-frame lodge, drying racks, skull gates and sharpened palisades) and the packed-earth ground, thatch, wattle, hide and straw-fringe textures: built in code (`src/world/village.ts`), dressed with the CC0 models above.
+- **Breakable effigies** (crossed stakes, rope lashings, cloth strips texture) are built in code (`src/world/effigies.ts`) around the CC0 skull and bone models.
+- **Log cabin and survival bed** (linen and leather textures): built in code (`src/world/base.ts`).
 - **Tribal village**: thatched huts, skull totems, fire and crates built in code (`src/world/village.ts`).
 - **Tree stumps**: a cylinder with the procedural bark texture on the side and a procedural growth-ring texture on the cut top (`src/world/vegetation.ts`, `src/world/textures.ts`).
 - **Rabbits**: multi-part procedural model (`src/world/animals.ts`). No CC0 *animal* rabbit was available: the Quaternius "Rabbit"/"Bunny" files are humanoid characters, and the animal rabbits on Poly Pizza are CC-BY 3.0, so they were not used.

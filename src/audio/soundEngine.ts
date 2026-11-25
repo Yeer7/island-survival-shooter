@@ -225,6 +225,30 @@ export class SoundEngine {
     this.burst({ type: 'lowpass', freq: 600, gain: 0.25, decay: 0.18, when: 0.01 });
   }
 
+  /** Axe on an effigy: a dry stick knock and the tied bones rattling. */
+  effigyHit(): void {
+    if (!this.ctx) return;
+    const p = 0.92 + Math.random() * 0.16;
+    this.burst({ type: 'bandpass', freq: 2100 * p, q: 2.2, gain: 0.55, decay: 0.05 });
+    this.tone({ f0: 430 * p, f1: 240, gain: 0.32, decay: 0.08 });
+    this.burst({ type: 'lowpass', freq: 800, gain: 0.2, decay: 0.1, when: 0.01 });
+    for (let i = 0; i < 5; i++) this.burst({ type: 'bandpass', freq: 3000 + Math.random() * 1800, q: 9, gain: 0.16, decay: 0.025, when: 0.04 + Math.random() * 0.3 });
+  }
+
+  /** An effigy giving way: sticks snapping, a hollow thud, bones clattering and cloth flapping. */
+  effigyBreak(): void {
+    if (!this.ctx) return;
+    this.burst({ type: 'highpass', freq: 1500, gain: 0.6, decay: 0.09, toEcho: 0.12 });
+    this.burst({ type: 'bandpass', freq: 900, q: 1.6, gain: 0.55, decay: 0.16, when: 0.02 });
+    this.tone({ f0: 230, f1: 70, gain: 0.45, decay: 0.22, when: 0.01 });
+    this.burst({ type: 'highpass', freq: 2200, gain: 0.35, decay: 0.06, when: 0.13 });
+    this.burst({ type: 'bandpass', freq: 900, endFreq: 260, q: 0.8, gain: 0.16, attack: 0.04, decay: 0.38, when: 0.05 });
+    // The fall: a hollow thud when it hits the ground.
+    this.tone({ f0: 140, f1: 55, gain: 0.5, decay: 0.2, when: 0.55 });
+    this.burst({ type: 'lowpass', freq: 500, gain: 0.35, decay: 0.18, when: 0.55 });
+    for (let i = 0; i < 9; i++) this.burst({ type: 'bandpass', freq: 2600 + Math.random() * 2200, q: 10, gain: 0.18, decay: 0.03, when: 0.5 + Math.random() * 0.55 });
+  }
+
   hitSoft(): void {
     if (!this.ctx) return;
     this.burst({ type: 'lowpass', freq: 700, gain: 0.35, decay: 0.12 });

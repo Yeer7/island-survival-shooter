@@ -1,4 +1,5 @@
 import { AssetLibrary, setLibrary } from './assets/assets';
+import { SaveStore } from './core/save';
 import { Game } from './game';
 import { startGallery } from './ui/gallery';
 
@@ -6,6 +7,7 @@ const canvas = document.getElementById('game-canvas') as HTMLCanvasElement;
 const overlay = document.getElementById('overlay') as HTMLDivElement;
 const crosshair = document.getElementById('crosshair') as HTMLDivElement;
 const playBtn = document.getElementById('play-btn') as HTMLButtonElement;
+const newGameBtn = document.getElementById('newgame-btn') as HTMLButtonElement;
 const sens = document.getElementById('sens') as HTMLInputElement;
 const sensVal = document.getElementById('sens-val') as HTMLSpanElement;
 const params = new URLSearchParams(location.search);
@@ -30,7 +32,10 @@ async function boot(): Promise<void> {
   const game = new Game(canvas, lib);
   if (import.meta.env.DEV || debug) (window as unknown as { __game: Game }).__game = game;
   playBtn.disabled = false;
-  playBtn.textContent = 'ENTRAR NA ILHA';
+  const hasSave = SaveStore.load() !== null;
+  playBtn.textContent = hasSave ? 'CONTINUAR JOGO' : 'ENTRAR NA ILHA';
+  newGameBtn.style.display = hasSave ? '' : 'none';
+  newGameBtn.addEventListener('click', () => game.newGame());
 
   sens.value = String(game.player.sensitivity);
   sensVal.textContent = `${game.player.sensitivity.toFixed(2)}×`;
@@ -41,7 +46,8 @@ async function boot(): Promise<void> {
   });
 
   const show = (playing: boolean) => {
-    overlay.style.display = playing || game.menuOpen ? 'none' : 'flex';
+    overlay.style.display = playing || game.menuOpen || game.screens.open ? 'none' : 'flex';
+    if (!playing && SaveStore.load()) newGameBtn.style.display = '';
     crosshair.style.display = playing ? 'block' : 'none';
   };
 

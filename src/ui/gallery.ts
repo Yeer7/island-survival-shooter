@@ -2,7 +2,6 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { ASSET_FILES, AssetLibrary, AssetName } from '../assets/assets';
 import { buildHide, buildMeat, buildTotem } from '../weapons/models';
-import { buildCannibal } from '../world/cannibals';
 import { normalize } from '../assets/assets';
 
 /**
@@ -40,8 +39,6 @@ export function startGallery(canvas: HTMLCanvasElement, lib: AssetLibrary): void
     { label: 'code: carne assada', build: () => buildMeat(true) },
     { label: 'code: pele (rolo)', build: () => buildHide() },
     { label: 'code: totem tribal', build: () => buildTotem() },
-    { label: 'code: canibal', build: () => buildCannibal('raider').rig.root },
-    { label: 'code: chefe tribal', build: () => buildCannibal('boss').rig.root },
   ];
   const cols = 7;
   const spacing = 3.4;

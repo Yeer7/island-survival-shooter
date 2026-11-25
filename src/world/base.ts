@@ -41,7 +41,6 @@ export const RECIPES: Recipe[] = [
   { id: 'arrows', label: 'Flechas ×5', icon: '➶', level: 2, kind: 'item', cost: { sticks: 2, rocks: 1 }, desc: 'Munição do arco (recuperável).' },
   { id: 'reinforcedArmor', label: 'Armadura Reforçada', icon: '🛡️', level: 2, kind: 'armor', cost: { hide: 4, logs: 1, rocks: 3 }, desc: 'Vida máxima 200.' },
   { id: 'flameAxe', label: 'Machado Flamejante', icon: '🔥', level: 3, kind: 'tool', cost: { logs: 2, rocks: 4, cloth: 2 }, desc: 'Dobro de dano, cabeça em brasa.' },
-  { id: 'sailboat', label: 'Veleiro de Fuga', icon: '⛵', level: 3, kind: 'boat', cost: { logs: 10, cloth: 6, hide: 4 }, desc: 'Etapa final: o barco para sair da ilha.' },
 ];
 
 export const LEVEL_UP: Record<2 | 3, { cost: Cost; boss: 'totem' | 'relic'; bossLabel: string }> = {

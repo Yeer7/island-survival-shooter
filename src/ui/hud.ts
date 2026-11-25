@@ -1,5 +1,5 @@
 import './hud.css';
-import { HOTBAR_INFO, HotbarId, Inventory, MATERIAL_INFO, MAX_LOGS } from '../player/inventory';
+import { HOTBAR_INFO, HotbarId, Inventory, MATERIAL_INFO } from '../player/inventory';
 
 const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls = '', parent?: HTMLElement, html = ''): HTMLElementTagNameMap[K] => {
   const e = document.createElement(tag);
@@ -42,6 +42,7 @@ export class Hud {
   private tutorialText: HTMLSpanElement;
   private tutorialStep: HTMLSpanElement;
   onSkipTutorial: () => void = () => {};
+  private questEl!: HTMLDivElement;
   onCraftButton: () => void = () => {};
   private target: HTMLDivElement;
   private targetFill: HTMLDivElement;
@@ -98,10 +99,13 @@ export class Hud {
     });
     requestAnimationFrame(measure);
 
-    this.tutorial = el('div', 'hud-tutorial', this.root);
+    // Bottom-left: tutorial step and current objective, plain text over the scene (The Forest style).
+    const quests = el('div', 'hud-quests', this.root);
+    this.questEl = el('div', 'hud-quest', quests);
+    this.tutorial = el('div', 'hud-tutorial', quests);
     this.tutorialStep = el('span', 'step', this.tutorial);
     this.tutorialText = el('span', '', this.tutorial);
-    const skip = el('button', '', this.tutorial, 'Pular (T)');
+    const skip = el('button', '', this.tutorial, '[Pular]');
     skip.addEventListener('click', () => this.onSkipTutorial());
     this.tutorial.style.display = 'none';
 
@@ -208,7 +212,7 @@ export class Hud {
       this.set(`cnt${i}`, s.cnt, c === null ? '' : String(c));
     });
     const mats: [string, number, string][] = [
-      ['logs', inv.logs, `/${MAX_LOGS}`],
+      ['logs', inv.logs, `/${inv.maxLogs}`],
       ['sticks', inv.mats.sticks, ''],
       ['rocks', inv.mats.rocks, ''],
       ['cloth', inv.mats.cloth, ''],
@@ -227,13 +231,27 @@ export class Hud {
     this.set('armor', this.armorEl, text);
   }
 
+  setMarkerVisible(name: string, on: boolean): void {
+    for (const m of this.markers) if (m.t.name === name) this.set(`mv-${name}`, m.el, on ? '1' : '0', 'opacity');
+  }
+
+  /** Current objective (quest) shown bottom-left. */
+  setQuest(icon: string, text: string | null): void {
+    if (text === null) {
+      this.questEl.style.display = 'none';
+      return;
+    }
+    this.questEl.style.display = '';
+    this.set('quest', this.questEl, '<span class="ico">' + icon + '</span><span><small>Objetivo</small>' + text + '</span>', 'html');
+  }
+
   setTutorial(step: number, total: number, text: string | null): void {
     if (text === null) {
       this.tutorial.style.display = 'none';
       return;
     }
     this.tutorial.style.display = '';
-    this.set('tut-step', this.tutorialStep, `${step}/${total}`);
+    this.set('tut-step', this.tutorialStep, `Tutorial ${step}/${total}`);
     this.set('tut-text', this.tutorialText, text);
   }
 

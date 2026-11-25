@@ -76,7 +76,8 @@ export class Terrain {
 
     const south = smoothstep(40, 190, z);
     const north = smoothstep(30, 170, -z);
-    const inlandStart = lerp(0.9, 0.78, south);
+    // Southern beach kept to a ~25 m strip of sand between the water and the forest.
+    const inlandStart = lerp(0.9, 0.865, south);
     const inland = 1 - smoothstep(inlandStart - 0.3, inlandStart, t);
 
     // Light domain warping bends hills and ridges so nothing lines up on the noise grid.
@@ -164,7 +165,7 @@ export class Terrain {
     const wl = this.waterLevelAt(x, z);
     if (h < wl - 0.25) return 'water';
     if (this.slope(x, z) > 0.32) return 'rock';
-    const beachTop = 2.3 + smoothstep(40, 190, z) * 0.8;
+    const beachTop = 2.3 + smoothstep(40, 190, z) * 0.2;
     if (h < beachTop || (wl === LAKE_LEVEL && h < LAKE_LEVEL + 0.7)) return 'sand';
     return 'grass';
   }
@@ -175,7 +176,7 @@ export class Terrain {
     const v = n.noise(x * 0.08, z * 0.08) * 0.5 + 0.5;
     const south = smoothstep(40, 190, z);
     const north = smoothstep(30, 170, -z);
-    const beachTop = 2.3 + south * 0.8;
+    const beachTop = 2.3 + south * 0.2;
     const nearLake = Math.hypot(x - LAKE_CENTER.x, z - LAKE_CENTER.z) < LAKE_RADIUS * 1.6;
 
     this.lastSand = 1;

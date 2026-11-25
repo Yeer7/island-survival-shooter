@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { library } from '../assets/assets';
 import { buildArrow, buildHide, buildLog, buildMeat, buildSticks, buildTotem } from '../weapons/models';
 
-export type ItemType = 'food' | 'bandage' | 'cloth' | 'stick' | 'log' | 'rock' | 'meat' | 'hide' | 'arrow' | 'totem';
+export type ItemType = 'food' | 'bandage' | 'cloth' | 'stick' | 'log' | 'rock' | 'meat' | 'hide' | 'arrow' | 'totem' | 'coconut' | 'relic' | 'heart' | 'flashlight' | 'backpack';
 
 export const ITEM_LABEL: Record<ItemType, string> = {
   food: 'Comida',
@@ -15,6 +15,11 @@ export const ITEM_LABEL: Record<ItemType, string> = {
   hide: 'Pele Animal',
   arrow: 'Flecha',
   totem: 'Totem Tribal',
+  coconut: 'Coco',
+  relic: 'Relíquia da Caverna',
+  heart: 'Coração Alfa',
+  flashlight: 'Lanterna Tática',
+  backpack: 'Mochila Tática',
 };
 
 export interface Pickup {
@@ -39,6 +44,51 @@ function itemMesh(type: ItemType): THREE.Object3D {
     case 'totem':
       g.add(buildTotem());
       break;
+    case 'coconut': {
+      const husk = new THREE.Mesh(new THREE.SphereGeometry(0.11, 12, 10), m(0x5a3a1e, 0.95));
+      husk.scale.set(1, 0.92, 1.1);
+      husk.position.y = 0.1;
+      const eye = new THREE.Mesh(new THREE.SphereGeometry(0.018, 6, 4), m(0x1e120a, 1));
+      eye.position.set(0.03, 0.18, 0.08);
+      g.add(husk, eye);
+      break;
+    }
+    case 'relic': {
+      // Glowing crystal on a carved stone base.
+      const base = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.15, 0.1, 8), m(0x6f6a62, 0.9));
+      base.position.y = 0.05;
+      const gem = new THREE.Mesh(new THREE.OctahedronGeometry(0.13, 0), new THREE.MeshStandardMaterial({ color: 0x6fd8ff, emissive: 0x2a9fd8, emissiveIntensity: 1.4, roughness: 0.2, metalness: 0.1 }));
+      gem.scale.y = 1.6;
+      gem.position.y = 0.32;
+      g.add(base, gem);
+      break;
+    }
+    case 'heart': {
+      const heart = new THREE.Mesh(new THREE.SphereGeometry(0.1, 12, 10), new THREE.MeshStandardMaterial({ color: 0x8a0f14, emissive: 0x5a0408, emissiveIntensity: 1.2, roughness: 0.35 }));
+      heart.scale.set(1, 1.2, 0.9);
+      heart.position.y = 0.13;
+      g.add(heart);
+      break;
+    }
+    case 'flashlight': {
+      const body = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.03, 0.26, 12), m(0x2b2f33, 0.5, 0.4));
+      body.rotation.z = Math.PI / 2;
+      body.position.y = 0.04;
+      const lens = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.04, 12), new THREE.MeshStandardMaterial({ color: 0xfff6d8, emissive: 0xfff0b0, emissiveIntensity: 0.8 }));
+      lens.rotation.z = Math.PI / 2;
+      lens.position.set(0.15, 0.045, 0);
+      g.add(body, lens);
+      break;
+    }
+    case 'backpack': {
+      const lib = library();
+      if (lib?.has('backpack')) {
+        g.add(lib.instance('backpack', { by: 'height', value: 0.55 }));
+        break;
+      }
+      g.add(new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.5, 0.25), m(0x4a5a34, 0.9)));
+      break;
+    }
     case 'food': {
       const lib = library();
       if (lib?.has('can')) {
@@ -95,8 +145,13 @@ function itemMesh(type: ItemType): THREE.Object3D {
       g.add(log);
       break;
     }
-    case 'rock':
+    case 'rock': {
+      // Loose pebble (instanced ground stones use no mesh: instIndex >= 0).
+      const st = new THREE.Mesh(new THREE.DodecahedronGeometry(0.11, 0), m(0x9a968e, 0.9));
+      st.scale.set(1.2, 0.6, 1);
+      g.add(st);
       break;
+    }
   }
   g.traverse((o) => {
     if ((o as THREE.Mesh).isMesh) o.castShadow = true;
@@ -114,11 +169,11 @@ export class PickupManager {
   add(type: ItemType, pos: THREE.Vector3, amount = 1, rotY = Math.random() * Math.PI * 2): Pickup {
     const mesh = itemMesh(type);
     // Every drop rests on the ground: its lowest point sits on the terrain, no floating.
-    const still = type !== 'totem';
+    const still = !(type === 'totem' || type === 'relic' || type === 'heart');
     mesh.rotation.y = rotY;
     mesh.updateMatrixWorld(true);
     const bb = new THREE.Box3().setFromObject(mesh);
-    const baseY = pos.y - bb.min.y + (type === 'totem' ? 0.08 : 0.005);
+    const baseY = pos.y - bb.min.y + (still ? 0.005 : 0.1);
     mesh.position.set(pos.x, baseY, pos.z);
     this.group.add(mesh);
     const p: Pickup = { type, pos: new THREE.Vector3(pos.x, baseY, pos.z), mesh, active: true, amount, baseY, phase: Math.random() * 6, spin: !still, instIndex: -1 };

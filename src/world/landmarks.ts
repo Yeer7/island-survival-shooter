@@ -45,15 +45,32 @@ export class CrashSite {
   private flicker = 0;
 
   constructor(private terrain: Terrain, colliders: ColliderGrid) {
-    // Find the southern beach: walk south from the interior until the ground is low sand.
-    const shore = terrain.findShore(-10, 120, 0, 1, 1.5);
-    const cx = shore.x;
-    const cz = shore.z + 4;
+    // A clearing in the pine forest of the centre-south (like The Forest): the flattest
+    // inland spot well away from the beach, the lake and the coast.
+    let best = { x: 0, z: 90, score: Infinity };
+    for (let x = -90; x <= 90; x += 6) {
+      for (let z = 40; z <= 150; z += 6) {
+        if (terrain.coastDistance(x, z) < 55) continue;
+        if (Math.hypot(x - LAKE_CENTER.x, z - LAKE_CENTER.z) < 80) continue;
+        const h = terrain.height(x, z);
+        if (h < 4.5) continue;
+        let rough = 0;
+        for (let k = 0; k < 10; k++) {
+          const a = (k / 10) * Math.PI * 2;
+          rough += Math.abs(terrain.height(x + Math.cos(a) * 16, z + Math.sin(a) * 16) - h);
+        }
+        const score = rough + Math.abs(z - 95) * 0.03 + Math.abs(x) * 0.02;
+        if (score < best.score) best = { x, z, score };
+      }
+    }
+    const cx = best.x;
+    const cz = best.z;
     this.yaw = 0.22;
     const baseY = terrain.height(cx, cz);
     this.center.set(cx, baseY, cz);
     this.group.position.copy(this.center);
     this.group.rotation.y = this.yaw;
+    this.dirt = this.buildDirtPatch(19);
 
     const hull = std(0xe8e8e4, 0.55, 0.15);
     const stripe = std(0x1f5fa8, 0.5, 0.1);
@@ -218,6 +235,55 @@ export class CrashSite {
     // Face the wreck when waking up.
     const toPlane = new THREE.Vector3().subVectors(this.center, this.spawn);
     this.spawnYaw = Math.atan2(-toPlane.x, -toPlane.z);
+  }
+
+  readonly dirt: THREE.Mesh;
+
+  /** Churned earth around the impact: a disc that follows the ground, fading at its rim. */
+  private buildDirtPatch(radius: number): THREE.Mesh {
+    const c = document.createElement('canvas');
+    c.width = c.height = 256;
+    const g = c.getContext('2d')!;
+    let seed = 9;
+    const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+    const grad = g.createRadialGradient(128, 128, 30, 128, 128, 128);
+    grad.addColorStop(0, 'rgba(92,70,46,1)');
+    grad.addColorStop(0.72, 'rgba(88,68,44,0.92)');
+    grad.addColorStop(1, 'rgba(80,62,40,0)');
+    g.fillStyle = grad;
+    g.fillRect(0, 0, 256, 256);
+    for (let i = 0; i < 2500; i++) {
+      const a = rnd() * Math.PI * 2;
+      const r = Math.sqrt(rnd()) * 118;
+      g.fillStyle = rnd() > 0.5 ? `rgba(60,44,28,${0.35 * rnd()})` : `rgba(130,104,72,${0.3 * rnd()})`;
+      g.fillRect(128 + Math.cos(a) * r, 128 + Math.sin(a) * r, 2 + rnd() * 5, 1 + rnd() * 3);
+    }
+    // Furrows ploughed by the fuselage.
+    g.strokeStyle = 'rgba(40,28,16,0.45)';
+    g.lineWidth = 6;
+    for (let k = -2; k <= 2; k++) {
+      g.beginPath();
+      g.moveTo(30, 128 + k * 14);
+      g.bezierCurveTo(90, 120 + k * 16, 170, 136 + k * 12, 236, 128 + k * 10);
+      g.stroke();
+    }
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    const seg = 40;
+    const geo = new THREE.PlaneGeometry(radius * 2, radius * 2, seg, seg);
+    geo.rotateX(-Math.PI / 2);
+    const pos = geo.attributes.position;
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i) + this.center.x;
+      const z = pos.getZ(i) + this.center.z;
+      pos.setY(i, this.terrain.height(x, z) - this.center.y + 0.04);
+    }
+    geo.computeVertexNormals();
+    const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ map: tex, transparent: true, depthWrite: false, roughness: 1, polygonOffset: true, polygonOffsetFactor: -2 }));
+    mesh.position.copy(this.center);
+    mesh.receiveShadow = true;
+    mesh.renderOrder = 0;
+    return mesh;
   }
 
   private toWorld(lx: number, ly: number, lz: number): THREE.Vector3 {

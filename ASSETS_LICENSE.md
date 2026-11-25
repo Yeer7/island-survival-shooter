@@ -34,6 +34,9 @@ Run `npm run lint:assets` to check every `.glb`/`.gltf`/`.fbx` and texture (pars
 | `survivalpack/Can_Closed.fbx` | Can_Closed (Comida drop) | Quaternius — Survival Pack (Sept 2020) | https://quaternius.com/packs/survival.html | CC0 1.0 | None |
 | `survivalpack/Backpack.fbx` | Backpack (reserved for the backpack in phase 3C) | Quaternius — Survival Pack (Sept 2020) | https://quaternius.com/packs/survival.html | CC0 1.0 | None |
 | `nature/fern.glb` | Fern | Quaternius | https://poly.pizza/m/jqcanvH7D6 | CC0 1.0 | Textures resized to 256 px |
+| `enemies/tribal_human.glb` | Animated Human (Idle/Walk/Run/Punch/Death) — night cannibals, village guards and the Tribal Chief (skin tint, mask, club, skirt and headdress added in code) | Quaternius | https://poly.pizza/m/c3Ibh9I3udk | CC0 1.0 | None |
+| `enemies/cave_skeleton.glb` | Skeleton (Idle/Running/Attack/Death) — Cave Guardian, scaled to 3.6 m, tinted, glowing eyes added in code | Quaternius | https://poly.pizza/m/wODZYCgX5Z | CC0 1.0 | None |
+| `enemies/alpha_wolf.glb` | Wolf (Idle/Walk/Gallop/Attack/Death) — Alpha Beast, scaled, darkened, red eyes added in code | Quaternius | https://poly.pizza/m/P1gU3Qkr9r | CC0 1.0 | None |
 | `animals/deer.glb` | Deer (animated) | Quaternius | https://poly.pizza/m/T6Cs7tmMHJ | CC0 1.0 | None |
 | `animals/stag.glb` | Stag (animated) | Quaternius | https://poly.pizza/m/tQdzbZ1Cmw | CC0 1.0 | None |
 | `tools/bow.glb` | Wooden Bow | Quaternius | https://poly.pizza/m/QnpqjLSKFU | CC0 1.0 | None |
@@ -52,7 +55,9 @@ Poly Pizza pages list each Quaternius model as "CC0 1.0 / Public Domain"; the Ke
 ## Made in code (no third-party source)
 
 - **Meat (raw/cooked), rolled hide and the Tribal Totem drops**: built in code with procedural marbling, grill-mark, leather and spiral textures (`src/weapons/models.ts`).
-- **Cannibals and the Tribal Chief**: articulated bodies built from primitives with procedural body-paint and carved-mask textures, animated in code (`src/world/cannibals.ts`).
+- **Cannibal props** (carved mask texture, clubs, spear, skirt, chief headdress) are made in code and attached to the CC0 rig's bones (`src/world/cannibals.ts`).
+- **Sea turtles, washed-up barrels/crates, shells**: built in code (`src/world/animals.ts`, `src/world/beach.ts`).
+- **North cave (tunnel, stalactites, bridge), east altar, escape sailboat, crash-site dirt patch, coconut, relic, Alpha heart and tactical flashlight drops**: built in code.
 - **Tribal village**: thatched huts, skull totems, fire and crates built in code (`src/world/village.ts`).
 - **Tree stumps**: a cylinder with the procedural bark texture on the side and a procedural growth-ring texture on the cut top (`src/world/vegetation.ts`, `src/world/textures.ts`).
 - **Rabbits**: multi-part procedural model (`src/world/animals.ts`). No CC0 *animal* rabbit was available: the Quaternius "Rabbit"/"Bunny" files are humanoid characters, and the animal rabbits on Poly Pizza are CC-BY 3.0, so they were not used.

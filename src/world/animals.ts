@@ -6,7 +6,7 @@ import { ColliderGrid } from './colliders';
 import { Exclusion } from './vegetation';
 import { Terrain } from './terrain';
 
-export type Species = 'rabbit' | 'deer';
+export type Species = 'rabbit' | 'deer' | 'turtle';
 
 interface SpeciesCfg {
   walk: number;
@@ -24,6 +24,7 @@ interface SpeciesCfg {
 
 // Short bursts of flight against the player's 10 m/s sprint: hunting is a chase, not a marathon.
 const CFG: Record<Species, SpeciesCfg> = {
+  turtle: { walk: 0.45, flee: 1.1, scare: 4, fleeTime: 3, rest: 3, hp: 25, radius: 0.4, height: 0.3, stride: 0.25, turn: 1.2 },
   rabbit: { walk: 2.0, flee: 6.5, scare: 12, fleeTime: 2.5, rest: 4, hp: 20, radius: 0.3, height: 0.35, stride: 0.55, turn: 3.0 },
   deer: { walk: 2.2, flee: 8.0, scare: 14, fleeTime: 3.5, rest: 4, hp: 60, radius: 0.75, height: 1.3, stride: 1.4, turn: 1.8 },
 };
@@ -80,6 +81,70 @@ function legGeo(len: number, r: number, hex: number): THREE.BufferGeometry {
   const g = new THREE.CylinderGeometry(r, r * 0.7, len, 5);
   g.translate(0, -len / 2, 0);
   return colored(g, hex);
+}
+
+let shellTex: THREE.CanvasTexture | null = null;
+
+/** Sea turtle: patterned domed shell, head and four flippers. Origin at its belly. */
+function buildTurtle(): { group: THREE.Group; body: THREE.Group; head: THREE.Object3D; legs: THREE.Object3D[] } {
+  if (!shellTex) {
+    const c = document.createElement('canvas');
+    c.width = c.height = 128;
+    const g = c.getContext('2d')!;
+    g.fillStyle = '#4f5b2e';
+    g.fillRect(0, 0, 128, 128);
+    g.strokeStyle = '#2f3818';
+    g.lineWidth = 3;
+    for (let y = 0; y < 4; y++) {
+      for (let x = 0; x < 4; x++) {
+        const cx = x * 32 + (y % 2) * 16 + 8;
+        const cy = y * 32 + 16;
+        g.fillStyle = (x + y) % 2 ? '#6b6a34' : '#5d6230';
+        g.beginPath();
+        for (let k = 0; k < 6; k++) g.lineTo(cx + Math.cos((k / 6) * Math.PI * 2) * 14, cy + Math.sin((k / 6) * Math.PI * 2) * 14);
+        g.closePath();
+        g.fill();
+        g.stroke();
+      }
+    }
+    shellTex = new THREE.CanvasTexture(c);
+    shellTex.colorSpace = THREE.SRGBColorSpace;
+  }
+  const skin = new THREE.MeshStandardMaterial({ color: 0x7a7a52, roughness: 0.9 });
+  const body = new THREE.Group();
+  const shell = new THREE.Mesh(new THREE.SphereGeometry(0.42, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2), new THREE.MeshStandardMaterial({ map: shellTex, roughness: 0.6 }));
+  shell.scale.set(1, 0.45, 1.25);
+  shell.position.y = 0.1;
+  shell.castShadow = true;
+  const belly = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.38, 0.08, 16), new THREE.MeshStandardMaterial({ color: 0xc9b98a, roughness: 0.9 }));
+  belly.scale.z = 1.22;
+  belly.position.y = 0.1;
+  const head = new THREE.Group();
+  head.position.set(0, 0.14, 0.52);
+  const skull = new THREE.Mesh(new THREE.SphereGeometry(0.11, 10, 8), skin);
+  skull.scale.set(0.9, 0.8, 1.25);
+  const eyeMat = new THREE.MeshStandardMaterial({ color: 0x0d0d0d });
+  for (const x of [-0.06, 0.06]) {
+    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.018, 6, 4), eyeMat);
+    eye.position.set(x, 0.03, 0.08);
+    head.add(eye);
+  }
+  head.add(skull);
+  body.add(shell, belly, head);
+  const legs: THREE.Object3D[] = [];
+  for (const [x, z, front] of [[-0.34, 0.3, 1], [0.34, 0.3, 1], [-0.3, -0.34, 0], [0.3, -0.34, 0]] as number[][]) {
+    const pivot = new THREE.Group();
+    pivot.position.set(x, 0.08, z);
+    const fl = new THREE.Mesh(new THREE.BoxGeometry(front ? 0.3 : 0.18, 0.04, front ? 0.14 : 0.12), skin);
+    fl.position.x = Math.sign(x) * (front ? 0.14 : 0.08);
+    fl.rotation.y = Math.sign(x) * (front ? -0.5 : 0.4);
+    pivot.add(fl);
+    body.add(pivot);
+    legs.push(pivot);
+  }
+  const group = new THREE.Group();
+  group.add(body);
+  return { group, body, head, legs };
 }
 
 function buildRabbit(): { group: THREE.Group; body: THREE.Group; head: null; legs: THREE.Object3D[] } {
@@ -166,13 +231,18 @@ export class Wildlife {
   constructor(private terrain: Terrain, private colliders: ColliderGrid, private exclusions: Exclusion[], private onDeath: (a: Animal) => void, private lib: AssetLibrary | null = null) {
     for (let i = 0; i < 14; i++) this.spawn('rabbit', null);
     for (let i = 0; i < 8; i++) this.spawn('deer', null);
+    for (let i = 0; i < 8; i++) this.spawn('turtle', null);
   }
 
-  private findSpot(avoid: THREE.Vector3 | null): THREE.Vector3 {
-    for (let k = 0; k < 400; k++) {
+  private findSpot(avoid: THREE.Vector3 | null, species: Species = 'rabbit'): THREE.Vector3 {
+    for (let k = 0; k < 600; k++) {
       const x = (this.rand() - 0.5) * 460;
       const z = (this.rand() - 0.5) * 460;
-      if (this.terrain.surfaceAt(x, z) !== 'grass') continue;
+      if (species === 'turtle') {
+        // Sea turtles crawl on the southern beach sand.
+        const h = this.terrain.height(x, z);
+        if (z < 40 || this.terrain.surfaceAt(x, z) !== 'sand' || h < 0.5 || this.terrain.waterLevelAt(x, z) !== 0) continue;
+      } else if (this.terrain.surfaceAt(x, z) !== 'grass') continue;
       if (this.exclusions.some((e) => Math.hypot(x - e.x, z - e.z) < e.r + 10)) continue;
       if (avoid && Math.hypot(x - avoid.x, z - avoid.z) < 70) continue;
       return new THREE.Vector3(x, this.terrain.height(x, z), z);
@@ -181,7 +251,7 @@ export class Wildlife {
   }
 
   private spawn(species: Species, avoid: THREE.Vector3 | null, reuse?: Animal): void {
-    const pos = this.findSpot(avoid);
+    const pos = this.findSpot(avoid, species);
     if (reuse) {
       reuse.pos.copy(pos);
       reuse.hp = reuse.cfg.hp;
@@ -200,7 +270,7 @@ export class Wildlife {
       return;
     }
     const built: { group: THREE.Group; body: THREE.Group; head: THREE.Object3D | null; legs: THREE.Object3D[]; mixer?: THREE.AnimationMixer; actions?: Partial<Record<ClipKey, THREE.AnimationAction>> } =
-      species === 'rabbit' ? buildRabbit() : this.buildDeerAsset() ?? buildDeer(this.rand);
+      species === 'rabbit' ? buildRabbit() : species === 'turtle' ? buildTurtle() : this.buildDeerAsset() ?? buildDeer(this.rand);
     const heading = this.rand() * Math.PI * 2;
     const a: Animal = {
       species,
@@ -328,9 +398,11 @@ export class Wildlife {
     a.targetHeading = Math.atan2(a.pos.x - from.x, a.pos.z - from.z);
   }
 
-  private blocked(x: number, z: number): boolean {
+  private blocked(x: number, z: number, species: Species = 'rabbit'): boolean {
     const h = this.terrain.height(x, z);
     if (h < this.terrain.waterLevelAt(x, z) + 0.3) return true;
+    // Turtles stay on the sand; everything else keeps off the beach edge.
+    if (species === 'turtle') return this.terrain.surfaceAt(x, z) !== 'sand';
     if (this.terrain.coastDistance(x, z) < 12) return true;
     if (this.terrain.slope(x, z) > 0.42) return true;
     return this.exclusions.some((e) => Math.hypot(x - e.x, z - e.z) < e.r * 0.6);
@@ -398,8 +470,8 @@ export class Wildlife {
 
       // Steer away from water, cliffs, the coast and the camps.
       const look = 2 + a.speed * 0.6;
-      if (this.blocked(a.pos.x + Math.sin(a.heading) * look, a.pos.z + Math.cos(a.heading) * look)) {
-        const left = !this.blocked(a.pos.x + Math.sin(a.heading + 1) * look, a.pos.z + Math.cos(a.heading + 1) * look);
+      if (this.blocked(a.pos.x + Math.sin(a.heading) * look, a.pos.z + Math.cos(a.heading) * look, a.species)) {
+        const left = !this.blocked(a.pos.x + Math.sin(a.heading + 1) * look, a.pos.z + Math.cos(a.heading + 1) * look, a.species);
         a.targetHeading = a.heading + (left ? 1.4 : -1.4);
         if (a.state === 'graze') {
           a.state = 'walk';
@@ -442,7 +514,15 @@ export class Wildlife {
       // Legs swing with distance travelled.
       a.legPhase += (a.speed * dt) / c.stride * Math.PI;
       const amp = clamp(a.speed / c.walk, 0, 1.4) * (a.species === 'rabbit' ? 0.7 : 0.45);
-      if (a.species === 'rabbit') {
+      if (a.species === 'turtle') {
+        // Flippers paddle in pairs; the shell rocks slightly.
+        const s = Math.sin(a.legPhase);
+        a.legs[0].rotation.y = s * 0.5 * moving;
+        a.legs[1].rotation.y = -s * 0.5 * moving;
+        a.legs[2].rotation.y = -s * 0.3 * moving;
+        a.legs[3].rotation.y = s * 0.3 * moving;
+        a.body.rotation.z = s * 0.04 * moving;
+      } else if (a.species === 'rabbit') {
         const hop = a.state === 'flee' ? Math.abs(Math.sin(a.legPhase)) * 0.12 : Math.abs(Math.sin(a.legPhase)) * 0.03 * moving;
         a.body.position.y = hop;
         const s = Math.sin(a.legPhase);

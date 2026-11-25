@@ -56,7 +56,8 @@ void main() {
 `;
 
 /** Real seconds per in-game day (1 game minute = 1 real second). */
-export const DAY_SECONDS = 24 * 60;
+/** Real seconds per in-game day: a full 24 h cycle every 7 minutes. */
+export const DAY_SECONDS = 420;
 
 const C = (hex: number) => new THREE.Color(hex);
 const DAY_ZENITH = C(0x3d82c4);
@@ -95,6 +96,8 @@ export class DayNight {
   /** Multiplier for unlit-shader surfaces (water, particles). */
   readonly ambient = new THREE.Color();
   daylight = 1;
+  /** Set while the player is inside the cave. */
+  indoor = false;
   night = 0;
   private skyMat: THREE.ShaderMaterial;
   private fog: THREE.FogExp2;
@@ -198,6 +201,16 @@ export class DayNight {
 
     this.fog.color.copy(this.horizon);
     this.fog.density = lerp(0.0034, 0.0022, this.daylight);
+    if (this.indoor) {
+      // Inside the cave: dense blue-black fog, no sun or moon, a faint cold fill.
+      this.fog.color.setHex(0x0a121c);
+      this.fog.density = 0.055;
+      this.key.intensity = 0;
+      this.hemi.color.setHex(0x34465e);
+      this.hemi.groundColor.setHex(0x0a0d12);
+      this.hemi.intensity = 0.28;
+      this.ambient.setRGB(0.12, 0.14, 0.18);
+    }
 
     const amb = lerp(0.2, 1.0, this.daylight);
     this.ambient.setRGB(amb * lerp(0.75, 1, this.daylight), amb * lerp(0.85, 1, this.daylight), amb);
@@ -207,6 +220,7 @@ export class DayNight {
     this.advance(dt);
     this.compute();
     this.sky.position.copy(camera.position);
+    this.sky.visible = !this.indoor;
     const u = this.skyMat.uniforms;
     (u.uZenith.value as THREE.Color).copy(this.zenith);
     (u.uHorizon.value as THREE.Color).copy(this.horizon);

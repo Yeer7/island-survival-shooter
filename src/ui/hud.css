@@ -369,7 +369,7 @@
 }
 .hud-fps {
   position: absolute;
-  left: 10px;
+  right: 10px;
   bottom: 8px;
   font-size: 11px;
   opacity: 0.55;
@@ -388,41 +388,57 @@
   }
 }
 
-.hud-tutorial {
+.hud-quests {
   position: absolute;
-  top: 66px;
-  left: 50%;
-  transform: translateX(-50%);
+  left: 22px;
+  bottom: 26px;
   display: flex;
-  align-items: center;
+  flex-direction: column;
   gap: 10px;
-  padding: 6px 8px 6px 12px;
-  border-radius: 8px;
-  background: rgba(10, 16, 20, 0.55);
-  font-size: 12.5px;
-  max-width: min(520px, calc(100vw - 32px));
-  pointer-events: auto;
+  max-width: min(360px, 40vw);
+  pointer-events: none;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85), 0 0 10px rgba(0, 0, 0, 0.45);
 }
+.hud-quest,
+.hud-tutorial {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 13.5px;
+  line-height: 1.35;
+  color: #f6f3ec;
+}
+.hud-quest .ico {
+  font-size: 15px;
+  line-height: 1.2;
+}
+.hud-quest small,
 .hud-tutorial .step {
+  display: block;
+  font-size: 10.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #e9c27a;
   font-weight: 700;
-  color: #ffd27a;
-  white-space: nowrap;
-  font-variant-numeric: tabular-nums;
+}
+.hud-tutorial {
+  flex-direction: column;
+  gap: 2px;
 }
 .hud-tutorial button {
+  pointer-events: auto;
+  align-self: flex-start;
   border: 0;
-  border-radius: 5px;
-  padding: 3px 9px;
+  padding: 0;
+  margin-top: 2px;
+  background: none;
+  color: rgba(246, 243, 236, 0.7);
   font: 600 11px system-ui, sans-serif;
-  background: rgba(255, 255, 255, 0.16);
-  color: #f4f7f5;
+  text-shadow: inherit;
   cursor: pointer;
 }
 .hud-tutorial button:hover {
-  background: rgba(255, 255, 255, 0.28);
-}
-.hud-tutorial.done {
-  animation: hud-toast 2.4s ease-out forwards;
+  color: #fff;
 }
 .hud-mats {
   display: grid;
@@ -457,127 +473,6 @@
   font-size: 11px;
   text-align: right;
   opacity: 0.8;
-}
-
-#craft-menu {
-  position: fixed;
-  inset: 0;
-  z-index: 20;
-  display: none;
-  align-items: center;
-  justify-content: center;
-  background: rgba(6, 10, 12, 0.55);
-  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-  color: #f4f7f5;
-  padding: 16px;
-}
-#craft-menu.on {
-  display: flex;
-}
-#craft-menu .panel {
-  width: min(760px, 100%);
-  max-height: calc(100vh - 32px);
-  overflow: auto;
-  background: rgba(22, 28, 30, 0.96);
-  border-radius: 12px;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5), inset 0 0 0 1px rgba(255, 255, 255, 0.08);
-  padding: 18px 20px 20px;
-}
-#craft-menu header {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 4px;
-}
-#craft-menu h2 {
-  font-size: 18px;
-  letter-spacing: 0.05em;
-}
-#craft-menu .have {
-  font-size: 12px;
-  color: #c8d6d0;
-  margin-bottom: 12px;
-}
-#craft-menu h3 {
-  font-size: 13px;
-  margin: 14px 0 8px;
-  color: #ffd27a;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-#craft-menu h3 .lock {
-  color: #c8d6d0;
-  font-weight: 500;
-}
-#craft-menu .grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 8px;
-}
-#craft-menu .rec {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  padding: 8px 10px;
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.05);
-}
-#craft-menu .rec.locked {
-  opacity: 0.45;
-}
-#craft-menu .rec .ico {
-  font-size: 22px;
-  width: 28px;
-  text-align: center;
-}
-#craft-menu .rec .info {
-  flex: 1;
-  min-width: 0;
-}
-#craft-menu .rec .nm {
-  font-size: 13px;
-  font-weight: 600;
-}
-#craft-menu .rec .cost {
-  font-size: 11px;
-  color: #c8d6d0;
-}
-#craft-menu .rec .cost .miss {
-  color: #ff8a7a;
-}
-#craft-menu .rec .desc {
-  font-size: 11px;
-  opacity: 0.7;
-}
-#craft-menu button {
-  border: 0;
-  border-radius: 6px;
-  padding: 6px 11px;
-  font: 700 12px system-ui, sans-serif;
-  background: #d97706;
-  color: #fff;
-  cursor: pointer;
-  white-space: nowrap;
-}
-#craft-menu button:disabled {
-  background: rgba(255, 255, 255, 0.12);
-  color: rgba(255, 255, 255, 0.45);
-  cursor: default;
-}
-#craft-menu button.ghost {
-  background: rgba(255, 255, 255, 0.14);
-}
-#craft-menu .upgrade {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  justify-content: space-between;
-  padding: 8px 10px;
-  border-radius: 8px;
-  background: rgba(255, 210, 122, 0.08);
-  font-size: 12px;
 }
 
 .hud-craft-btn {

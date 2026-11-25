@@ -65,6 +65,14 @@ export class PlayerController {
     private events: ControllerEvents,
   ) {}
 
+  /** Place the feet at an exact point (used indoors, where there is no terrain). */
+  placeAt(x: number, y: number, z: number, yaw: number): void {
+    this.pos.set(x, y, z);
+    this.vel.set(0, 0, 0);
+    this.yaw = yaw;
+    this.pitch = 0;
+  }
+
   teleport(x: number, z: number, yaw: number): void {
     this.pos.set(x, this.terrain.height(x, z), z);
     this.vel.set(0, 0, 0);
@@ -81,7 +89,11 @@ export class PlayerController {
     this.trauma = clamp(this.trauma + t, 0, 1);
   }
 
+  /** Indoors (the cave): a floor function and wall clamp replace the terrain and the sea. */
+  interior: { ground(x: number, z: number): number; clamp(p: THREE.Vector3): void } | null = null;
+
   private groundAt(x: number, z: number, feetY: number): number {
+    if (this.interior) return this.interior.ground(x, z);
     let g = this.terrain.height(x, z);
     const d = this.dock.groundAt(x, z);
     if (d !== null && feetY >= d - 0.6) g = Math.max(g, d);
@@ -147,15 +159,16 @@ export class PlayerController {
       }
     });
 
-    // Keep the player on the island's playable disc.
-    const r = Math.hypot(this.pos.x, this.pos.z);
+    // Keep the player on the island's playable disc (or inside the cave walls).
+    const r = this.interior ? 0 : Math.hypot(this.pos.x, this.pos.z);
+    if (this.interior) this.interior.clamp(this.pos);
     if (r > 330) {
       this.pos.x *= 330 / r;
       this.pos.z *= 330 / r;
     }
 
     const g = this.groundAt(this.pos.x, this.pos.z, this.pos.y);
-    const wl = this.terrain.waterLevelAt(this.pos.x, this.pos.z);
+    const wl = this.interior ? -1000 : this.terrain.waterLevelAt(this.pos.x, this.pos.z);
     const depth = wl - g;
     const wasGround = this.onGround;
     this.swimming = depth > 1.4 && this.pos.y < wl - 0.9;
@@ -187,7 +200,7 @@ export class PlayerController {
       if (this.stepAccum >= stride) {
         this.stepAccum -= stride;
         const dockY = this.dock.groundAt(this.pos.x, this.pos.z);
-        this.surface = this.swimming ? 'water' : dockY !== null && Math.abs(this.pos.y - dockY) < 0.1 ? 'wood' : this.terrain.surfaceAt(this.pos.x, this.pos.z);
+        this.surface = this.interior ? 'rock' : this.swimming ? 'water' : dockY !== null && Math.abs(this.pos.y - dockY) < 0.1 ? 'wood' : this.terrain.surfaceAt(this.pos.x, this.pos.z);
         if (depth > 0.15 && !this.swimming && this.surface !== 'wood') this.surface = 'water';
         this.events.onStep(this.surface, this.sprinting);
       }

@@ -24,6 +24,7 @@ const REST: Record<HotbarId, Pose> = {
   bow: P(-0.07, -0.22, -0.56, 0.1, 0.35, 1.2),
   torch: P(0.28, -0.34, -0.52, -0.25, -0.2, -0.1),
   rod: P(0.26, -0.34, -0.46, -1.0, -0.15, -0.05),
+  flashlight: P(0.22, -0.24, -0.42, 0.02, -0.05, 0),
   food: HELD,
   cookedMeat: HELD,
   cookedFish: HELD,
@@ -139,7 +140,22 @@ export class ViewModel {
     bandG.position.set(-0.02, 0.05, -0.04);
     canG.position.set(-0.02, 0.05, -0.04);
 
+    // Tactical flashlight held forward, lens toward -Z.
+    const flashlight = new THREE.Group();
+    const fBody = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.017, 0.17, 12), new THREE.MeshStandardMaterial({ color: 0x24282c, roughness: 0.45, metalness: 0.3 }));
+    fBody.rotation.x = Math.PI / 2;
+    fBody.position.z = -0.05;
+    const fHead = new THREE.Mesh(new THREE.CylinderGeometry(0.028, 0.021, 0.05, 12), new THREE.MeshStandardMaterial({ color: 0x1b1e21, roughness: 0.4, metalness: 0.4 }));
+    fHead.rotation.x = Math.PI / 2;
+    fHead.position.z = -0.15;
+    const fLens = new THREE.Mesh(new THREE.CircleGeometry(0.024, 12), new THREE.MeshStandardMaterial({ color: 0xfff6d8, emissive: 0xfff0b0, emissiveIntensity: 1.5 }));
+    fLens.position.z = -0.176;
+    fLens.rotation.y = Math.PI;
+    flashlight.add(fBody, fHead, fLens);
+    flashlight.position.set(-0.01, 0.0, -0.02);
+
     this.tools = {
+      flashlight,
       axe,
       flameAxe,
       spear,
@@ -196,8 +212,9 @@ export class ViewModel {
       [-0.12, 0.065, -0.02],
       [-0.12, 0.065, -0.16],
       [-0.1, 0.18, -0.09],
+      [-0.1, 0.29, -0.06],
     ];
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < 4; i++) {
       const log = buildLog(0.56, 0.065);
       log.rotation.set(0, (i - 1) * 0.06, Math.PI / 2);
       log.position.set(stack[i][0], stack[i][1], stack[i][2]);

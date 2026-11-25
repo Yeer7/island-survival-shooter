@@ -1,0 +1,242 @@
+#survival-book {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: radial-gradient(ellipse at center, rgba(10, 8, 6, 0.45), rgba(4, 4, 3, 0.75));
+  font-family: Georgia, 'Times New Roman', serif;
+}
+#survival-book.on {
+  display: flex;
+}
+#survival-book .book {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr 18px 1fr;
+  width: min(940px, 100%);
+  min-height: min(560px, calc(100vh - 32px));
+  max-height: calc(100vh - 32px);
+  padding: 22px 26px 26px 26px;
+  border-radius: 10px 10px 12px 12px;
+  /* leather cover peeking around the pages */
+  background: #4a2f1c;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.6), inset 0 0 0 3px #3a2414, inset 0 0 30px rgba(0, 0, 0, 0.5);
+  color: #3a2a1a;
+}
+#survival-book .page {
+  overflow: auto;
+  padding: 22px 26px 46px;
+  position: relative;
+  background:
+    radial-gradient(ellipse at 30% 20%, rgba(255, 250, 235, 0.55), transparent 60%),
+    radial-gradient(ellipse at 80% 90%, rgba(150, 110, 60, 0.22), transparent 55%),
+    linear-gradient(#efe2c2, #e6d3aa);
+  box-shadow: inset 0 0 40px rgba(120, 84, 40, 0.35);
+}
+#survival-book .page.left {
+  border-radius: 6px 0 0 6px;
+  box-shadow: inset -18px 0 26px -14px rgba(90, 60, 25, 0.55), inset 0 0 40px rgba(120, 84, 40, 0.3);
+}
+#survival-book .page.right {
+  border-radius: 0 6px 6px 0;
+  box-shadow: inset 18px 0 26px -14px rgba(90, 60, 25, 0.55), inset 0 0 40px rgba(120, 84, 40, 0.3);
+}
+#survival-book .spine {
+  background: linear-gradient(90deg, #b79a6c, #8b6c42 45%, #6d5232 50%, #8b6c42 55%, #b79a6c);
+}
+#survival-book h2 {
+  font-size: 21px;
+  margin: 0 0 10px;
+  letter-spacing: 0.02em;
+  border-bottom: 1px solid rgba(90, 60, 25, 0.35);
+  padding-bottom: 6px;
+}
+#survival-book h3 {
+  font-size: 15px;
+  margin: 12px 0 4px;
+}
+#survival-book p {
+  font-size: 13.5px;
+  line-height: 1.45;
+  margin: 0 0 8px;
+}
+#survival-book .lead {
+  font-style: italic;
+}
+#survival-book .hint {
+  font-size: 12.5px;
+  color: #7a3b22;
+}
+#survival-book .entries {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+#survival-book .entries li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 8px;
+  border-bottom: 1px dashed rgba(90, 60, 25, 0.3);
+  cursor: pointer;
+  font-size: 14px;
+}
+#survival-book .entries li:hover {
+  background: rgba(120, 84, 40, 0.1);
+}
+#survival-book .entries li.sel {
+  background: rgba(150, 40, 20, 0.12);
+  outline: 1px solid rgba(150, 40, 20, 0.35);
+}
+#survival-book .entries li.locked {
+  opacity: 0.55;
+}
+#survival-book .entries .ico {
+  width: 24px;
+  text-align: center;
+  font-size: 17px;
+}
+#survival-book .entries .nm {
+  flex: 1;
+}
+#survival-book .entries .lv {
+  font-size: 11.5px;
+  color: #6a5034;
+}
+#survival-book .sketch {
+  font-size: 54px;
+  text-align: center;
+  margin: 4px 0 6px;
+  filter: sepia(0.5) saturate(0.8);
+}
+#survival-book .cost {
+  list-style: none;
+  padding: 0;
+  margin: 10px 0 14px;
+}
+#survival-book .cost li {
+  display: flex;
+  justify-content: space-between;
+  padding: 4px 2px;
+  border-bottom: 1px dotted rgba(90, 60, 25, 0.35);
+  font-size: 14px;
+}
+#survival-book .cost li.miss b {
+  color: #a3321c;
+}
+#survival-book .cost li.ok b {
+  color: #2e5d22;
+}
+#survival-book .stamp {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 6px;
+  border: 1.5px solid #2e5d22;
+  border-radius: 4px;
+  color: #2e5d22;
+  font: 700 10.5px system-ui, sans-serif;
+  text-transform: uppercase;
+  transform: rotate(-3deg);
+}
+#survival-book .stamp.lock {
+  border-color: #a3321c;
+  color: #a3321c;
+}
+#survival-book .lvl p {
+  font-size: 12.5px;
+}
+#survival-book .act {
+  display: block;
+  width: 100%;
+  border: 0;
+  border-radius: 6px;
+  padding: 10px 14px;
+  background: #7a2e18;
+  color: #f6ecd6;
+  font: 700 14px Georgia, serif;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+  box-shadow: 0 2px 0 #4f1c0e;
+}
+#survival-book .act:hover:not(:disabled) {
+  background: #8f3820;
+}
+#survival-book .act:disabled {
+  background: rgba(90, 60, 25, 0.25);
+  color: rgba(58, 42, 26, 0.55);
+  box-shadow: none;
+  cursor: default;
+}
+#survival-book footer {
+  position: absolute;
+  left: 26px;
+  right: 26px;
+  bottom: 12px;
+  font-size: 11.5px;
+  color: #6a5034;
+  border-top: 1px solid rgba(90, 60, 25, 0.25);
+  padding-top: 6px;
+}
+#survival-book .tabs {
+  position: absolute;
+  right: -112px;
+  top: 40px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+#survival-book .tab {
+  width: 118px;
+  text-align: left;
+  border: 0;
+  border-radius: 0 8px 8px 0;
+  padding: 8px 10px 8px 16px;
+  background: #b28b55;
+  color: #3a2a1a;
+  font: 700 12.5px Georgia, serif;
+  cursor: pointer;
+  box-shadow: 2px 2px 6px rgba(0, 0, 0, 0.35);
+}
+#survival-book .tab span {
+  margin-right: 6px;
+}
+#survival-book .tab.on {
+  background: #e6d3aa;
+  transform: translateX(6px);
+}
+#survival-book .close {
+  position: absolute;
+  top: -12px;
+  right: 18px;
+  border: 0;
+  border-radius: 14px;
+  padding: 5px 12px;
+  background: #2a1a10;
+  color: #f0e2c4;
+  font: 600 12px system-ui, sans-serif;
+  cursor: pointer;
+}
+@media (max-width: 1180px) {
+  #survival-book .book {
+    grid-template-columns: 1fr;
+  }
+  #survival-book .spine {
+    display: none;
+  }
+  #survival-book .tabs {
+    position: static;
+    flex-direction: row;
+    grid-column: 1;
+    margin-bottom: 8px;
+  }
+  #survival-book .tab {
+    width: auto;
+    border-radius: 8px;
+  }
+  #survival-book .tab.on {
+    transform: none;
+  }
+}

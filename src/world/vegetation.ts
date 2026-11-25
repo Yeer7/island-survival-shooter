@@ -84,6 +84,8 @@ class InstancedSet {
 }
 
 const TREE_ASSETS: AssetName[] = ['pineA', 'pineB', 'pineC'];
+const PALM_ASSETS: AssetName[] = ['palm1', 'palm2', 'palm3'];
+const PALM_HEIGHT = 8;
 /** Normalised tree height in metres before the per-tree scale. */
 const TREE_HEIGHT = 9.5;
 
@@ -99,6 +101,7 @@ export interface Tree {
   collider: Circle;
   variant: number;
   slot: number;
+  kind: 'pine' | 'palm';
 }
 
 interface FallingTree {
@@ -131,25 +134,43 @@ export class Forest {
   private q = new THREE.Quaternion();
   private zero = new THREE.Matrix4().makeScale(0, 0, 0);
 
-  constructor(private terrain: Terrain, colliders: ColliderGrid, exclusions: Exclusion[], private events: ForestEvents, lib: AssetLibrary, count = 350) {
-    this.variants = TREE_ASSETS.map((n) => lib.parts(n, { by: 'height', value: TREE_HEIGHT }));
-    for (const parts of this.variants) {
+  constructor(private terrain: Terrain, colliders: ColliderGrid, exclusions: Exclusion[], private events: ForestEvents, lib: AssetLibrary, count = 350, groves: { x: number; z: number; r0: number; r1: number; count: number }[] = []) {
+    // Variants 0-2 are pines; 3-5 are the beach palms (choppable too).
+    this.variants = [
+      ...TREE_ASSETS.map((n) => lib.parts(n, { by: 'height', value: TREE_HEIGHT })),
+      ...PALM_ASSETS.map((n) => lib.parts(n, { by: 'height', value: PALM_HEIGHT })),
+    ];
+    this.variants.forEach((parts, v) => {
       for (const p of parts) {
         const sm = p.material as THREE.MeshStandardMaterial;
-        if (sm.alphaTest > 0) addWind(sm, 3.0, 0.012);
+        if (sm.alphaTest > 0) addWind(sm, v < 3 ? 3.0 : 4.0, v < 3 ? 0.012 : 0.02);
       }
-    }
+    });
 
     const rand = mulberry32(4242);
-    const placed: { x: number; z: number }[] = [];
+    const placed: { x: number; z: number; kind: 'pine' | 'palm' }[] = [];
     const minDist = 6.5;
     let attempts = 0;
+    // Dense groves first (e.g. the pines walling in the crash clearing).
+    for (const gv of groves) {
+      let n = 0;
+      for (let k = 0; k < gv.count * 30 && n < gv.count; k++) {
+        const a = rand() * Math.PI * 2;
+        const r = gv.r0 + rand() * (gv.r1 - gv.r0);
+        const x = gv.x + Math.cos(a) * r;
+        const z = gv.z + Math.sin(a) * r;
+        if (terrain.slope(x, z) > 0.3 || terrain.height(x, z) < 3) continue;
+        if (placed.some((p) => (p.x - x) ** 2 + (p.z - z) ** 2 < 4.5 * 4.5)) continue;
+        placed.push({ x, z, kind: 'pine' });
+        n++;
+      }
+    }
     while (placed.length < count && attempts < 60000) {
       attempts++;
       const x = (rand() - 0.5) * 520;
       const z = (rand() - 0.5) * 520;
       const h = terrain.height(x, z);
-      const beachTop = 2.3 + smoothstep(40, 190, z) * 0.8;
+      const beachTop = 2.3 + smoothstep(40, 190, z) * 0.2;
       if (h < beachTop + 1.0 || h > 34) continue;
       if (terrain.slope(x, z) > 0.27) continue;
       if (Math.hypot(x - LAKE_CENTER.x, z - LAKE_CENTER.z) < LAKE_RADIUS * 1.2) continue;
@@ -164,7 +185,24 @@ export class Forest {
           break;
         }
       }
-      if (ok) placed.push({ x, z });
+      if (ok) placed.push({ x, z, kind: 'pine' });
+    }
+
+    // Palms along the southern beach, on the sand strip.
+    let palms = 0;
+    attempts = 0;
+    while (palms < 42 && attempts < 20000) {
+      attempts++;
+      const a = Math.PI * (0.12 + rand() * 0.76);
+      const r0 = terrain.islandRadius(Math.cos(a), Math.sin(a)) * (0.84 + rand() * 0.1);
+      const x = Math.cos(a) * r0;
+      const z = Math.sin(a) * r0;
+      const h = terrain.height(x, z);
+      if (h < 0.7 || h > 4 || z < 40 || terrain.slope(x, z) > 0.2) continue;
+      if (exclusions.some((e) => Math.hypot(x - e.x, z - e.z) < e.r)) continue;
+      if (placed.some((p) => (p.x - x) ** 2 + (p.z - z) ** 2 < 25)) continue;
+      placed.push({ x, z, kind: 'palm' });
+      palms++;
     }
 
     this.sets = this.variants.map((parts) => new InstancedSet(parts, placed.length, true));
@@ -185,16 +223,21 @@ export class Forest {
     this.stumps.meshes.push(stumpMesh);
     const tint = new THREE.Color();
     placed.forEach((p, i) => {
-      const scale = 0.8 + rand() * 0.5;
-      const variant = Math.floor(rand() * this.variants.length);
+      const palm = p.kind === 'palm';
+      const scale = palm ? 0.8 + rand() * 0.45 : 0.8 + rand() * 0.5;
+      const variant = palm ? 3 + Math.floor(rand() * 3) : Math.floor(rand() * 3);
       const y = terrain.height(p.x, p.z) - 0.1;
-      const collider = colliders.add({ x: p.x, z: p.z, r: 0.42 * scale, y0: y, y1: y + TREE_HEIGHT * scale, kind: 'tree', ref: i });
-      const tree: Tree = { x: p.x, y, z: p.z, scale, rotY: rand() * Math.PI * 2, hp: 100, maxHp: 100, state: 'alive', collider, variant, slot: 0 };
+      const height = (palm ? PALM_HEIGHT : TREE_HEIGHT) * scale;
+      const collider = colliders.add({ x: p.x, z: p.z, r: (palm ? 0.32 : 0.42) * scale, y0: y, y1: y + height, kind: 'tree', ref: i });
+      // A palm comes down in 3 axe blows; a pine takes 4.
+      const hp = palm ? 75 : 100;
+      const tree: Tree = { x: p.x, y, z: p.z, scale, rotY: rand() * Math.PI * 2, hp, maxHp: hp, state: 'alive', collider, variant, slot: 0, kind: p.kind };
       this.dummy.position.set(p.x, y, p.z);
       this.dummy.rotation.set(0, tree.rotY, 0);
       this.dummy.scale.setScalar(scale);
       this.dummy.updateMatrix();
-      tint.setHSL(0.25 + (rand() - 0.5) * 0.05, 0.2 + rand() * 0.2, 0.5 + rand() * 0.12).multiplyScalar(1.9);
+      if (palm) tint.setRGB(1, 1, 1);
+      else tint.setHSL(0.25 + (rand() - 0.5) * 0.05, 0.2 + rand() * 0.2, 0.5 + rand() * 0.12).multiplyScalar(1.9);
       tree.slot = this.sets[variant].push(this.dummy.matrix, tint);
       this.stumps.push(this.zero);
       this.trees.push(tree);
@@ -260,7 +303,7 @@ export class Forest {
       if (t < 0) t = c < 0 ? 0 : -1;
       if (t < 0 || t > best) continue;
       const y = o.y + d.y * t;
-      if (y < tr.y - 0.2 || y > tr.y + TREE_HEIGHT * tr.scale) continue;
+      if (y < tr.y - 0.2 || y > tr.y + (tr.kind === 'palm' ? PALM_HEIGHT : TREE_HEIGHT) * tr.scale) continue;
       best = t;
       hit = i;
     }
@@ -475,30 +518,8 @@ export class Props {
     for (const b2 of bushSets) b2.finish(this.group);
     fernSet.finish(this.group);
 
-    // Palm trees along the southern beach (Ultimate Stylized Nature, loaded from FBX).
-    const palmSets = (['palm1', 'palm2', 'palm3'] as AssetName[]).map((n) => new InstancedSet(lib.parts(n, { by: 'height', value: 8 }), 30, true));
-    for (const set of palmSets) for (const m of set.meshes) if ((m.material as THREE.MeshStandardMaterial).alphaTest > 0) addWind(m.material as THREE.Material, 4, 0.02);
-    let palms = 0;
-    tries = 0;
-    while (palms < 45 && tries < 20000) {
-      tries++;
-      const a = Math.PI * (0.15 + rand() * 0.7);
-      const r0 = terrain.islandRadius(Math.cos(a), Math.sin(a)) * (0.8 + rand() * 0.12);
-      const x = Math.cos(a) * r0;
-      const z = Math.sin(a) * r0;
-      const h = terrain.height(x, z);
-      if (h < 0.7 || h > 4 || z < 40 || excluded(x, z, 2) || terrain.slope(x, z) > 0.2) continue;
-      if (colliders.isFree(x, z, 2.5) === false) continue;
-      const s = 0.8 + rand() * 0.45;
-      d.position.set(x, h - 0.1, z);
-      d.rotation.set(0, rand() * Math.PI * 2, 0);
-      d.scale.setScalar(s);
-      d.updateMatrix();
-      palmSets[Math.floor(rand() * 3)].push(d.matrix, color.setRGB(1, 1, 1));
-      colliders.add({ x, z, r: 0.35 * s, y0: h - 1, y1: h + 8 * s, kind: 'rock', ref: 0 });
-      palms++;
-    }
-    for (const p2 of palmSets) p2.finish(this.group);
+    // Palms are part of the Forest now, so they can be chopped.
+
 
     // Grass is the dynamic low carpet in grass.ts (GrassField).
 

@@ -35,7 +35,7 @@ export class GrassField {
   private dummy = new THREE.Object3D();
   private col = new THREE.Color();
 
-  constructor(private terrain: Terrain, lib: AssetLibrary) {
+  constructor(private terrain: Terrain, lib: AssetLibrary, private bare: { x: number; z: number; r: number }[] = []) {
     const parts = lib.parts('grass', { by: 'height', value: 0.3 });
     const geo = parts[0].geometry;
     const normals = geo.attributes.normal as THREE.BufferAttribute;
@@ -102,6 +102,7 @@ export class GrassField {
       const yaw = rand() * Math.PI * 2;
       const tint = 0.9 + rand() * 0.2;
       if (this.terrain.surfaceAt(x, z) !== 'grass' || this.terrain.slope(x, z) >= 0.18) continue;
+      if (this.bare.some((b) => Math.hypot(x - b.x, z - b.z) < b.r)) continue;
       d.position.set(x, this.terrain.height(x, z) - 0.02, z);
       d.rotation.set(0, yaw, 0);
       d.scale.set(s, s * (0.85 + rand() * 0.3), s);

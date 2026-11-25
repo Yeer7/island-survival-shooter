@@ -6,7 +6,7 @@ import { clamp, smoothstep } from './core/math';
 import { Arrows, ArrowHitInfo } from './fx/arrows';
 import { Debris } from './fx/particles';
 import { PlayerController } from './player/controller';
-import { FOOD_EFFECT, FoodId, HOTBAR_INFO, HotbarId, Inventory, MAX_LOGS, ToolId, Vitals } from './player/inventory';
+import { FOOD_EFFECT, FoodId, HOTBAR_INFO, HotbarId, Inventory, ToolId, Vitals } from './player/inventory';
 import { CraftMenu, CraftState } from './ui/craftMenu';
 import { Hud } from './ui/hud';
 import { Bow, CombatWorld, MELEE, Melee, MeleeSpec } from './weapons/tools';
@@ -19,7 +19,12 @@ import { ITEM_LABEL, ItemType, Pickup, PickupManager } from './world/pickups';
 import { DayNight } from './world/sky';
 import { LAKE_CENTER, LAKE_LEVEL, LAKE_RADIUS, Terrain } from './world/terrain';
 import { Forest, Props, Tree, windUniform } from './world/vegetation';
-import { Cannibal, SafeZone, Tribe } from './world/cannibals';
+import { BossRole, Cannibal, SafeZone, Tribe } from './world/cannibals';
+import { Beach } from './world/beach';
+import { BOAT_COST, Sailboat } from './world/boat';
+import { Altar, Cave } from './world/cave';
+import { SaveData, SaveStore } from './core/save';
+import { Screens } from './ui/screens';
 import { Village } from './world/village';
 import { GrassField } from './world/grass';
 import { Water } from './world/water';
@@ -79,6 +84,19 @@ export class Game implements CombatWorld {
   readonly forest: Forest;
   readonly props: Props;
   readonly village: Village;
+  readonly cave: Cave;
+  readonly altar: Altar;
+  readonly beach: Beach;
+  readonly boat: Sailboat;
+  readonly screens = new Screens();
+  /** Inside the north cave. */
+  indoors = false;
+  private flashlight: THREE.SpotLight;
+  private caveLoot = { flashlight: false, backpack: false };
+  private stats = { hunted: 0 };
+  private escaped = false;
+  private deathShown = false;
+  private chasmT = 0;
   readonly tribe: Tribe;
   private zones: SafeZone[] = [];
   private spottedT = 0;
@@ -112,7 +130,6 @@ export class Game implements CombatWorld {
   private bobber: THREE.Mesh;
   private fishLine: THREE.Line;
   private lastArrowHit: RayHit | null = null;
-  private boatBuilt = false;
   private tutorialStep = 0;
   private tutorialDone = store.get('iss.tutorialDone') === '1';
   private flags = { caseBroken: false, logTaken: false, gathered: false, menuOpened: false };
@@ -147,7 +164,7 @@ export class Game implements CombatWorld {
     this.sky = new DayNight(this.scene);
 
     this.crash = new CrashSite(this.terrain, this.colliders);
-    this.scene.add(this.crash.group, this.crash.fireLight);
+    this.scene.add(this.crash.group, this.crash.fireLight, this.crash.dirt);
     for (const s of this.crash.suitcases) this.scene.add(s.mesh);
     for (const e of [...this.crash.smoke, ...this.crash.fire]) this.scene.add(e.points);
 
@@ -162,31 +179,58 @@ export class Game implements CombatWorld {
       this.crash.suitcases.push(c);
       this.scene.add(c.mesh);
     }
+    this.cave = new Cave(this.terrain, this.colliders, lib);
+    this.scene.add(this.cave.outside, this.cave.inside);
+    this.altar = new Altar(this.terrain, this.colliders, lib);
+    this.scene.add(this.altar.group);
+    this.boat = new Sailboat(this.terrain, this.colliders);
+    this.scene.add(this.boat.group);
+    this.beach = new Beach(this.terrain, [{ x: this.boat.pos.x, z: this.boat.pos.z, r: 10 }]);
+    this.scene.add(this.beach.group);
+    // Barrels and crates washed ashore break like the luggage too.
+    for (const b of this.beach.breakables) {
+      this.crash.suitcases.push(b);
+      this.scene.add(b.mesh);
+    }
+    const save = SaveStore.load();
 
     const exclusions = [
-      { x: this.crash.center.x, z: this.crash.center.z, r: 32 },
+      { x: this.crash.center.x, z: this.crash.center.z, r: 25 },
       { x: this.dock.start.x, z: this.dock.start.z, r: 7 },
       { x: this.village.center.x, z: this.village.center.z, r: this.village.radius },
+      { x: this.cave.arena.x, z: this.cave.arena.z, r: 20 },
+      { x: this.cave.mouth.x, z: this.cave.mouth.z, r: 12 },
+      { x: this.altar.center.x, z: this.altar.center.z, r: this.altar.radius },
     ];
     this.forest = new Forest(this.terrain, this.colliders, exclusions, {
       onFallStart: (t) => this.onTreeFallStart(t),
       onLanded: (t, d) => this.onTreeLanded(t, d),
       onSettled: (t, d) => this.onTreeSettled(t, d),
-    }, lib);
+    }, lib, 330, [{ x: this.crash.center.x, z: this.crash.center.z, r0: 26, r1: 58, count: 70 }]);
     this.scene.add(this.forest.group);
     this.props = new Props(this.terrain, this.colliders, exclusions, this.forest, lib);
     this.scene.add(this.props.group);
-    this.grass = new GrassField(this.terrain, lib);
+    this.grass = new GrassField(this.terrain, lib, [{ x: this.crash.center.x, z: this.crash.center.z, r: 20 }]);
     this.scene.add(this.grass.mesh);
     this.props.smallRocks.forEach((r, i) => this.pickups.addInstanced('rock', i, r.x, r.y, r.z));
     this.props.smallSticks.forEach((r, i) => this.pickups.addInstanced('stick', i, r.x, r.y, r.z));
+    for (const d of this.beach.driftwood) this.pickups.add('log', this.v1.set(d.x, d.y, d.z), 1, d.rotY);
+    for (const pb of this.beach.pebbles) this.pickups.add('rock', pb, 1);
     this.wildlife = new Wildlife(this.terrain, this.colliders, exclusions, (a) => this.onAnimalDeath(a), lib);
     this.scene.add(this.wildlife.group);
-    this.tribe = new Tribe(this.terrain, this.colliders, this.village, {
-      onHitPlayer: (dmg, c) => this.onCannibalHit(dmg, c),
-      onDeath: (c) => this.onCannibalDeath(c),
-      onSpotted: () => this.onScoutSpotted(),
-    });
+    this.tribe = new Tribe(
+      this.terrain,
+      this.colliders,
+      lib,
+      { village: this.village, cave: this.cave.arena, altar: this.altar.center },
+      {
+        onHitPlayer: (dmg, c) => this.onCannibalHit(dmg, c),
+        onDeath: (c) => this.onCannibalDeath(c),
+        onSpotted: () => this.onScoutSpotted(),
+        onRoar: (c) => this.sound.roar(c.role === 'alpha' ? 'alpha' : c.role === 'guardian' ? 'guardian' : 'boss'),
+      },
+      (save?.defeated ?? []) as BossRole[],
+    );
     this.scene.add(this.tribe.group);
     this.arrows = new Arrows(
       (o, d, max) => {
@@ -214,6 +258,9 @@ export class Game implements CombatWorld {
     this.fishLine.frustumCulled = false;
     this.fishLine.visible = false;
     this.scene.add(this.bobber, this.fishLine);
+    // Tactical flashlight: a real spot light that is part of the fixed light pool (0 when off).
+    this.flashlight = new THREE.SpotLight(0xfff2dc, 0, 55, 0.42, 0.45, 1.2);
+    this.scene.add(this.flashlight, this.flashlight.target);
 
     this.player = new PlayerController(this.camera, this.terrain, this.colliders, this.dock, {
       onStep: (s, sprint) => this.sound.footstep(s, sprint),
@@ -233,6 +280,9 @@ export class Game implements CombatWorld {
       { name: 'Avião', cls: 'plane', x: this.crash.center.x, z: this.crash.center.z },
       { name: 'Lago', cls: 'lake', x: LAKE_CENTER.x, z: LAKE_CENTER.z },
       { name: 'Aldeia', cls: 'plane', x: this.village.center.x, z: this.village.center.z },
+      { name: 'Caverna', cls: 'plane', x: this.cave.mouth.x, z: this.cave.mouth.z },
+      { name: 'Altar', cls: 'plane', x: this.altar.center.x, z: this.altar.center.z },
+      { name: 'Veleiro', cls: 'lake', x: this.boat.pos.x, z: this.boat.pos.z },
     ]);
     this.hud.onCraftButton = () => (this.menuOpen ? this.closeMenu() : this.openMenu());
     this.hud.setFade(1);
@@ -248,6 +298,7 @@ export class Game implements CombatWorld {
       }
     });
 
+    if (save) this.applySave(save);
     this.onResize();
     window.addEventListener('resize', () => this.onResize());
     this.warmUp();
@@ -269,7 +320,7 @@ export class Game implements CombatWorld {
     }
     warm.position.set(this.crash.center.x, -40, this.crash.center.z);
     this.scene.add(warm);
-    for (const id of ['torch', 'bow', 'rod', 'spear', 'flameAxe'] as HotbarId[]) this.vm.equip(id);
+    for (const id of ['torch', 'bow', 'rod', 'spear', 'flameAxe', 'flashlight'] as HotbarId[]) this.vm.equip(id);
     this.player.update(0, this.input, false);
     this.sky.update(0, 0, this.camera, this.player.pos);
     this.renderer.compile(this.scene, this.camera);
@@ -306,7 +357,8 @@ export class Game implements CombatWorld {
     if (on && !this.started) {
       this.started = true;
       this.sound.start();
-      this.hud.message('ILHA DESCONHECIDA', 'Você sobreviveu à queda. Quebre as malas com o machado e siga para o lago.', 7);
+      if (this.loadedSave) this.hud.message(`DIA ${this.sky.day}`, 'Progresso carregado. A ilha continua de onde você parou.', 4);
+      else this.hud.message('ILHA DESCONHECIDA', 'Você sobreviveu à queda no meio da floresta. Quebre as malas com o machado.', 7);
     } else if (on) {
       this.sound.start();
     }
@@ -345,7 +397,10 @@ export class Game implements CombatWorld {
     this.updateFishing(dt);
     this.updatePlacement();
 
+    this.sky.indoor = this.indoors;
     this.sky.update(dt, this.time, this.camera, this.player.pos);
+    this.boat.update(dt, this.time);
+    this.updateCave(dt);
     windUniform.value = this.time;
     this.grass.update(this.player.pos.x, this.player.pos.z);
     this.forest.update(dt);
@@ -355,7 +410,7 @@ export class Game implements CombatWorld {
     this.base.update(dt, this.time, this.sky.ambient);
     this.village.update(dt, this.sky.ambient);
     this.updateZones();
-    this.tribe.update(dt, { player: this.player.pos, alive: !this.vitals.dead, night: this.sky.night > 0.5, day: this.sky.day, zones: this.zones });
+    this.tribe.update(dt, { player: this.player.pos, alive: !this.vitals.dead, night: this.sky.night > 0.5, day: this.sky.day, zones: this.zones, indoors: this.indoors });
     this.updateCooking(dt);
     this.wildlife.update(dt, this.player.pos, this.player.sprinting || (this.player.moving && !this.input.keys.has('ControlLeft')));
     this.pickups.update(this.time);
@@ -365,6 +420,7 @@ export class Game implements CombatWorld {
 
     this.updateTargets();
     this.updateTutorial();
+    this.updateQuest();
     this.updateAudio();
     this.updateHud(dt);
     this.updateDeath(dt);
@@ -497,9 +553,9 @@ export class Game implements CombatWorld {
     const inv = this.inv;
     switch (p.type) {
       case 'log':
-        if (inv.logs >= MAX_LOGS) {
+        if (inv.logs >= this.inv.maxLogs) {
           this.sound.denied();
-          this.hud.toast(`Ombro cheio (${MAX_LOGS}/${MAX_LOGS}) — [G] solta`);
+          this.hud.toast(`Ombro cheio (${this.inv.maxLogs}/${this.inv.maxLogs}) — [G] solta`);
           return;
         }
         inv.logs++;
@@ -515,6 +571,9 @@ export class Game implements CombatWorld {
       case 'meat':
         inv.food.meat += p.amount;
         break;
+      case 'coconut':
+        inv.food.food += p.amount;
+        break;
       case 'cloth':
         inv.mats.cloth += p.amount;
         break;
@@ -529,13 +588,37 @@ export class Game implements CombatWorld {
       case 'arrow':
         inv.mats.arrows += p.amount;
         break;
+      case 'relic':
+        inv.mats.relic += 1;
+        this.sound.levelUp();
+        this.hud.message('RELÍQUIA DA CAVERNA', 'Evolua o Livro [Tab] para o Nível 3 (Machado Flamejante). A caverna está aberta.', 6);
+        this.saveGame();
+        break;
+      case 'heart':
+        inv.mats.heart += 1;
+        this.sound.levelUp();
+        this.hud.message('CORAÇÃO ALFA', 'Leve o coração ao Veleiro na Praia Sul para terminar o reparo.', 6);
+        this.saveGame();
+        break;
+      case 'flashlight':
+        inv.tools.add('flashlight');
+        this.caveLoot.flashlight = true;
+        this.select('flashlight');
+        this.sound.flashlightClick();
+        this.hud.message('LANTERNA TÁTICA', 'Um feixe forte para a caverna e para as noites.', 4);
+        break;
+      case 'backpack':
+        inv.hasBackpack = true;
+        this.caveLoot.backpack = true;
+        this.hud.message('MOCHILA TÁTICA', 'Agora você carrega 4 toras e coleta o dobro de gravetos e pedras.', 5);
+        break;
       case 'stick':
-        inv.mats.sticks += p.amount;
+        inv.mats.sticks += p.amount * (inv.hasBackpack ? 2 : 1);
         this.flags.gathered = true;
         if (p.instIndex >= 0) this.props.hideSmallStick(p.instIndex);
         break;
       case 'rock':
-        inv.mats.rocks += 1;
+        inv.mats.rocks += inv.hasBackpack ? 2 : 1;
         this.flags.gathered = true;
         if (p.instIndex >= 0) this.props.hideSmallRock(p.instIndex);
         break;
@@ -565,7 +648,7 @@ export class Game implements CombatWorld {
   private findInteractable(): Interactable | null {
     const target = this.pickups.highlighted;
     if (target) {
-      if (target.type === 'log' && this.inv.logs >= MAX_LOGS) return { key: 'E', text: `Ombro cheio (${MAX_LOGS}/${MAX_LOGS})`, run: () => this.collect(target) };
+      if (target.type === 'log' && this.inv.logs >= this.inv.maxLogs) return { key: 'E', text: `Ombro cheio (${this.inv.maxLogs}/${this.inv.maxLogs})`, run: () => this.collect(target) };
       return { key: 'E', text: `Pegar ${ITEM_LABEL[target.type]}`, run: () => this.collect(target) };
     }
     const p = this.player.pos;
@@ -578,9 +661,30 @@ export class Game implements CombatWorld {
       }
       if (pl.kind === 'logHolder' && d < 2.4) {
         if (this.inv.logs > 0 && pl.logs < 12) return { key: 'E', text: `Guardar toras (${pl.logs}/12)`, run: () => this.depositLogs(pl) };
-        if (pl.logs > 0 && this.inv.logs < MAX_LOGS) return { key: 'E', text: `Pegar tora (${pl.logs}/12)`, run: () => this.takeLog(pl) };
+        if (pl.logs > 0 && this.inv.logs < this.inv.maxLogs) return { key: 'E', text: `Pegar tora (${pl.logs}/12)`, run: () => this.takeLog(pl) };
       }
       if (pl.kind === 'gate' && d < 2.8) return { key: 'E', text: pl.open ? 'Fechar portão' : 'Abrir portão', run: () => this.base.toggleGate(pl) };
+    }
+    if (this.indoors) {
+      if (p.distanceTo(this.cave.entryInside) < 3.2) return { key: 'E', text: 'Voltar à Superfície', run: () => this.leaveCave() };
+      if (!this.cave.bridgeRepaired && Math.hypot(p.x - this.cave.bridgePos.x, p.z - this.cave.bridgePos.z) < 3.2) {
+        return { key: 'E', text: `Consertar ponte (Gravetos ${this.inv.mats.sticks}/4 · Panos ${this.inv.mats.cloth}/2)`, run: () => this.repairBridge() };
+      }
+      return null;
+    }
+    if (Math.hypot(p.x - this.cave.mouth.x, p.z - this.cave.mouth.z) < 6) {
+      if (this.tribe.defeated.has('guardian')) return { key: 'E', text: 'Entrar na Caverna', run: () => this.enterCave() };
+      return { key: 'E', text: 'O Guardião bloqueia a entrada', run: () => this.hud.toast('💀 Derrote o Guardião da Caverna primeiro') };
+    }
+    if (Math.hypot(p.x - this.boat.pos.x, p.z - this.boat.pos.z) < 8.5) {
+      if (this.escaped) return null;
+      if (this.boat.complete) return { key: 'E', text: 'Zarpar no Veleiro', run: () => this.sail() };
+      const d = this.boat.delivered;
+      return {
+        key: 'E',
+        text: `Reparar Veleiro (Toras ${d.logs}/${BOAT_COST.logs} · Gravetos ${d.sticks}/${BOAT_COST.sticks} · Panos ${d.cloth}/${BOAT_COST.cloth} · Coração ${d.heart}/1)`,
+        run: () => this.repairBoat(),
+      };
     }
     const cab = this.base.cabinNear(p, 5.2);
     if (cab) {
@@ -625,6 +729,7 @@ export class Game implements CombatWorld {
     this.hud.setFade(Math.min(1, this.sleepT / 1.0) * (this.sleepT < 2.2 ? 1 : Math.max(0, 1 - (this.sleepT - 2.2) / 1.2)));
     if (this.sleepT >= 1.1 && this.sleepT - dt < 1.1) {
       this.sky.sleepUntil(7);
+      this.saveGame();
       this.vitals.health = this.vitals.maxHealth;
       this.vitals.hunger = Math.max(10, this.vitals.hunger - 20);
       this.hud.message(`DIA ${this.sky.day}`, 'Você dormiu e recuperou toda a vida.', 3.5);
@@ -700,7 +805,6 @@ export class Game implements CombatWorld {
     const owned = new Set<string>(this.inv.tools);
     if (this.inv.armor >= 1) owned.add('hideArmor');
     if (this.inv.armor >= 2) owned.add('reinforcedArmor');
-    if (this.boatBuilt) owned.add('sailboat');
     return { level: this.base.benchLevel, have: this.resources(), bossItems: { totem: this.inv.mats.totem, relic: this.inv.mats.relic }, owned };
   }
 
@@ -752,11 +856,6 @@ export class Game implements CombatWorld {
         this.hud.toast(`${r.icon} ${r.label}: vida máxima ${max}`);
         break;
       }
-      case 'boat':
-        this.boatBuilt = true;
-        this.spawnBoat();
-        this.hud.message('VELEIRO DE FUGA', 'O barco está pronto na doca. A fuga chega na próxima fase!', 5);
-        break;
     }
     this.craft.render(this.craftState());
   }
@@ -767,26 +866,10 @@ export class Game implements CombatWorld {
     this.pay(up.cost);
     this.inv.mats[up.boss]--;
     this.base.benchLevel = level;
+    this.saveGame();
     this.sound.levelUp();
     this.hud.toast(`🛠️ Bancada Nível ${level}!`);
     this.craft.render(this.craftState());
-  }
-
-  private spawnBoat(): void {
-    const g = new THREE.Group();
-    const hull = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.6, 4.2), new THREE.MeshStandardMaterial({ color: 0x7a5a3a, roughness: 0.85 }));
-    hull.position.y = 0.2;
-    const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.08, 4, 6), new THREE.MeshStandardMaterial({ color: 0x5a4030 }));
-    mast.position.y = 2.3;
-    const sail = new THREE.Mesh(new THREE.PlaneGeometry(1.8, 2.8), new THREE.MeshStandardMaterial({ color: 0xe8e0cc, side: THREE.DoubleSide, roughness: 0.95 }));
-    sail.position.set(0, 2.5, 0.6);
-    sail.rotation.y = Math.PI / 2;
-    g.add(hull, mast, sail);
-    g.traverse((o) => ((o as THREE.Mesh).castShadow = true));
-    g.position.copy(this.dock.end).setY(LAKE_LEVEL);
-    g.lookAt(this.dock.start.x, LAKE_LEVEL, this.dock.start.z);
-    g.position.x += 1.8;
-    this.scene.add(g);
   }
 
   private startPlacement(r: Recipe): void {
@@ -1116,15 +1199,17 @@ export class Game implements CombatWorld {
     this.sound.animalHurt(a.species === 'deer');
     this.hud.showTargetHealth(Math.max(0, a.hp) / a.cfg.hp);
     this.hud.hitMarker();
-    if (killed) this.hud.toast(a.species === 'deer' ? '🦌 Cervo abatido' : '🐇 Coelho abatido');
+    if (killed) this.hud.toast(a.species === 'deer' ? '🦌 Cervo abatido' : a.species === 'turtle' ? '🐢 Tartaruga abatida' : '🐇 Coelho abatido');
   }
 
   private onAnimalDeath(a: Animal): void {
+    this.stats.hunted++;
     const n = a.species === 'deer' ? 2 : 1;
     for (let k = 0; k < n; k++) {
       const x = a.pos.x + (Math.random() - 0.5) * 1.2;
       const z = a.pos.z + (Math.random() - 0.5) * 1.2;
       this.pickups.add('meat', this.v4.set(x, this.terrain.height(x, z), z));
+      if (a.species === 'turtle') continue;
       const hx = a.pos.x + (Math.random() - 0.5) * 1.2;
       const hz = a.pos.z + (Math.random() - 0.5) * 1.2;
       this.pickups.add('hide', this.v4.set(hx, this.terrain.height(hx, hz), hz));
@@ -1174,6 +1259,22 @@ export class Game implements CombatWorld {
 
   private onTreeSettled(t: Tree, dir: THREE.Vector3): void {
     const rotY = Math.atan2(dir.x, dir.z) + Math.PI / 2;
+    if (t.kind === 'palm') {
+      // A palm gives 2 logs and a coconut.
+      for (let i = 0; i < 2; i++) {
+        const along = (2 + i * 2.6) * t.scale;
+        const x = t.x + dir.x * along;
+        const z = t.z + dir.z * along;
+        const y = this.groundY(x, z);
+        this.pickups.add('log', this.v1.set(x, y, z), 1, rotY + (Math.random() - 0.5) * 0.3);
+        this.debris.burst(this.v1.set(x, y + 0.2, z), this.v3.set(0, 1, 0), 8, 0xc2a070, { speed: 2, size: 0.07, floor: y });
+      }
+      const cx = t.x + dir.x * 7 * t.scale + dir.z * 0.8;
+      const cz = t.z + dir.z * 7 * t.scale - dir.x * 0.8;
+      this.pickups.add('coconut', this.v1.set(cx, this.groundY(cx, cz), cz), 1);
+      this.hud.toast('🌴 2 toras + 1 coco — [E] para pegar');
+      return;
+    }
     for (let i = 0; i < 3; i++) {
       const along = (1.8 + i * 2.3) * t.scale;
       const side = (i - 1) * 0.25;
@@ -1216,6 +1317,18 @@ export class Game implements CombatWorld {
       this.torchLight.intensity = burning * (16 + Math.sin(t * 17) * 2 + Math.sin(t * 7.3) * 2);
     } else {
       this.torchLight.intensity = 0;
+    }
+    // Tactical flashlight: a strong spot from just right of the eye along the view.
+    if (this.inv.selected === 'flashlight') {
+      const d = this.camera.getWorldDirection(this.v2);
+      this.flashlight.position.copy(this.camera.position).addScaledVector(d, 0.3);
+      this.flashlight.position.x += -d.z * 0.22;
+      this.flashlight.position.z += d.x * 0.22;
+      this.flashlight.position.y -= 0.12;
+      this.flashlight.target.position.copy(this.camera.position).addScaledVector(d, 20);
+      this.flashlight.intensity = 140;
+    } else {
+      this.flashlight.intensity = 0;
     }
     // Two pooled campfire lights go to the nearest fires (hysteresis keeps them from swapping).
     const fires = this.base.placed.filter((p) => p.kind === 'campfire');
@@ -1320,18 +1433,230 @@ export class Game implements CombatWorld {
   private updateDeath(dt: number): void {
     if (!this.vitals.dead) return;
     this.deathT += dt;
-    this.hud.setFade(Math.min(1, this.deathT / 1.5));
-    if (this.deathT === dt) this.hud.message('VOCÊ DESMAIOU', 'Acordando de novo perto do avião…', 3);
-    if (this.deathT > 2.6) {
-      this.deathT = 0;
-      this.vitals.dead = false;
-      this.vitals.health = this.vitals.maxHealth * 0.6;
-      this.vitals.hunger = Math.max(this.vitals.hunger, 50);
-      this.player.teleport(this.crash.spawn.x, this.crash.spawn.z, this.crash.spawnYaw);
-      this.player.wake = 0;
-      this.fadeIn = 1;
+    this.hud.setFade(Math.min(0.85, this.deathT / 1.5));
+    if (this.deathT > 1.4 && !this.deathShown) {
+      this.deathShown = true;
+      this.sound.deathSting();
+      this.menuOpen = true;
+      this.setPlaying(false);
+      if (document.pointerLockElement) document.exitPointerLock();
+      this.screens.showDeath(this.runStats(), () => this.respawn(), () => this.newGame());
     }
   }
+
+  /** Back on the island with all progress kept: at a finished cabin if there is one, else by the plane. */
+  respawn(): void {
+    this.deathT = 0;
+    this.deathShown = false;
+    this.vitals.dead = false;
+    this.vitals.health = this.vitals.maxHealth * 0.6;
+    this.vitals.hunger = Math.max(this.vitals.hunger, 50);
+    if (this.indoors) this.setIndoors(false);
+    const cabin = this.base.cabins.find((c) => c.complete);
+    if (cabin) this.player.teleport(cabin.pos.x + 5, cabin.pos.z + 2, 0);
+    else this.player.teleport(this.crash.spawn.x, this.crash.spawn.z, this.crash.spawnYaw);
+    this.player.wake = 0;
+    this.fadeIn = 1;
+    this.menuOpen = false;
+    this.requestLock();
+  }
+
+  newGame(): void {
+    SaveStore.clear();
+    location.reload();
+  }
+
+  private runStats(): { days: number; kills: number; hunted: number } {
+    return { days: this.sky.day, kills: this.tribe.kills, hunted: this.stats.hunted };
+  }
+
+  // ---------------------------------------------------------------- cave
+
+  private setIndoors(on: boolean): void {
+    this.indoors = on;
+    this.player.interior = on ? { ground: (x, z) => this.cave.groundAt(x, z), clamp: (p) => this.cave.clamp(p) } : null;
+  }
+
+  private enterCave(): void {
+    this.setIndoors(true);
+    const e = this.cave.entryInside;
+    this.player.placeAt(e.x, 0, e.z, 0);
+    this.fadeIn = 1;
+    this.sound.roar('guardian');
+    this.hud.message('CAVERNA NORTE', 'Escura e úmida. Uma tocha ou lanterna ajuda. [E] na entrada para voltar.', 5);
+  }
+
+  private leaveCave(): void {
+    this.setIndoors(false);
+    const o = this.cave.exitOutside;
+    this.player.teleport(o.x, o.z, Math.atan2(-(o.x - this.cave.mouth.x), -(o.z - this.cave.mouth.z)) + Math.PI);
+    this.fadeIn = 1;
+  }
+
+  private repairBridge(): void {
+    if (this.inv.mats.sticks < 4 || this.inv.mats.cloth < 2) {
+      this.sound.denied();
+      this.hud.toast('A ponte precisa de 4 Gravetos e 2 Panos');
+      return;
+    }
+    this.inv.mats.sticks -= 4;
+    this.inv.mats.cloth -= 2;
+    this.cave.setBridge(true);
+    this.sound.bridge();
+    this.player.addTrauma(0.1);
+    this.hud.toast('🌉 Ponte consertada');
+    this.saveGame();
+  }
+
+  private cavePickupsPlaced = false;
+
+  private updateCave(dt: number): void {
+    if (!this.cavePickupsPlaced) {
+      this.cavePickupsPlaced = true;
+      if (!this.caveLoot.flashlight) this.pickups.add('flashlight', this.cave.lootPos, 1, 0.4);
+      if (!this.caveLoot.backpack) this.pickups.add('backpack', this.cave.backpackPos, 1, -0.3);
+    }
+    if (!this.indoors) return;
+    // Falling into the chasm hurts and puts you back at the near edge.
+    if (this.player.pos.y < -6) {
+      this.chasmT += dt;
+      if (this.chasmT > 0.3) {
+        this.chasmT = 0;
+        this.vitals.damage(20);
+        this.sound.hurt();
+        const b = this.cave.bridgePos;
+        this.player.placeAt(b.x, 0, b.z + 3, 0);
+        this.hud.toast('Você caiu no abismo! Conserte a ponte [E].');
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------- escape
+
+  private repairBoat(): void {
+    const stored = this.base.storedLogs(this.player.pos, 30);
+    const have = { logs: this.inv.logs + stored, sticks: this.inv.mats.sticks, cloth: this.inv.mats.cloth, heart: this.inv.mats.heart };
+    const take = this.boat.deliver(have);
+    if (take.logs + take.sticks + take.cloth + take.heart === 0) {
+      this.sound.denied();
+      this.hud.toast('Traga toras, gravetos, panos e o Coração Alfa');
+      return;
+    }
+    const fromShoulder = Math.min(this.inv.logs, take.logs);
+    this.inv.logs -= fromShoulder;
+    if (take.logs > fromShoulder) this.base.takeStoredLogs(this.player.pos, take.logs - fromShoulder, 30);
+    this.vm.setLogs(this.inv.logs);
+    this.inv.mats.sticks -= take.sticks;
+    this.inv.mats.cloth -= take.cloth;
+    this.inv.mats.heart -= take.heart;
+    this.sound.repair();
+    this.player.addTrauma(0.06);
+    if (this.boat.complete) {
+      this.hud.message('VELEIRO PRONTO', 'Suba pela escada da popa e [E] para zarpar.', 5);
+      this.sound.levelUp();
+    } else this.hud.toast(`⛵ Veleiro ${Math.round(this.boat.progress * 100)}%`);
+    this.saveGame();
+  }
+
+  private sail(): void {
+    this.escaped = true;
+    this.saveGame();
+    this.sound.victory();
+    this.menuOpen = true;
+    this.setPlaying(false);
+    if (document.pointerLockElement) document.exitPointerLock();
+    this.screens.showVictory(this.runStats(), () => this.newGame(), () => {
+      this.menuOpen = false;
+      this.requestLock();
+    });
+  }
+
+  // ---------------------------------------------------------------- quests
+
+  private updateQuest(): void {
+    const lvl = this.base.benchLevel;
+    const d = this.tribe.defeated;
+    const hasCabin = this.base.cabins.some((c) => c.complete);
+    const hasFire = this.base.placed.some((p) => p.kind === 'campfire');
+    let q: [string, string];
+    if (this.escaped) q = ['⛵', 'Você escapou da ilha. Explore à vontade.'];
+    else if (!hasCabin || !hasFire) q = ['🛖', 'Construa uma Cabana e uma Fogueira antes da noite [Tab]'];
+    else if (!d.has('boss')) q = ['👑', 'Derrote o Chefe Tribal na [Aldeia] a Oeste'];
+    else if (lvl < 2) q = ['📜', 'Evolua o Livro para o Nível 2 com o Totem Tribal [Tab]'];
+    else if (!d.has('guardian')) q = ['💀', 'Derrote o Guardião da [Caverna] ao Norte'];
+    else if (!this.caveLoot.flashlight || !this.caveLoot.backpack) q = ['🔦', 'Explore a Caverna: lanterna e mochila depois da ponte'];
+    else if (lvl < 3) q = ['📜', 'Evolua o Livro para o Nível 3 com a Relíquia [Tab]'];
+    else if (!d.has('alpha') && this.inv.mats.heart === 0 && this.boat.delivered.heart === 0) q = ['🐺', 'Cace a Fera Alfa no [Altar] a Leste'];
+    else q = ['⛵', 'Repare o [Veleiro] na Praia Sul e fuja da ilha'];
+    this.hud.setQuest(q[0], q[1]);
+    this.hud.setMarkerVisible('Altar', lvl >= 2);
+  }
+
+  // ---------------------------------------------------------------- save
+
+  saveGame(): void {
+    const inv = this.inv;
+    const data: SaveData = {
+      v: 1,
+      day: this.sky.day,
+      hours: this.sky.hours,
+      player: this.indoors ? { x: this.cave.exitOutside.x, z: this.cave.exitOutside.z, yaw: 0 } : { x: this.player.pos.x, z: this.player.pos.z, yaw: this.player.yaw },
+      health: Math.max(1, this.vitals.health),
+      maxHealth: this.vitals.maxHealth,
+      hunger: this.vitals.hunger,
+      inv: { tools: [...inv.tools], food: { ...inv.food }, mats: { ...inv.mats }, logs: inv.logs, armor: inv.armor, hasBackpack: inv.hasBackpack },
+      benchLevel: this.base.benchLevel,
+      cabins: this.base.cabins.map((c) => ({ x: c.pos.x, z: c.pos.z, yaw: c.group.rotation.y, delivered: { ...c.delivered } })),
+      placed: this.base.placed.map((p) => ({ kind: p.kind, x: p.pos.x, z: p.pos.z, yaw: p.yaw, logs: p.logs })),
+      defeated: [...this.tribe.defeated],
+      bridgeRepaired: this.cave.bridgeRepaired,
+      caveLoot: { ...this.caveLoot },
+      boat: { ...this.boat.delivered },
+      stats: { kills: this.tribe.kills, hunted: this.stats.hunted },
+      tutorialDone: this.tutorialDone,
+      escaped: this.escaped,
+    };
+    if (SaveStore.save(data)) this.hud.toast('💾 Jogo salvo');
+  }
+
+  private applySave(d: SaveData): void {
+    this.sky.day = d.day;
+    this.sky.hours = d.hours;
+    this.vitals.maxHealth = d.maxHealth;
+    this.vitals.health = d.health;
+    this.vitals.hunger = d.hunger;
+    const inv = this.inv;
+    for (const t of d.inv.tools) inv.tools.add(t as ToolId);
+    Object.assign(inv.food, d.inv.food);
+    Object.assign(inv.mats, d.inv.mats);
+    inv.logs = d.inv.logs;
+    inv.armor = d.inv.armor;
+    inv.hasBackpack = d.inv.hasBackpack;
+    this.base.benchLevel = d.benchLevel;
+    for (const c of d.cabins) {
+      const cabin = this.base.placeCabin(c.x, c.z, c.yaw);
+      cabin.deliver(c.delivered);
+    }
+    for (const p of d.placed) {
+      const placed = this.base.place(p.kind as BuildKind, p.x, p.z, p.yaw);
+      if (p.kind === 'logHolder') this.base.setHolderLogs(placed, p.logs);
+    }
+    this.cave.setBridge(d.bridgeRepaired);
+    this.caveLoot = { ...d.caveLoot };
+    this.boat.deliver(d.boat);
+    this.tribe.kills = d.stats.kills;
+    this.stats.hunted = d.stats.hunted;
+    this.escaped = d.escaped;
+    if (d.tutorialDone) {
+      this.tutorialDone = true;
+      this.hud.setTutorial(0, 0, null);
+    }
+    this.player.teleport(d.player.x, d.player.z, d.player.yaw);
+    this.vm.setLogs(inv.logs);
+    this.loadedSave = true;
+  }
+
+  private loadedSave = false;
 
   /** Lit campfires (16 m) and finished cabins (8 m) keep cannibals out. */
   private updateZones(): void {
@@ -1347,13 +1672,15 @@ export class Game implements CombatWorld {
     this.sound.animalHurt(true);
     this.hud.showTargetHealth(Math.max(0, c.hp) / c.maxHp);
     this.hud.hitMarker();
-    if (killed) this.hud.toast(c.role === 'boss' ? '👑 Chefe Tribal derrotado!' : '💀 Canibal derrotado');
+    if (killed) this.hud.toast(c.role === 'boss' || c.role === 'guardian' || c.role === 'alpha' ? `👑 ${c.cfg.name} derrotado!` : '💀 Canibal derrotado');
   }
 
   private onCannibalHit(dmg: number, c: Cannibal): void {
     this.vitals.damage(dmg);
-    this.sound.hurt();
-    this.player.addTrauma(c.role === 'boss' ? 0.5 : 0.3);
+    const big = c.role === 'boss' || c.role === 'guardian' || c.role === 'alpha';
+    if (big) this.sound.monsterHit();
+    else this.sound.hurt();
+    this.player.addTrauma(big ? 0.55 : 0.3);
     // Knock the player back a little from the blow.
     const dx = this.player.pos.x - c.pos.x;
     const dz = this.player.pos.z - c.pos.z;
@@ -1365,9 +1692,12 @@ export class Game implements CombatWorld {
   private onCannibalDeath(c: Cannibal): void {
     const drops: ItemType[] = [];
     const pool: ItemType[] = ['cloth', 'food', 'bandage'];
-    const count = c.role === 'boss' ? 3 : 1 + (Math.random() < 0.5 ? 1 : 0);
+    const bossKill = c.role === 'boss' || c.role === 'guardian' || c.role === 'alpha';
+    const count = bossKill ? 3 : 1 + (Math.random() < 0.5 ? 1 : 0);
     for (let k = 0; k < count; k++) drops.push(pool[Math.floor(Math.random() * pool.length)]);
     if (c.role === 'boss') drops.push('totem');
+    if (c.role === 'guardian') drops.push('relic');
+    if (c.role === 'alpha') drops.push('heart');
     drops.forEach((type, k) => {
       const a = (k / drops.length) * Math.PI * 2 + Math.random();
       const x = c.pos.x + Math.cos(a) * 0.8;
@@ -1375,6 +1705,9 @@ export class Game implements CombatWorld {
       this.pickups.add(type, this.v4.set(x, this.terrain.height(x, z), z), 1);
     });
     if (c.role === 'boss') this.hud.message('O CHEFE CAIU', 'Pegue o Totem Tribal [E] para evoluir seu menu para o Nível 2.', 6);
+    if (c.role === 'guardian') this.hud.message('O GUARDIÃO CAIU', 'Pegue a Relíquia [E]. A entrada da caverna está livre.', 6);
+    if (c.role === 'alpha') this.hud.message('A FERA ALFA CAIU', 'Pegue o Coração Alfa [E] e leve-o ao Veleiro.', 6);
+    if (bossKill) this.saveGame();
   }
 
   private onScoutSpotted(): void {
@@ -1391,7 +1724,7 @@ export class Game implements CombatWorld {
     this.inv.mats.rocks += 40;
     this.inv.mats.cloth += 20;
     this.inv.mats.hide += 20;
-    this.inv.logs = MAX_LOGS;
+    this.inv.logs = this.inv.maxLogs;
     this.vm.setLogs(this.inv.logs);
   }
 }

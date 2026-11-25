@@ -1,3 +1,4 @@
+import './book.css';
 import { Cost, LEVEL_UP, RECIPES, Recipe } from '../world/base';
 
 export interface CraftState {
@@ -7,23 +8,37 @@ export interface CraftState {
   owned: Set<string>;
 }
 
-const COST_LABEL: Record<keyof Cost, string> = { logs: 'Toras', sticks: 'Gravetos', rocks: 'Pedras', cloth: 'Pano', hide: 'Pele' };
+type Tab = 'build' | 'gear' | 'levels';
 
-/** Crafting bench menu: levels 1→3, recipes with costs, locked tiers with their boss item. */
+const COST_LABEL: Record<keyof Cost, string> = { logs: 'Toras', sticks: 'Gravetos', rocks: 'Pedras', cloth: 'Pano', hide: 'Pele' };
+const TABS: { id: Tab; label: string; icon: string }[] = [
+  { id: 'build', label: 'Construções', icon: '🛖' },
+  { id: 'gear', label: 'Equipamentos', icon: '🪓' },
+  { id: 'levels', label: 'Níveis 1 → 3', icon: '📜' },
+];
+
+/**
+ * The Survival Book ([Tab]/[B]): an open journal with two parchment pages, a spine
+ * and side tabs (Constructions, Equipment, Levels). Left page lists the entries of
+ * the open tab; the right page shows the chosen entry with its cost and action.
+ */
 export class CraftMenu {
   readonly root: HTMLDivElement;
-  private panel: HTMLDivElement;
+  private book: HTMLDivElement;
   isOpen = false;
+  private tab: Tab = 'build';
+  private selected: string | null = null;
+  private state: CraftState | null = null;
   onCraft: (r: Recipe) => void = () => {};
   onUpgrade: (level: 2 | 3) => void = () => {};
   onClose: () => void = () => {};
 
   constructor() {
     this.root = document.createElement('div');
-    this.root.id = 'craft-menu';
-    this.panel = document.createElement('div');
-    this.panel.className = 'panel';
-    this.root.appendChild(this.panel);
+    this.root.id = 'survival-book';
+    this.book = document.createElement('div');
+    this.book.className = 'book';
+    this.root.appendChild(this.book);
     document.body.appendChild(this.root);
     this.root.addEventListener('mousedown', (e) => {
       if (e.target === this.root) this.onClose();
@@ -35,13 +50,15 @@ export class CraftMenu {
   }
 
   private costHtml(cost: Cost, have: Required<Cost>): string {
-    return (Object.keys(cost) as (keyof Cost)[])
+    const keys = Object.keys(cost) as (keyof Cost)[];
+    if (!keys.length) return '<li>Sem custo agora — materiais entregues depois com [E]</li>';
+    return keys
       .map((k) => {
         const need = cost[k] ?? 0;
         const ok = have[k] >= need;
-        return `<span class="${ok ? '' : 'miss'}">${COST_LABEL[k]} ${have[k]}/${need}</span>`;
+        return `<li class="${ok ? 'ok' : 'miss'}"><span>${COST_LABEL[k]}</span><b>${have[k]}/${need}</b></li>`;
       })
-      .join(' · ');
+      .join('');
   }
 
   open(state: CraftState): void {
@@ -55,45 +72,85 @@ export class CraftMenu {
     this.root.classList.remove('on');
   }
 
+  private entries(): Recipe[] {
+    if (this.tab === 'build') return RECIPES.filter((r) => r.kind === 'build');
+    if (this.tab === 'gear') return RECIPES.filter((r) => r.kind !== 'build');
+    return [];
+  }
+
   render(state: CraftState): void {
+    this.state = state;
     const h = state.have;
-    let html = `<header><h2>CRIAÇÃO E CONSTRUÇÃO · NV ${state.level}</h2><button class="ghost" data-close>Fechar (Tab)</button></header>
-      <div class="have">Toras ${h.logs} (ombro + suportes por perto) · Gravetos ${h.sticks} · Pedras ${h.rocks} · Pano ${h.cloth} · Pele ${h.hide}</div>`;
-    for (const lvl of [1, 2, 3] as const) {
-      const locked = state.level < lvl;
-      let lockText = '';
-      if (lvl > 1) {
-        const up = LEVEL_UP[lvl as 2 | 3];
-        lockText = locked ? `<span class="lock">🔒 requer ${up.bossLabel} (Chefe)</span>` : '';
+    const list = this.entries();
+    if (this.tab !== 'levels' && (!this.selected || !list.some((r) => r.id === this.selected))) this.selected = list[0]?.id ?? null;
+
+    const tabs = TABS.map((t) => `<button class="tab ${t.id === this.tab ? 'on' : ''}" data-tab="${t.id}"><span>${t.icon}</span>${t.label}</button>`).join('');
+    let left = '';
+    let right = '';
+    if (this.tab === 'levels') {
+      left = `<h2>Níveis do Livro</h2><p class="lead">Seu nível atual: <b>${state.level}</b>. Cada nível pede madeira, pedra e um troféu de chefe.</p>`;
+      for (const lvl of [1, 2, 3] as const) {
+        const items = RECIPES.filter((r) => r.level === lvl).map((r) => `${r.icon} ${r.label}`).join(' · ');
+        const status = state.level >= lvl ? '<span class="stamp">liberado</span>' : '<span class="stamp lock">🔒 bloqueado</span>';
+        left += `<div class="lvl"><h3>Nível ${lvl} ${status}</h3><p>${items}</p></div>`;
       }
-      html += `<h3>Nível ${lvl} ${lockText}</h3>`;
-      if (lvl > 1 && locked && state.level === lvl - 1) {
-        const up = LEVEL_UP[lvl as 2 | 3];
+      right = '<h2>Evoluir</h2>';
+      if (state.level >= 3) right += '<p class="lead">O livro está completo. Agora: o Veleiro na Praia Sul.</p>';
+      else {
+        const next = (state.level + 1) as 2 | 3;
+        const up = LEVEL_UP[next];
         const bossHave = state.bossItems[up.boss];
         const can = CraftMenu.affordable(up.cost, h) && bossHave > 0;
-        html += `<div class="upgrade"><span>Evoluir para Nv ${lvl}: ${this.costHtml(up.cost, h)} · <span class="${bossHave > 0 ? '' : 'miss'}">${up.bossLabel} ${bossHave}/1</span></span>
-          <button data-up="${lvl}" ${can ? '' : 'disabled'}>Evoluir</button></div>`;
+        right += `<p class="lead">Para o Nível ${next}:</p><ul class="cost">${this.costHtml(up.cost, h)}<li class="${bossHave > 0 ? 'ok' : 'miss'}"><span>${up.bossLabel}</span><b>${bossHave}/1</b></li></ul>
+          <p class="hint">${next === 2 ? 'O Totem Tribal fica com o Chefe da Aldeia (Oeste).' : 'A Relíquia está com o Guardião da Caverna (Norte).'}</p>
+          <button class="act" data-up="${next}" ${can ? '' : 'disabled'}>Evoluir para Nível ${next}</button>`;
       }
-      html += '<div class="grid">';
-      for (const r of RECIPES.filter((x) => x.level === lvl)) {
+    } else {
+      left = `<h2>${this.tab === 'build' ? 'Construções' : 'Equipamentos'}</h2><ul class="entries">`;
+      for (const r of list) {
+        const locked = r.level > state.level;
+        const owned = state.owned.has(r.id);
+        left += `<li class="${r.id === this.selected ? 'sel' : ''} ${locked ? 'locked' : ''}" data-sel="${r.id}"><span class="ico">${locked ? '🔒' : r.icon}</span><span class="nm">${r.label}</span><span class="lv">${owned ? '✓' : `Nv ${r.level}`}</span></li>`;
+      }
+      left += '</ul>';
+      const r = list.find((x) => x.id === this.selected);
+      if (r) {
+        const locked = r.level > state.level;
         const owned = state.owned.has(r.id);
         const can = !locked && !owned && CraftMenu.affordable(r.cost, h);
         const verb = r.kind === 'build' ? 'Construir' : r.kind === 'armor' ? 'Vestir' : 'Criar';
-        html += `<div class="rec ${locked ? 'locked' : ''}">
-          <div class="ico">${locked ? '🔒' : r.icon}</div>
-          <div class="info"><div class="nm">${r.label}</div><div class="cost">${this.costHtml(r.cost, h)}</div><div class="desc">${r.desc}</div></div>
-          <button data-r="${r.id}" ${can ? '' : 'disabled'}>${owned ? 'Feito' : verb}</button></div>`;
+        right = `<div class="sketch">${r.icon}</div><h2>${r.label}</h2><p class="lead">${r.desc}</p>
+          <ul class="cost">${this.costHtml(r.cost, h)}</ul>
+          ${locked ? `<p class="hint">🔒 Requer Nível ${r.level} do livro.</p>` : ''}
+          <button class="act" data-r="${r.id}" ${can ? '' : 'disabled'}>${owned ? 'Já feito' : verb}</button>`;
       }
-      html += '</div>';
     }
-    this.panel.innerHTML = html;
-    this.panel.querySelector('[data-close]')?.addEventListener('click', () => this.onClose());
-    this.panel.querySelectorAll<HTMLButtonElement>('[data-r]').forEach((b) =>
+    this.book.innerHTML = `<nav class="tabs">${tabs}</nav>
+      <section class="page left">${left}</section>
+      <div class="spine"></div>
+      <section class="page right">${right}<footer>Toras ${h.logs} (ombro + suportes) · Gravetos ${h.sticks} · Pedras ${h.rocks} · Pano ${h.cloth} · Pele ${h.hide}</footer></section>
+      <button class="close" data-close>Fechar [Tab]</button>`;
+
+    this.book.querySelector('[data-close]')?.addEventListener('click', () => this.onClose());
+    this.book.querySelectorAll<HTMLButtonElement>('[data-tab]').forEach((b) =>
       b.addEventListener('click', () => {
-        const r = RECIPES.find((x) => x.id === b.dataset.r);
-        if (r) this.onCraft(r);
+        this.tab = b.dataset.tab as Tab;
+        this.selected = null;
+        if (this.state) this.render(this.state);
       }),
     );
-    this.panel.querySelectorAll<HTMLButtonElement>('[data-up]').forEach((b) => b.addEventListener('click', () => this.onUpgrade(Number(b.dataset.up) as 2 | 3)));
+    this.book.querySelectorAll<HTMLElement>('[data-sel]').forEach((li) =>
+      li.addEventListener('click', () => {
+        this.selected = li.dataset.sel!;
+        if (this.state) this.render(this.state);
+      }),
+    );
+    this.book.querySelectorAll<HTMLButtonElement>('[data-r]').forEach((b) =>
+      b.addEventListener('click', () => {
+        const rec = RECIPES.find((x) => x.id === b.dataset.r);
+        if (rec) this.onCraft(rec);
+      }),
+    );
+    this.book.querySelectorAll<HTMLButtonElement>('[data-up]').forEach((b) => b.addEventListener('click', () => this.onUpgrade(Number(b.dataset.up) as 2 | 3)));
   }
 }

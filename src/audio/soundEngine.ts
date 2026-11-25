@@ -358,6 +358,65 @@ export class SoundEngine {
     this.burst({ type: 'highpass', freq: 3500, gain: 0.12, attack: 0.1, decay: 0.8 });
   }
 
+  /** Low growl for the chief, a hollow bone rattle-roar for the guardian, a howl-snarl for the alpha. */
+  roar(kind: 'boss' | 'guardian' | 'alpha'): void {
+    if (!this.ctx) return;
+    if (kind === 'alpha') {
+      this.tone({ type: 'sawtooth', f0: 220, f1: 520, gain: 0.12, attack: 0.25, decay: 0.9 });
+      this.tone({ type: 'sawtooth', f0: 110, f1: 70, gain: 0.18, attack: 0.05, decay: 0.8, when: 0.7 });
+      this.burst({ type: 'lowpass', freq: 600, gain: 0.35, attack: 0.05, decay: 0.7, when: 0.7, toEcho: 0.3 });
+    } else if (kind === 'guardian') {
+      this.tone({ type: 'sawtooth', f0: 70, f1: 45, gain: 0.3, attack: 0.15, decay: 1.4, toEcho: 0.4 });
+      for (let i = 0; i < 8; i++) this.burst({ type: 'bandpass', freq: 2200 + Math.random() * 1500, q: 6, gain: 0.08, decay: 0.04, when: 0.1 + i * 0.09 });
+    } else {
+      this.tone({ type: 'sawtooth', f0: 140, f1: 85, gain: 0.22, attack: 0.1, decay: 0.9, toEcho: 0.3 });
+      this.burst({ type: 'bandpass', freq: 500, q: 1.5, gain: 0.3, attack: 0.08, decay: 0.8 });
+    }
+  }
+
+  /** A heavy blow landing on the player from a monster. */
+  monsterHit(): void {
+    if (!this.ctx) return;
+    this.tone({ f0: 90, f1: 40, gain: 0.6, decay: 0.25 });
+    this.burst({ type: 'lowpass', freq: 900, gain: 0.45, decay: 0.2 });
+  }
+
+  bridge(): void {
+    if (!this.ctx) return;
+    for (let i = 0; i < 5; i++) {
+      this.tone({ f0: 190 + i * 8, f1: 110, gain: 0.3, decay: 0.08, when: i * 0.16 });
+      this.burst({ type: 'bandpass', freq: 1200, q: 2, gain: 0.2, decay: 0.05, when: i * 0.16 });
+    }
+    this.tone({ type: 'triangle', f0: 120, f1: 80, gain: 0.15, decay: 0.6, when: 0.9 });
+  }
+
+  flashlightClick(): void {
+    if (!this.ctx) return;
+    this.tone({ type: 'square', f0: 2600, f1: 2000, gain: 0.05, decay: 0.02 });
+    this.burst({ type: 'highpass', freq: 3500, gain: 0.12, decay: 0.025 });
+  }
+
+  repair(): void {
+    if (!this.ctx) return;
+    for (let i = 0; i < 4; i++) {
+      this.tone({ f0: 240, f1: 140, gain: 0.32, decay: 0.07, when: i * 0.14 });
+      this.burst({ type: 'bandpass', freq: 1600, q: 3, gain: 0.2, decay: 0.04, when: i * 0.14 });
+    }
+    this.burst({ type: 'bandpass', freq: 500, endFreq: 900, q: 1, gain: 0.12, attack: 0.1, decay: 0.4, when: 0.6 });
+  }
+
+  victory(): void {
+    if (!this.ctx) return;
+    [392, 494, 587, 784, 988].forEach((f, i) => this.tone({ type: 'triangle', f0: f, gain: 0.14, attack: 0.02, decay: 0.6, when: i * 0.16 }));
+    this.tone({ type: 'triangle', f0: 784, gain: 0.1, attack: 0.2, decay: 1.8, when: 0.9 });
+  }
+
+  deathSting(): void {
+    if (!this.ctx) return;
+    [330, 262, 196].forEach((f, i) => this.tone({ type: 'sawtooth', f0: f, f1: f * 0.94, gain: 0.08, attack: 0.05, decay: 0.7, when: i * 0.3 }));
+    this.burst({ type: 'lowpass', freq: 300, gain: 0.3, attack: 0.3, decay: 1.6 });
+  }
+
   impact(surface: Surface | 'wood' | 'metal'): void {
     if (!this.ctx) return;
     if (surface === 'metal') {

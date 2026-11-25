@@ -1,7 +1,7 @@
-export type ToolId = 'axe' | 'flameAxe' | 'spear' | 'bow' | 'torch' | 'rod';
+export type ToolId = 'axe' | 'flameAxe' | 'spear' | 'bow' | 'torch' | 'rod' | 'flashlight';
 export type FoodId = 'food' | 'cookedMeat' | 'cookedFish' | 'meat' | 'fish' | 'bandage';
 export type HotbarId = ToolId | FoodId;
-export type MaterialId = 'sticks' | 'rocks' | 'cloth' | 'hide' | 'arrows' | 'totem' | 'relic';
+export type MaterialId = 'sticks' | 'rocks' | 'cloth' | 'hide' | 'arrows' | 'totem' | 'relic' | 'heart';
 
 export const HOTBAR_INFO: Record<HotbarId, { label: string; icon: string }> = {
   axe: { label: 'Machado de Emergência', icon: '🪓' },
@@ -10,6 +10,7 @@ export const HOTBAR_INFO: Record<HotbarId, { label: string; icon: string }> = {
   bow: { label: 'Arco de Caça', icon: '🏹' },
   torch: { label: 'Tocha', icon: '🕯️' },
   rod: { label: 'Vara de Pesca', icon: '🎣' },
+  flashlight: { label: 'Lanterna Tática', icon: '🔦' },
   food: { label: 'Comida enlatada', icon: '🥫' },
   cookedMeat: { label: 'Carne Assada', icon: '🍖' },
   cookedFish: { label: 'Peixe Assado', icon: '🐟' },
@@ -26,6 +27,7 @@ export const MATERIAL_INFO: Record<MaterialId, { label: string; icon: string }> 
   arrows: { label: 'Flechas', icon: '➶' },
   totem: { label: 'Totem Tribal', icon: '🗿' },
   relic: { label: 'Relíquia da Caverna', icon: '💎' },
+  heart: { label: 'Coração Alfa', icon: '❤️‍🔥' },
 };
 
 /** Effects of eating/using a consumable: hunger and health deltas. */
@@ -38,7 +40,7 @@ export const FOOD_EFFECT: Record<FoodId, { hunger: number; health: number; text:
   bandage: { hunger: 0, health: 40, text: '+40 Vida' },
 };
 
-const TOOL_ORDER: ToolId[] = ['axe', 'flameAxe', 'spear', 'bow', 'torch', 'rod'];
+const TOOL_ORDER: ToolId[] = ['axe', 'flameAxe', 'spear', 'bow', 'torch', 'flashlight', 'rod'];
 const FOOD_ORDER: FoodId[] = ['food', 'cookedMeat', 'cookedFish', 'meat', 'fish', 'bandage'];
 
 export const MAX_LOGS = 3;
@@ -46,7 +48,13 @@ export const MAX_LOGS = 3;
 export class Inventory {
   readonly tools = new Set<ToolId>(['axe']);
   readonly food: Record<FoodId, number> = { food: 0, cookedMeat: 0, cookedFish: 0, meat: 0, fish: 0, bandage: 0 };
-  readonly mats: Record<MaterialId, number> = { sticks: 0, rocks: 0, cloth: 0, hide: 0, arrows: 0, totem: 0, relic: 0 };
+  readonly mats: Record<MaterialId, number> = { sticks: 0, rocks: 0, cloth: 0, hide: 0, arrows: 0, totem: 0, relic: 0, heart: 0 };
+  /** Tactical backpack from the cave: 4 logs on the shoulder and double sticks/stones. */
+  hasBackpack = false;
+
+  get maxLogs(): number {
+    return this.hasBackpack ? 4 : MAX_LOGS;
+  }
   /** Logs carried on the shoulder. */
   logs = 0;
   armor = 0;

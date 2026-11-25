@@ -19,6 +19,7 @@ import { ITEM_LABEL, ItemType, Pickup, PickupManager } from './world/pickups';
 import { DayNight } from './world/sky';
 import { LAKE_CENTER, LAKE_LEVEL, LAKE_RADIUS, Terrain } from './world/terrain';
 import { Forest, Props, Tree, windUniform } from './world/vegetation';
+import { GrassField } from './world/grass';
 import { Water } from './world/water';
 
 type HitKind = 'tree' | 'case' | 'animal' | 'terrain' | 'water' | 'hard';
@@ -75,6 +76,7 @@ export class Game implements CombatWorld {
   readonly base: BaseSite;
   readonly forest: Forest;
   readonly props: Props;
+  readonly grass: GrassField;
   readonly wildlife: Wildlife;
   readonly pickups = new PickupManager();
   readonly debris = new Debris();
@@ -162,6 +164,8 @@ export class Game implements CombatWorld {
     this.scene.add(this.forest.group);
     this.props = new Props(this.terrain, this.colliders, exclusions, this.forest, lib);
     this.scene.add(this.props.group);
+    this.grass = new GrassField(this.terrain, lib);
+    this.scene.add(this.grass.mesh);
     this.props.smallRocks.forEach((r, i) => this.pickups.addInstanced('rock', i, r.x, r.y, r.z));
     this.props.smallSticks.forEach((r, i) => this.pickups.addInstanced('stick', i, r.x, r.y, r.z));
     this.wildlife = new Wildlife(this.terrain, this.colliders, exclusions, (a) => this.onAnimalDeath(a), lib);
@@ -199,6 +203,7 @@ export class Game implements CombatWorld {
     });
     this.player.teleport(this.crash.spawn.x, this.crash.spawn.z, this.crash.spawnYaw);
     this.player.wake = 0;
+    this.grass.update(this.player.pos.x, this.player.pos.z);
     const sens = Number(store.get('iss.sens'));
     if (sens > 0) this.player.sensitivity = sens;
 
@@ -322,6 +327,7 @@ export class Game implements CombatWorld {
 
     this.sky.update(dt, this.time, this.camera, this.player.pos);
     windUniform.value = this.time;
+    this.grass.update(this.player.pos.x, this.player.pos.z);
     this.forest.update(dt);
     this.debris.update(dt);
     this.arrows.update(dt);

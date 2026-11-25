@@ -85,17 +85,18 @@ export class Terrain {
     // Four-octave FBM through a smooth elevation curve: flat lowlands, rounded tops.
     const hills01 = clamp(n.fbm(wx * 0.0052 + 3, wz * 0.0052 - 7, 4) * 0.58 + 0.5, 0, 1);
     const hillH = hills01 * hills01 * (3 - 2 * hills01);
-    h += inland * (2.4 + hillH * 16) * (1 - 0.6 * south);
+    // Gentle, walkable hills (a few metres to ~11 m), flatter toward the south beach.
+    h += inland * (2.0 + hillH * 9) * (1 - 0.6 * south) * (1 - 0.35 * north);
 
-    // Northern range: a broad warped massif from soft-ridged FBM (smooth |r|, no creases),
-    // banded along an east-west spine so it reads as one serra rather than scattered peaks.
-    const r = n.fbm(wx * 0.0085 + 40, wz * 0.0085 + 13, 4);
-    const softRidge = clamp(1 - Math.sqrt(r * r + 0.02), 0, 1);
-    const ridge = softRidge * softRidge * (3 - 2 * softRidge);
+    // Northern highland: broad rounded swells along an east-west spine (plain FBM,
+    // no ridge creases). Its cliffs are made of large rock clusters placed in Props,
+    // so the ground itself stays smooth and the tallest point is ~18-20 m.
+    const massRaw = clamp(n.fbm(wx * 0.0065 + 40, wz * 0.0065 + 13, 4) * 0.6 + 0.5, 0, 1);
+    const mass = massRaw * massRaw * (3 - 2 * massRaw);
     const spine = -150 + n.noise(x * 0.006 + 7, 3.3) * 28;
-    const band = Math.exp(-(((z - spine) / 75) ** 2));
-    const northInland = 1 - smoothstep(0.76, 0.97, t);
-    h += north * northInland * (5 + band * (11 + ridge * 21) + hillH * 6);
+    const band = Math.exp(-(((z - spine) / 80) ** 2));
+    const northInland = 1 - smoothstep(0.74, 0.97, t);
+    h += north * northInland * (2 + band * (3 + mass * 6.5));
 
     h += n.noise(x * 0.03, z * 0.03) * 0.25 * land;
 
@@ -129,6 +130,16 @@ export class Terrain {
     const hd = this.grid[iz * n + ix + 1];
     if (fx + fz <= 1) return ha + (hd - ha) * fx + (hb - ha) * fz;
     return hc + (hb - hc) * (1 - fx) + (hd - hc) * (1 - fz);
+  }
+
+  /** Ground colour (linear) at the nearest terrain vertex. */
+  colorAt(x: number, z: number, out: THREE.Color): THREE.Color {
+    const n = SEG + 1;
+    const ix = Math.round(clamp((x + HALF) / STEP, 0, SEG));
+    const iz = Math.round(clamp((z + HALF) / STEP, 0, SEG));
+    const c = this.mesh.geometry.attributes.color as THREE.BufferAttribute;
+    const i = iz * n + ix;
+    return out.setRGB(c.getX(i), c.getY(i), c.getZ(i));
   }
 
   /** 0 = flat, 1 = vertical. */
@@ -186,7 +197,7 @@ export class Terrain {
       this.lastSand = Math.max(this.lastSand, shore * 0.7);
     }
     // Slope blending: rock only on steep faces and on the high crest of the range.
-    const rockMix = Math.max(smoothstep(0.3, 0.52, slope), north * smoothstep(30, 40, h) * 0.7);
+    const rockMix = smoothstep(0.42, 0.6, slope);
     if (rockMix > 0 && h > 0.3) {
       out.lerp(v > 0.5 ? c.rock : c.dark, rockMix);
       this.lastRock = rockMix;

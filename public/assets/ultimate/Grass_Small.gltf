@@ -15,20 +15,13 @@
 	"nodes":[
 		{
 			"mesh":0,
-			"name":"Bush_Small",
-			"rotation":[
-				0.040793586522340775,
-				-0.5334215760231018,
-				0.8006436824798584,
-				0.26975399255752563
-			]
+			"name":"Grass_Small"
 		}
 	],
 	"materials":[
 		{
-			"alphaMode":"BLEND",
 			"doubleSided":true,
-			"name":"Bush_Leaves",
+			"name":"Grass",
 			"pbrMetallicRoughness":{
 				"baseColorTexture":{
 					"index":0
@@ -40,7 +33,7 @@
 	],
 	"meshes":[
 		{
-			"name":"Plane.026",
+			"name":"Plane.001",
 			"primitives":[
 				{
 					"attributes":{
@@ -63,69 +56,69 @@
 	"images":[
 		{
 			"mimeType":"image/png",
-			"name":"Bush_Leaves",
-			"uri":"Bush_Leaves.png"
+			"name":"Grass",
+			"uri":"Grass.png"
 		}
 	],
 	"accessors":[
 		{
 			"bufferView":0,
 			"componentType":5126,
-			"count":380,
+			"count":80,
 			"max":[
-				0.9521744251251221,
-				0.6065765619277954,
-				0.4635052978992462
+				0.21996039152145386,
+				0.3886142075061798,
+				0.12141148746013641
 			],
 			"min":[
-				-0.842343807220459,
-				-0.6496739983558655,
-				-0.6315136551856995
+				-0.25008365511894226,
+				-0.005486309062689543,
+				-0.15612493455410004
 			],
 			"type":"VEC3"
 		},
 		{
 			"bufferView":1,
 			"componentType":5126,
-			"count":380,
+			"count":80,
 			"type":"VEC3"
 		},
 		{
 			"bufferView":2,
 			"componentType":5126,
-			"count":380,
+			"count":80,
 			"type":"VEC2"
 		},
 		{
 			"bufferView":3,
 			"componentType":5123,
-			"count":570,
+			"count":174,
 			"type":"SCALAR"
 		}
 	],
 	"bufferViews":[
 		{
 			"buffer":0,
-			"byteLength":4560,
+			"byteLength":960,
 			"byteOffset":0,
 			"target":34962
 		},
 		{
 			"buffer":0,
-			"byteLength":4560,
-			"byteOffset":4560,
+			"byteLength":960,
+			"byteOffset":960,
 			"target":34962
 		},
 		{
 			"buffer":0,
-			"byteLength":3040,
-			"byteOffset":9120,
+			"byteLength":640,
+			"byteOffset":1920,
 			"target":34962
 		},
 		{
 			"buffer":0,
-			"byteLength":1140,
-			"byteOffset":12160,
+			"byteLength":348,
+			"byteOffset":2560,
 			"target":34963
 		}
 	],
@@ -137,8 +130,8 @@
 	],
 	"buffers":[
 		{
-			"byteLength":13300,
-			"uri":"Bush_Small.bin"
+			"byteLength":2908,
+			"uri":"Grass_Small.bin"
 		}
 	]
 }

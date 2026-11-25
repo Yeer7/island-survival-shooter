@@ -131,7 +131,7 @@ export class Forest {
   private q = new THREE.Quaternion();
   private zero = new THREE.Matrix4().makeScale(0, 0, 0);
 
-  constructor(terrain: Terrain, colliders: ColliderGrid, exclusions: Exclusion[], private events: ForestEvents, lib: AssetLibrary, count = 350) {
+  constructor(private terrain: Terrain, colliders: ColliderGrid, exclusions: Exclusion[], private events: ForestEvents, lib: AssetLibrary, count = 350) {
     this.variants = TREE_ASSETS.map((n) => lib.parts(n, { by: 'height', value: TREE_HEIGHT }));
     for (const parts of this.variants) {
       for (const p of parts) {
@@ -179,6 +179,9 @@ export class Forest {
     stumpMesh.castShadow = true;
     stumpMesh.receiveShadow = true;
     stumpMesh.count = 0;
+    // Stumps appear one by one from zero-scale instances, so the computed bounds are
+    // useless: never cull them (they are one cheap draw).
+    stumpMesh.frustumCulled = false;
     this.stumps.meshes.push(stumpMesh);
     const tint = new THREE.Color();
     placed.forEach((p, i) => {
@@ -203,11 +206,19 @@ export class Forest {
   private writeStump(i: number): void {
     const t = this.trees[i];
     this.sets[t.variant].set(t.slot, this.zero);
-    this.dummy.position.set(t.x, t.y + 0.05, t.z);
+    // Sit the stump on the lowest ground under its rim (and a little into it) so it
+    // never hovers on a slope.
+    let low = this.terrain.height(t.x, t.z);
+    for (let k = 0; k < 8; k++) {
+      const a = (k / 8) * Math.PI * 2;
+      low = Math.min(low, this.terrain.height(t.x + Math.cos(a) * 0.5 * t.scale, t.z + Math.sin(a) * 0.5 * t.scale));
+    }
+    this.dummy.position.set(t.x, low - 0.12, t.z);
     this.dummy.rotation.set(0, t.rotY, 0);
     this.dummy.scale.set(t.scale, t.scale * (0.85 + (t.slot % 5) * 0.06), t.scale);
     this.dummy.updateMatrix();
     this.stumps.set(i, this.dummy.matrix);
+    for (const m of this.stumps.meshes) m.computeBoundingSphere();
   }
 
   private fallMesh(variant: number): THREE.Group {
@@ -359,35 +370,87 @@ export class Props {
       const parts = lib.parts(n, { by: 'footprint', value: 2 }).map((p) => ({ geometry: p.geometry, material: p.geometry.attributes.uv ? stone : stoneNoUv }));
       return new InstancedSet(parts, 120, true);
     });
-    let b = 0;
+    // Rock heights after normalisation, to bury each one by a fraction of its height.
+    const rockHeights = rockNames.map((n) => {
+      const parts = lib.parts(n, { by: 'footprint', value: 2 });
+      let top = 0;
+      for (const p of parts) {
+        p.geometry.computeBoundingBox();
+        top = Math.max(top, p.geometry.boundingBox!.max.y);
+      }
+      return top;
+    });
+    /** Lowest ground under a footprint of radius r (centre plus a ring of samples). */
+    const lowest = (x: number, z: number, r: number) => {
+      let low = terrain.height(x, z);
+      for (let k = 0; k < 8; k++) {
+        const a2 = (k / 8) * Math.PI * 2;
+        low = Math.min(low, terrain.height(x + Math.cos(a2) * r, z + Math.sin(a2) * r));
+      }
+      return low;
+    };
+    // Place a rock with its base sunk ~35% of its height below the lowest ground
+    // under its footprint, so no rock ever floats over a slope.
+    const placeRock = (set: number, x: number, z: number, s: number, sy: number, yaw: number) => {
+      const footR = s * 0.9;
+      const ground = lowest(x, z, footR);
+      const height = rockHeights[set] * s * sy;
+      d.position.set(x, ground - height * 0.35, z);
+      d.rotation.set((rand() - 0.5) * 0.12, yaw, (rand() - 0.5) * 0.12);
+      d.scale.set(s * (0.9 + rand() * 0.25), s * sy, s * (0.9 + rand() * 0.25));
+      d.updateMatrix();
+      color.setHSL(0.09, 0.03 + rand() * 0.05, 0.42 + rand() * 0.16).multiplyScalar(1.9);
+      rockSets[set].push(d.matrix, color);
+      const top = ground + height * 0.65;
+      if (s > 0.7) colliders.add({ x, z, r: s * 0.85, y0: ground - 1, y1: top, kind: 'rock', ref: 0 });
+    };
+
+    // Northern cliffs: rows of large cliff/boulder rocks along the highland spine.
     let tries = 0;
-    while (b < 190 && tries < 24000) {
+    let clusters = 0;
+    while (clusters < 16 && tries < 4000) {
+      tries++;
+      const cx = (rand() - 0.5) * 380;
+      const cz = -110 - rand() * 90;
+      const h = terrain.height(cx, cz);
+      if (h < 6 || excluded(cx, cz, 10) || terrain.coastDistance(cx, cz) < 18) continue;
+      const along = rand() * Math.PI;
+      const count = 3 + Math.floor(rand() * 4);
+      for (let k = 0; k < count; k++) {
+        const off = (k - count / 2) * (3.2 + rand() * 1.5);
+        const x = cx + Math.cos(along) * off + (rand() - 0.5) * 2;
+        const z = cz + Math.sin(along) * off + (rand() - 0.5) * 2;
+        if (nearTree(x, z, 2)) continue;
+        const s = 2.2 + rand() * 2.6;
+        placeRock(rand() < 0.6 ? 0 : 1, x, z, s, 0.9 + rand() * 0.6, along + (rand() - 0.5) * 0.8);
+      }
+      clusters++;
+    }
+
+    // Scattered boulders elsewhere, mostly smaller and rounder.
+    let b = 0;
+    tries = 0;
+    while (b < 150 && tries < 24000) {
       tries++;
       const x = (rand() - 0.5) * 540;
       const z = (rand() - 0.5) * 540;
       const h = terrain.height(x, z);
       if (h < 0.6 || excluded(x, z, 4)) continue;
       const north = smoothstep(30, 150, -z);
-      const steep = terrain.slope(x, z);
-      if (rand() > 0.1 + north * 0.75 + steep * 0.8) continue;
+      if (rand() > 0.12 + north * 0.6) continue;
       if (terrain.isInLake(x, z) || nearTree(x, z, 2.5)) continue;
-      const big = north > 0.5 && rand() < 0.7;
-      const s = big ? 1.5 + rand() * rand() * 4 : 0.5 + rand() * rand() * 2.2;
+      const big = north > 0.5 && rand() < 0.35;
+      const s = big ? 1.2 + rand() * rand() * 2.5 : 0.45 + rand() * rand() * 1.8;
       const set = big ? Math.floor(rand() * 3) : 3 + Math.floor(rand() * 3);
-      d.position.set(x, h - s * 0.12, z);
-      d.rotation.set((rand() - 0.5) * 0.25, rand() * Math.PI * 2, (rand() - 0.5) * 0.25);
-      d.scale.set(s * (0.9 + rand() * 0.3), s * (0.8 + rand() * 0.4), s * (0.9 + rand() * 0.3));
-      d.updateMatrix();
-      color.setHSL(0.09, 0.03 + rand() * 0.05, 0.42 + rand() * 0.16).multiplyScalar(1.9);
-      rockSets[set].push(d.matrix, color);
-      if (s > 0.8) colliders.add({ x, z, r: s * 0.85, y0: h - 1, y1: h + s * 1.2, kind: 'rock', ref: b });
+      placeRock(set, x, z, s, 0.8 + rand() * 0.4, rand() * Math.PI * 2);
       b++;
     }
     for (const s of rockSets) s.finish(this.group);
 
     // Bushes and ferns (CC0), swaying, no cast shadows to keep the shadow pass light.
     // Ultimate Stylized Nature bushes (three sizes) plus ferns under the trees.
-    const bushSets = (['bushSmall', 'bush', 'bushLarge'] as AssetName[]).map((n, k) => new InstancedSet(lib.parts(n, { by: 'height', value: [0.7, 1.1, 1.6][k] }), 90, false));
+    // Bush.gltf only, varied by scale and rotation.
+    const bushSets = [new InstancedSet(lib.parts('bush', { by: 'height', value: 1.1 }), 240, false)];
     const fernSet = new InstancedSet(lib.parts('fern', { by: 'height', value: 0.8 }), 260, false);
     for (const set of [...bushSets, fernSet]) for (const m of set.meshes) addWind(m.material as THREE.Material, 0.1, 0.06);
     const bushCount = () => bushSets.reduce((s2, b2) => s2 + b2.count, 0);
@@ -399,9 +462,9 @@ export class Props {
       if (terrain.surfaceAt(x, z) !== 'grass' || excluded(x, z)) continue;
       const h = terrain.height(x, z);
       const fern = nearTree(x, z, 5) ? rand() < 0.7 : rand() < 0.3;
-      const set = fern ? fernSet : bushSets[Math.floor(rand() * 3)];
-      if (set.count >= (fern ? 260 : 80)) continue;
-      const s = 0.7 + rand() * 0.7;
+      const set = fern ? fernSet : bushSets[0];
+      if (set.count >= (fern ? 260 : 240)) continue;
+      const s = fern ? 0.7 + rand() * 0.7 : 0.55 + rand() * 0.9;
       d.position.set(x, h - 0.05, z);
       d.rotation.set(0, rand() * 6, 0);
       d.scale.setScalar(s);
@@ -437,35 +500,7 @@ export class Props {
     }
     for (const p2 of palmSets) p2.finish(this.group);
 
-    // Grass tufts: one draw call, no shadows cast.
-    const grassGeo = this.buildGrassTuft();
-    const grassMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, side: THREE.DoubleSide });
-    addWind(grassMat, 0.05, 0.18);
-    const GRASS = 18000;
-    const grass = new THREE.InstancedMesh(grassGeo, grassMat, GRASS);
-    let ng = 0;
-    tries = 0;
-    while (ng < GRASS && tries < 120000) {
-      tries++;
-      const x = (rand() - 0.5) * 520;
-      const z = (rand() - 0.5) * 520;
-      const meadow = terrain.noise.noise(x * 0.02 - 13, z * 0.02 + 8) * 0.5 + 0.5;
-      if (rand() > meadow * 1.3) continue;
-      if (terrain.surfaceAt(x, z) !== 'grass') continue;
-      const h = terrain.height(x, z);
-      const s = 0.7 + rand() * 0.8;
-      d.position.set(x, h - 0.03, z);
-      d.rotation.set(0, rand() * 6, 0);
-      d.scale.set(s, s * (0.8 + rand() * 0.5), s);
-      d.updateMatrix();
-      grass.setMatrixAt(ng, d.matrix);
-      color.setHSL(0.24 + (rand() - 0.5) * 0.06, 0.45, 0.5);
-      grass.setColorAt(ng, color.multiplyScalar(1.9));
-      ng++;
-    }
-    grass.count = ng;
-    grass.receiveShadow = true;
-    this.group.add(grass);
+    // Grass is the dynamic low carpet in grass.ts (GrassField).
 
     // Small stones the player can pick up (CC0 pebble).
     this.pebbles = new InstancedSet(lib.parts('pebble', { by: 'footprint', value: 0.32 }).map((p) => ({ geometry: p.geometry, material: p.geometry.attributes.uv ? stone : stoneNoUv })), 70, true);
@@ -477,7 +512,7 @@ export class Props {
       const h = terrain.height(x, z);
       if (h < 0.5 || terrain.isInLake(x, z) || terrain.slope(x, z) > 0.3) continue;
       if (this.pebbles.count < 12 && Math.abs(h - LAKE_LEVEL) > 2.5 && z < 120) continue;
-      d.position.set(x, h - 0.01, z);
+      d.position.set(x, lowest(x, z, 0.15) - 0.04, z);
       d.rotation.set(0, rand() * 6, 0);
       d.scale.setScalar(0.9 + rand() * 0.4);
       d.updateMatrix();

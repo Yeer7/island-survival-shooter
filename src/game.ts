@@ -13,7 +13,7 @@ import { Hud } from './ui/hud';
 import { Bow, CombatWorld, MELEE, Melee, MeleeSpec } from './weapons/tools';
 import { ViewModel } from './weapons/viewmodel';
 import { Animal, Wildlife } from './world/animals';
-import { BaseSite, BuildKind, CABIN_COST, Cabin, Cost, LEVEL_UP, Placed, Recipe, buildModel, setGhost } from './world/base';
+import { BaseSite, BuildKind, CABIN_COST, CABIN_D, Cabin, Cost, LEVEL_UP, Placed, Recipe, buildModel, setGhost } from './world/base';
 import { ColliderGrid } from './world/colliders';
 import { CrashSite, Dock } from './world/landmarks';
 import { ITEM_LABEL, ItemType, Pickup, PickupManager } from './world/pickups';
@@ -124,6 +124,7 @@ export class Game implements CombatWorld {
   /** Fixed pool of real point lights: torch + two campfires (crash fire is separate). */
   private torchLight: THREE.PointLight;
   private campLights: THREE.PointLight[] = [];
+  private cabinLight: THREE.PointLight;
   private campAssign: (Placed | null)[] = [null, null];
   private time = 0;
   private playing = false;
@@ -256,6 +257,8 @@ export class Game implements CombatWorld {
 
     this.torchLight = new THREE.PointLight(0xffa860, 0, 20, 1.5);
     this.scene.add(this.torchLight);
+    this.cabinLight = new THREE.PointLight(0xffb468, 0, 13, 1.7);
+    this.scene.add(this.cabinLight);
     for (let i = 0; i < 2; i++) {
       const l = new THREE.PointLight(0xff8a3a, 0, 18, 1.6);
       this.campLights.push(l);
@@ -325,7 +328,7 @@ export class Game implements CombatWorld {
   private warmUp(): void {
     const warm = new THREE.Group();
     warm.add(this.forest.makeWarmupObject());
-    for (const k of ['campfire', 'logHolder', 'wall', 'gate'] as BuildKind[]) {
+    for (const k of ['campfire', 'logHolder', 'wall', 'gate', 'bed', 'cabin'] as BuildKind[]) {
       warm.add(buildModel(k));
       const g = buildModel(k);
       setGhost(g, true);
@@ -693,6 +696,7 @@ export class Game implements CombatWorld {
         if (this.inv.logs > 0 && pl.logs < 12) return { key: 'E', text: `Guardar toras (${pl.logs}/12)`, run: () => this.depositLogs(pl) };
         if (pl.logs > 0 && this.inv.logs < this.inv.maxLogs) return { key: 'E', text: `Pegar tora (${pl.logs}/12)`, run: () => this.takeLog(pl) };
       }
+      if (pl.kind === 'bed' && d < 2.1) return { key: 'E', text: 'Dormir e Salvar', run: () => this.startSleep() };
       if (pl.kind === 'gate' && d < 2.8) return { key: 'E', text: pl.open ? 'Fechar portão' : 'Abrir portão', run: () => this.base.toggleGate(pl) };
     }
     if (this.indoors) {
@@ -727,9 +731,24 @@ export class Game implements CombatWorld {
         run: () => this.repairBoat(),
       };
     }
-    const cab = this.base.cabinNear(p, 5.2);
+    const cab = this.base.cabinNear(p, 8);
     if (cab) {
-      if (cab.complete) return { key: 'E', text: 'Dormir até 07:00', run: () => this.startSleep() };
+      if (cab.complete) {
+        const dw = cab.doorWorld(this.v4);
+        if (Math.hypot(dw.x - p.x, dw.z - p.z) < 2.2) return { key: 'E', text: cab.doorOpen ? 'Fechar Porta' : 'Abrir Porta', run: () => this.toggleCabinDoor(cab) };
+        const hasBed = this.base.placed.some((pl) => pl.kind === 'bed' && cab.inside(pl.pos.x, pl.pos.z, 0));
+        if (!hasBed && cab.inside(p.x, p.z, 0)) {
+          return {
+            key: 'E',
+            text: 'Dormir',
+            run: () => {
+              this.sound.denied();
+              this.hud.toast('🛏️ Construa uma Cama pelo Livro [Tab] e coloque aqui dentro para dormir!');
+            },
+          };
+        }
+        return null;
+      }
       const d = cab.delivered;
       const text = `Entregar (Toras ${d.logs}/${CABIN_COST.logs} · Gravetos ${d.sticks}/${CABIN_COST.sticks} · Pedras ${d.rocks}/${CABIN_COST.rocks})`;
       return { key: 'E', text, run: () => this.deliverCabin(cab) };
@@ -752,11 +771,16 @@ export class Game implements CombatWorld {
     this.sound.build();
     this.player.addTrauma(0.08);
     if (cabin.complete) {
-      this.hud.message('CABANA PRONTA', 'Agora você pode dormir [E] para curar e pular a noite.', 5);
+      this.hud.message('CABANA PRONTA', 'Abra a porta com [E]. Construa uma Cama pelo Livro [Tab] para dormir e salvar.', 5.5);
       this.sound.levelUp();
     } else {
       this.hud.toast(`🛖 Cabana ${Math.round(cabin.progress * 100)}%`);
     }
+  }
+
+  private toggleCabinDoor(cab: Cabin): void {
+    cab.setDoor(!cab.doorOpen);
+    this.sound.door(cab.doorOpen);
   }
 
   private startSleep(): void {
@@ -770,10 +794,11 @@ export class Game implements CombatWorld {
     this.hud.setFade(Math.min(1, this.sleepT / 1.0) * (this.sleepT < 2.2 ? 1 : Math.max(0, 1 - (this.sleepT - 2.2) / 1.2)));
     if (this.sleepT >= 1.1 && this.sleepT - dt < 1.1) {
       this.sky.sleepUntil(7);
-      this.saveGame();
       this.vitals.health = this.vitals.maxHealth;
-      this.vitals.hunger = Math.max(10, this.vitals.hunger - 20);
-      this.hud.message(`DIA ${this.sky.day}`, 'Você dormiu e recuperou toda a vida.', 3.5);
+      // A night's rest takes the edge off real hunger (but is no meal).
+      if (this.vitals.hunger < 30) this.vitals.hunger = Math.min(100, this.vitals.hunger + 20);
+      this.saveGame();
+      this.hud.message(`DIA ${this.sky.day} · 07:00`, 'Você dormiu, recuperou toda a vida e o jogo foi salvo.', 3.5);
     }
     if (this.sleepT > 3.4) {
       this.sleepT = -1;
@@ -927,22 +952,28 @@ export class Game implements CombatWorld {
     if (!pl) return;
     const o = this.camera.position;
     const d = this.camera.getWorldDirection(this.v2);
+    // Ground under the aim: terrain, or the planks of a finished cabin.
+    const groundAt = (x: number, z: number) => {
+      const f = this.base.cabinFloorAt(x, z);
+      const g = this.terrain.height(x, z);
+      return f !== null ? Math.max(f, g) : g;
+    };
     let t = 9;
     for (let s = 0.5; s < 9; s += 0.25) {
-      if (o.y + d.y * s < this.terrain.height(o.x + d.x * s, o.z + d.z * s)) {
+      if (o.y + d.y * s < groundAt(o.x + d.x * s, o.z + d.z * s)) {
         t = s;
         break;
       }
     }
-    t = Math.max(2.2, t);
+    t = Math.max(pl.kind === 'bed' ? 1.6 : 2.2, t);
     pl.x = o.x + d.x * t;
     pl.z = o.z + d.z * t;
-    const valid = this.base.canPlace(pl.kind, pl.x, pl.z) && Math.hypot(pl.x - this.player.pos.x, pl.z - this.player.pos.z) > 1.4;
+    const valid = this.base.canPlace(pl.kind, pl.x, pl.z, pl.yaw) && Math.hypot(pl.x - this.player.pos.x, pl.z - this.player.pos.z) > (pl.kind === 'bed' ? 0.9 : 1.4);
     if (valid !== pl.valid) {
       pl.valid = valid;
       setGhost(pl.ghost, valid);
     }
-    pl.ghost.position.set(pl.x, this.terrain.height(pl.x, pl.z), pl.z);
+    pl.ghost.position.set(pl.x, pl.kind === 'bed' ? groundAt(pl.x, pl.z) : this.terrain.height(pl.x, pl.z), pl.z);
     pl.ghost.rotation.y = pl.yaw;
   }
 
@@ -951,7 +982,7 @@ export class Game implements CombatWorld {
     if (!pl) return;
     if (!pl.valid || !CraftMenu.affordable(pl.recipe.cost, this.resources())) {
       this.sound.denied();
-      this.hud.toast(pl.valid ? 'Materiais insuficientes' : 'Lugar inválido');
+      this.hud.toast(pl.valid ? 'Materiais insuficientes' : pl.kind === 'bed' ? 'Coloque a Cama dentro de uma Cabana pronta' : 'Lugar inválido');
       return;
     }
     this.pay(pl.recipe.cost);
@@ -965,7 +996,8 @@ export class Game implements CombatWorld {
       placed.smoke?.setViewportHeight(innerHeight * ratio);
     }
     this.sound.build();
-    this.debris.burst(this.v1.set(pl.x, this.terrain.height(pl.x, pl.z) + 0.2, pl.z), this.v3.set(0, 1, 0), 14, 0xc2a070, { speed: 2.5, size: 0.07, floor: this.terrain.height(pl.x, pl.z) });
+    const fy = this.base.cabinFloorAt(pl.x, pl.z) ?? this.terrain.height(pl.x, pl.z);
+    this.debris.burst(this.v1.set(pl.x, fy + 0.2, pl.z), this.v3.set(0, 1, 0), 14, 0xc2a070, { speed: 2.5, size: 0.07, floor: fy });
     this.hud.toast(`${pl.recipe.icon} ${pl.recipe.label} construído`);
     this.cancelPlacement();
   }
@@ -1420,6 +1452,23 @@ export class Game implements CombatWorld {
         l.intensity = 0;
       }
     }
+    // The lantern inside the nearest finished cabin: a soft warm light with a slow flicker.
+    let lamp: Cabin | null = null;
+    let ld = 60;
+    for (const c of this.base.cabins) {
+      const d = Math.hypot(c.pos.x - p.x, c.pos.z - p.z);
+      if (c.complete && d < ld) {
+        ld = d;
+        lamp = c;
+      }
+    }
+    if (lamp) {
+      lamp.lampWorld(this.cabinLight.position);
+      this.cabinLight.position.y -= 0.05;
+      this.cabinLight.intensity = 7 + Math.sin(t * 9.3) * 0.6 + Math.sin(t * 23.1) * 0.35;
+    } else {
+      this.cabinLight.intensity = 0;
+    }
   }
 
   private updateTargets(): void {
@@ -1525,7 +1574,10 @@ export class Game implements CombatWorld {
     this.vitals.hunger = Math.max(this.vitals.hunger, 50);
     if (this.indoors) this.setIndoors(false);
     const cabin = this.base.cabins.find((c) => c.complete);
-    if (cabin) this.player.teleport(cabin.pos.x + 5, cabin.pos.z + 2, 0);
+    if (cabin) {
+      const at = cabin.toWorld(0, -CABIN_D / 2 - 4.5, this.v4);
+      this.player.teleport(at.x, at.z, cabin.group.rotation.y + Math.PI);
+    }
     else this.player.teleport(this.crash.spawn.x, this.crash.spawn.z, this.crash.spawnYaw);
     this.player.wake = 0;
     this.fadeIn = 1;
@@ -1734,7 +1786,7 @@ export class Game implements CombatWorld {
   private updateZones(): void {
     this.zones.length = 0;
     for (const pl of this.base.placed) if (pl.kind === 'campfire') this.zones.push({ x: pl.pos.x, z: pl.pos.z, r: 16 });
-    for (const c of this.base.cabins) if (c.complete) this.zones.push({ x: c.pos.x, z: c.pos.z, r: 8 });
+    for (const c of this.base.cabins) if (c.complete) this.zones.push({ x: c.pos.x, z: c.pos.z, r: 10 });
   }
 
   private hitCannibal(i: number, dmg: number, p: THREE.Vector3, n: THREE.Vector3): void {

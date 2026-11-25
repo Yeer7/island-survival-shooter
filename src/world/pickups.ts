@@ -92,7 +92,8 @@ function itemMesh(type: ItemType): THREE.Object3D {
     case 'food': {
       const lib = library();
       if (lib?.has('can')) {
-        g.add(lib.instance('can', { by: 'height', value: 0.13 }));
+        // Red-label tin, big enough to read on dark crash-site soil.
+        g.add(lib.instance('can', { by: 'height', value: 0.32 }));
         break;
       }
       const can = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.12, 14), m(0xc0392b, 0.5, 0.2, 0x3a0d08));
@@ -120,6 +121,12 @@ function itemMesh(type: ItemType): THREE.Object3D {
       break;
     }
     case 'cloth': {
+      const lib = library();
+      if (lib?.has('bandages')) {
+        // Rolled linen strips (SurvivalPack Bandages), lying on their side.
+        g.add(lib.instance('bandages', { by: 'footprint', value: 0.35 }));
+        break;
+      }
       const a = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.05, 0.22), m(0x3b6ea5, 0.95, 0, 0x08131f));
       const b = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.04, 0.2), m(0xd8cfb8, 0.95, 0, 0x1a1810));
       b.position.y = 0.045;

@@ -437,6 +437,16 @@ export class SoundEngine {
     this.tone({ type: 'triangle', f0: 990, gain: 0.1, decay: 0.12, when: 0.07 });
   }
 
+  /** Cabin door: a wooden creak, then the knock of the door settling. */
+  door(open: boolean): void {
+    if (!this.ctx) return;
+    this.tone({ type: 'sawtooth', f0: open ? 150 : 220, f1: open ? 230 : 140, gain: 0.04, attack: 0.05, decay: 0.42 });
+    this.burst({ type: 'bandpass', freq: 850, q: 6, gain: 0.12, attack: 0.04, decay: 0.38 });
+    const knock = open ? 0.42 : 0.3;
+    this.tone({ f0: 120, f1: 70, gain: 0.35, decay: 0.12, when: knock });
+    this.burst({ type: 'lowpass', freq: 700, gain: 0.25, decay: 0.1, when: knock });
+  }
+
   denied(): void {
     if (!this.ctx) return;
     this.tone({ type: 'triangle', f0: 300, f1: 220, gain: 0.1, decay: 0.12 });

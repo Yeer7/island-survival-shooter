@@ -27,7 +27,7 @@ export const ASSET_FILES = {
   fern: 'assets/nature/fern.glb',
   firstAid: 'assets/survivalpack/FirstAidKit.fbx',
   bandages: 'assets/survivalpack/Bandages.fbx',
-  can: 'assets/survivalpack/Can_Closed.fbx',
+  can: 'assets/survivalpack/Can_Red.fbx',
   backpack: 'assets/survivalpack/Backpack.fbx',
   deer: 'assets/animals/deer.glb',
   enemyHuman: 'assets/enemies/tribal_human.glb',
@@ -51,6 +51,14 @@ export type AssetName = keyof typeof ASSET_FILES;
  *  materials are rebuilt from these resized copies (matched by material name). */
 const FBX_TEXTURES: Record<string, { leaves: string; bark: string }> = {
   palm: { leaves: 'assets/ultimate/PalmTree_Leaves.png', bark: 'assets/ultimate/PalmTree_Trunk.jpg' },
+};
+
+/** Flat-coloured SurvivalPack props regraded so they read on the ground (by material name). */
+const FBX_RECOLOR: Partial<Record<AssetName, Record<string, { color: number; metalness?: number; roughness?: number }>>> = {
+  // Food tin: red body, yellow label band, bright tin rims.
+  can: { Grey: { color: 0xc8362a, roughness: 0.55 }, Red: { color: 0xf2c230, roughness: 0.6 }, LightGrey: { color: 0xc9ccd0, metalness: 0.6, roughness: 0.35 } },
+  // Cloth: light linen rolls tied with a red band.
+  bandages: { White: { color: 0xf1ebdc, roughness: 0.95 }, Red: { color: 0xc0392b, roughness: 0.85 } },
 };
 
 export interface LoadedAsset {
@@ -131,6 +139,8 @@ export class AssetLibrary {
               if (!set) {
                 // Flat-coloured low-poly FBX (SurvivalPack): keep its colours, make it PBR.
                 const src = mat as THREE.MeshPhongMaterial;
+                const re = FBX_RECOLOR[name]?.[mat.name];
+                if (re) return new THREE.MeshStandardMaterial({ name: mat.name, color: re.color, roughness: re.roughness ?? 0.75, metalness: re.metalness ?? 0 });
                 return new THREE.MeshStandardMaterial({ name: mat.name, color: src.color ? src.color.clone() : new THREE.Color(0xcccccc), roughness: 0.75, metalness: 0 });
               }
               const isLeaf = /leaf|leaves/i.test(mat.name);

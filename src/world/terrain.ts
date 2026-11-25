@@ -79,15 +79,25 @@ export class Terrain {
     const inlandStart = lerp(0.9, 0.78, south);
     const inland = 1 - smoothstep(inlandStart - 0.3, inlandStart, t);
 
-    const hills = n.fbm(x * 0.0055 + 3, z * 0.0055 - 7, 4) * 0.5 + 0.5;
-    h += inland * (2.8 + hills * hills * 20) * (1 - 0.6 * south);
+    // Light domain warping bends hills and ridges so nothing lines up on the noise grid.
+    const wx = x + n.fbm(x * 0.0035 + 31, z * 0.0035 - 17, 3) * 38;
+    const wz = z + n.fbm(x * 0.0035 - 53, z * 0.0035 + 29, 3) * 38;
+    // Four-octave FBM through a smooth elevation curve: flat lowlands, rounded tops.
+    const hills01 = clamp(n.fbm(wx * 0.0052 + 3, wz * 0.0052 - 7, 4) * 0.58 + 0.5, 0, 1);
+    const hillH = hills01 * hills01 * (3 - 2 * hills01);
+    h += inland * (2.4 + hillH * 16) * (1 - 0.6 * south);
 
-    // Rocky northern highland that falls steeply to the sea.
-    const ridged = 1 - Math.abs(n.noise(x * 0.011 + 40, z * 0.011 + 13));
-    const northInland = 1 - smoothstep(0.83, 0.98, t);
-    h += north * northInland * (10 + ridged * ridged * 26 + hills * 10);
+    // Northern range: a broad warped massif from soft-ridged FBM (smooth |r|, no creases),
+    // banded along an east-west spine so it reads as one serra rather than scattered peaks.
+    const r = n.fbm(wx * 0.0085 + 40, wz * 0.0085 + 13, 4);
+    const softRidge = clamp(1 - Math.sqrt(r * r + 0.02), 0, 1);
+    const ridge = softRidge * softRidge * (3 - 2 * softRidge);
+    const spine = -150 + n.noise(x * 0.006 + 7, 3.3) * 28;
+    const band = Math.exp(-(((z - spine) / 75) ** 2));
+    const northInland = 1 - smoothstep(0.76, 0.97, t);
+    h += north * northInland * (5 + band * (11 + ridge * 21) + hillH * 6);
 
-    h += (n.noise(x * 0.045, z * 0.045) * 0.35 + n.noise(x * 0.12, z * 0.12) * 0.12) * land;
+    h += n.noise(x * 0.03, z * 0.03) * 0.25 * land;
 
     // Fresh-water lake basin.
     const lx = x - LAKE_CENTER.x;
@@ -175,7 +185,8 @@ export class Terrain {
       out.lerp(c.mud, shore * 0.85);
       this.lastSand = Math.max(this.lastSand, shore * 0.7);
     }
-    const rockMix = Math.max(smoothstep(0.22, 0.4, slope), north * smoothstep(20, 30, h) * 0.85);
+    // Slope blending: rock only on steep faces and on the high crest of the range.
+    const rockMix = Math.max(smoothstep(0.3, 0.52, slope), north * smoothstep(30, 40, h) * 0.7);
     if (rockMix > 0 && h > 0.3) {
       out.lerp(v > 0.5 ? c.rock : c.dark, rockMix);
       this.lastRock = rockMix;

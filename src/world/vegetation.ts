@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { AssetLibrary, AssetName, InstancePart } from '../assets/assets';
 import { mulberry32, smoothstep } from '../core/math';
 import { ColliderGrid, Circle } from './colliders';
 import { LAKE_CENTER, LAKE_LEVEL, LAKE_RADIUS, Terrain } from './terrain';
@@ -14,7 +15,12 @@ export interface Exclusion {
 /** Shared wind clock for every swaying material. */
 export const windUniform = { value: 0 };
 
-function addWind(mat: THREE.Material, start: number, amount: number): void {
+const winded = new WeakSet<THREE.Material>();
+
+/** Sways vertices above `start` metres (in the model's own space). */
+export function addWind(mat: THREE.Material, start: number, amount: number): void {
+  if (winded.has(mat)) return;
+  winded.add(mat);
   mat.onBeforeCompile = (shader) => {
     shader.uniforms.uWindTime = windUniform;
     shader.vertexShader = shader.vertexShader
@@ -32,60 +38,54 @@ function addWind(mat: THREE.Material, start: number, amount: number): void {
         transformed.z += cos(uWindTime * 0.83 + swayPh) * swayK * 0.7;`,
       );
   };
+  mat.customProgramCacheKey = () => `wind-${start}-${amount}`;
 }
 
-function paint(geo: THREE.BufferGeometry, bottom: THREE.Color, top: THREE.Color, y0: number, y1: number, jitter = 0): void {
-  const pos = geo.attributes.position;
-  const colors = new Float32Array(pos.count * 3);
-  const c = new THREE.Color();
-  for (let i = 0; i < pos.count; i++) {
-    const t = smoothstep(y0, y1, pos.getY(i));
-    c.copy(bottom).lerp(top, t);
-    if (jitter) c.multiplyScalar(1 - jitter / 2 + Math.random() * jitter);
-    colors[i * 3] = c.r;
-    colors[i * 3 + 1] = c.g;
-    colors[i * 3 + 2] = c.b;
+/** One instanced draw per material part of a model, sharing one set of matrices. */
+class InstancedSet {
+  readonly meshes: THREE.InstancedMesh[];
+  count = 0;
+
+  constructor(parts: InstancePart[], capacity: number, castShadow: boolean) {
+    this.meshes = parts.map((p) => {
+      const m = new THREE.InstancedMesh(p.geometry, p.material, Math.max(1, capacity));
+      m.castShadow = castShadow;
+      m.receiveShadow = true;
+      m.count = 0;
+      return m;
+    });
   }
-  geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-}
 
-function buildTrunkGeometry(): THREE.BufferGeometry {
-  const g = new THREE.CylinderGeometry(0.2, 0.34, 3.8, 7, 2);
-  g.translate(0, 1.9, 0);
-  paint(g, new THREE.Color(0x4f3622), new THREE.Color(0x7a5636), 0, 3.8, 0.15);
-  return g;
-}
-
-function buildFoliageGeometry(): THREE.BufferGeometry {
-  const layers = [
-    { r: 2.7, h: 3.4, y: 3.9 },
-    { r: 2.25, h: 3.0, y: 5.5 },
-    { r: 1.75, h: 2.6, y: 6.9 },
-    { r: 1.1, h: 2.2, y: 8.2 },
-  ];
-  const parts: THREE.BufferGeometry[] = [];
-  const rand = mulberry32(7);
-  layers.forEach((l, i) => {
-    const g = new THREE.ConeGeometry(l.r, l.h, 8, 1);
-    const pos = g.attributes.position;
-    for (let v = 0; v < pos.count; v++) {
-      if (pos.getY(v) < 0) {
-        pos.setX(v, pos.getX(v) * (0.9 + rand() * 0.25));
-        pos.setZ(v, pos.getZ(v) * (0.9 + rand() * 0.25));
-        pos.setY(v, pos.getY(v) + (rand() - 0.5) * 0.35);
-      }
+  push(matrix: THREE.Matrix4, color?: THREE.Color): number {
+    const i = this.count++;
+    for (const m of this.meshes) {
+      m.setMatrixAt(i, matrix);
+      if (color) m.setColorAt(i, color);
     }
-    g.rotateY(i * 0.4);
-    g.translate(0, l.y, 0);
-    const dark = new THREE.Color(0x1f4a2a).multiplyScalar(0.9 + i * 0.05);
-    const light = new THREE.Color(0x4f8a3e).multiplyScalar(0.95 + i * 0.06);
-    paint(g, dark, light, l.y - l.h / 2, l.y + l.h / 2, 0.1);
-    parts.push(g);
-  });
-  const merged = mergeGeometries(parts)!;
-  merged.computeVertexNormals();
-  return merged;
+    return i;
+  }
+
+  set(i: number, matrix: THREE.Matrix4): void {
+    for (const m of this.meshes) {
+      m.setMatrixAt(i, matrix);
+      m.instanceMatrix.needsUpdate = true;
+    }
+  }
+
+  finish(group: THREE.Group): void {
+    for (const m of this.meshes) {
+      m.count = this.count;
+      m.instanceMatrix.needsUpdate = true;
+      if (m.instanceColor) m.instanceColor.needsUpdate = true;
+      m.computeBoundingSphere();
+      group.add(m);
+    }
+  }
 }
+
+const TREE_ASSETS: AssetName[] = ['pineA', 'pineB', 'pineC'];
+/** Normalised tree height in metres before the per-tree scale. */
+const TREE_HEIGHT = 9.5;
 
 export interface Tree {
   x: number;
@@ -97,6 +97,8 @@ export interface Tree {
   maxHp: number;
   state: 'alive' | 'falling' | 'stump';
   collider: Circle;
+  variant: number;
+  slot: number;
 }
 
 interface FallingTree {
@@ -117,27 +119,26 @@ export interface ForestEvents {
   onSettled(tree: Tree, dir: THREE.Vector3): void;
 }
 
-/** ~350 instanced pines that can be chopped, fall over and leave stumps. */
+/** ~350 instanced CC0 pines (three variants) that can be chopped, fall and leave stumps. */
 export class Forest {
   readonly trees: Tree[] = [];
-  readonly trunks: THREE.InstancedMesh;
-  readonly foliage: THREE.InstancedMesh;
   readonly group = new THREE.Group();
-  private trunkGeo: THREE.BufferGeometry;
-  private foliageGeo: THREE.BufferGeometry;
-  private trunkMat: THREE.MeshStandardMaterial;
-  private foliageMat: THREE.MeshStandardMaterial;
+  private variants: InstancePart[][];
+  private sets: InstancedSet[];
+  private stumps: InstancedSet;
   private falling: FallingTree[] = [];
   private dummy = new THREE.Object3D();
   private q = new THREE.Quaternion();
+  private zero = new THREE.Matrix4().makeScale(0, 0, 0);
 
-  constructor(terrain: Terrain, colliders: ColliderGrid, exclusions: Exclusion[], private events: ForestEvents, count = 350) {
-    this.trunkGeo = buildTrunkGeometry();
-    this.foliageGeo = buildFoliageGeometry();
-    const tex = detailTextures();
-    this.trunkMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, map: tex.bark, bumpMap: tex.barkBump, bumpScale: 3, color: new THREE.Color(1.35, 1.35, 1.35) });
-    this.foliageMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, flatShading: true, map: tex.foliage, color: new THREE.Color(1.4, 1.4, 1.4) });
-    addWind(this.foliageMat, 3.0, 0.014);
+  constructor(terrain: Terrain, colliders: ColliderGrid, exclusions: Exclusion[], private events: ForestEvents, lib: AssetLibrary, count = 350) {
+    this.variants = TREE_ASSETS.map((n) => lib.parts(n, { by: 'height', value: TREE_HEIGHT }));
+    for (const parts of this.variants) {
+      for (const p of parts) {
+        const sm = p.material as THREE.MeshStandardMaterial;
+        if (sm.alphaTest > 0) addWind(sm, 3.0, 0.012);
+      }
+    }
 
     const rand = mulberry32(4242);
     const placed: { x: number; z: number }[] = [];
@@ -149,7 +150,7 @@ export class Forest {
       const z = (rand() - 0.5) * 520;
       const h = terrain.height(x, z);
       const beachTop = 2.3 + smoothstep(40, 190, z) * 0.8;
-      if (h < beachTop + 1.0 || h > 40) continue;
+      if (h < beachTop + 1.0 || h > 34) continue;
       if (terrain.slope(x, z) > 0.27) continue;
       if (Math.hypot(x - LAKE_CENTER.x, z - LAKE_CENTER.z) < LAKE_RADIUS * 1.2) continue;
       if (exclusions.some((e) => Math.hypot(x - e.x, z - e.z) < e.r)) continue;
@@ -163,64 +164,55 @@ export class Forest {
           break;
         }
       }
-      if (!ok) continue;
-      placed.push({ x, z });
+      if (ok) placed.push({ x, z });
     }
 
-    this.trunks = new THREE.InstancedMesh(this.trunkGeo, this.trunkMat, placed.length);
-    this.foliage = new THREE.InstancedMesh(this.foliageGeo, this.foliageMat, placed.length);
+    this.sets = this.variants.map((parts) => new InstancedSet(parts, placed.length, true));
+    this.stumps = new InstancedSet(lib.parts('stump', { by: 'footprint', value: 1 }), placed.length, true);
     const tint = new THREE.Color();
     placed.forEach((p, i) => {
-      const scale = 0.75 + rand() * 0.6;
-      const y = terrain.height(p.x, p.z) - 0.15;
-      const collider = colliders.add({ x: p.x, z: p.z, r: 0.42 * scale, y0: y, y1: y + 9 * scale, kind: 'tree', ref: i });
-      const tree: Tree = { x: p.x, y, z: p.z, scale, rotY: rand() * Math.PI * 2, hp: 100, maxHp: 100, state: 'alive', collider };
+      const scale = 0.8 + rand() * 0.5;
+      const variant = Math.floor(rand() * this.variants.length);
+      const y = terrain.height(p.x, p.z) - 0.1;
+      const collider = colliders.add({ x: p.x, z: p.z, r: 0.42 * scale, y0: y, y1: y + TREE_HEIGHT * scale, kind: 'tree', ref: i });
+      const tree: Tree = { x: p.x, y, z: p.z, scale, rotY: rand() * Math.PI * 2, hp: 100, maxHp: 100, state: 'alive', collider, variant, slot: 0 };
+      this.dummy.position.set(p.x, y, p.z);
+      this.dummy.rotation.set(0, tree.rotY, 0);
+      this.dummy.scale.setScalar(scale);
+      this.dummy.updateMatrix();
+      tint.setHSL(0.25 + (rand() - 0.5) * 0.05, 0.2 + rand() * 0.2, 0.5 + rand() * 0.12).multiplyScalar(1.9);
+      tree.slot = this.sets[variant].push(this.dummy.matrix, tint);
+      this.stumps.push(this.zero);
       this.trees.push(tree);
-      this.writeAlive(i);
-      tint.setHSL(0.27 + (rand() - 0.5) * 0.06, 0.3 + rand() * 0.25, 0.42 + rand() * 0.16);
-      this.foliage.setColorAt(i, tint.multiplyScalar(2.1));
-      this.trunks.setColorAt(i, tint.setRGB(1, 1, 1).multiplyScalar(0.85 + rand() * 0.3));
     });
-    for (const m of [this.trunks, this.foliage]) {
-      m.castShadow = true;
-      m.receiveShadow = true;
-      m.instanceMatrix.needsUpdate = true;
-      if (m.instanceColor) m.instanceColor.needsUpdate = true;
-      m.computeBoundingSphere();
-      this.group.add(m);
-    }
-  }
-
-  private writeAlive(i: number): void {
-    const t = this.trees[i];
-    const d = this.dummy;
-    d.position.set(t.x, t.y, t.z);
-    d.rotation.set(0, t.rotY, 0);
-    d.scale.setScalar(t.scale);
-    d.updateMatrix();
-    this.trunks.setMatrixAt(i, d.matrix);
-    this.foliage.setMatrixAt(i, d.matrix);
+    for (const s of this.sets) s.finish(this.group);
+    this.stumps.finish(this.group);
   }
 
   private writeStump(i: number): void {
     const t = this.trees[i];
-    const d = this.dummy;
-    d.position.set(t.x, t.y, t.z);
-    d.rotation.set(0, t.rotY, 0);
-    d.scale.set(t.scale, 0.16, t.scale);
-    d.updateMatrix();
-    this.trunks.setMatrixAt(i, d.matrix);
-    d.scale.setScalar(0);
-    d.updateMatrix();
-    this.foliage.setMatrixAt(i, d.matrix);
-    this.trunks.instanceMatrix.needsUpdate = true;
-    this.foliage.instanceMatrix.needsUpdate = true;
+    this.sets[t.variant].set(t.slot, this.zero);
+    this.dummy.position.set(t.x, t.y + 0.05, t.z);
+    this.dummy.rotation.set(0, t.rotY, 0);
+    this.dummy.scale.set(t.scale * 0.95, t.scale * 0.8, t.scale * 0.95);
+    this.dummy.updateMatrix();
+    this.stumps.set(i, this.dummy.matrix);
+  }
+
+  private fallMesh(variant: number): THREE.Group {
+    const g = new THREE.Group();
+    for (const p of this.variants[variant]) {
+      const m = new THREE.Mesh(p.geometry, p.material);
+      m.castShadow = true;
+      g.add(m);
+    }
+    return g;
   }
 
   /** Builds a falling copy once so its shader variants compile at load, not mid-play. */
   makeWarmupObject(): THREE.Object3D {
     const g = new THREE.Group();
-    g.add(new THREE.Mesh(this.trunkGeo, this.trunkMat), new THREE.Mesh(this.foliageGeo, this.foliageMat));
+    for (let v = 0; v < this.variants.length; v++) g.add(this.fallMesh(v));
     return g;
   }
 
@@ -246,7 +238,7 @@ export class Forest {
       if (t < 0) t = c < 0 ? 0 : -1;
       if (t < 0 || t > best) continue;
       const y = o.y + d.y * t;
-      if (y < tr.y - 0.2 || y > tr.y + 9 * tr.scale) continue;
+      if (y < tr.y - 0.2 || y > tr.y + TREE_HEIGHT * tr.scale) continue;
       best = t;
       hit = i;
     }
@@ -272,14 +264,10 @@ export class Forest {
     const group = new THREE.Group();
     group.position.set(t.x, t.y + 0.55, t.z);
     const pivot = new THREE.Group();
-    const inner = new THREE.Group();
+    const inner = this.fallMesh(t.variant);
     inner.rotation.y = t.rotY;
     inner.scale.setScalar(t.scale);
     inner.position.y = -0.55;
-    const trunk = new THREE.Mesh(this.trunkGeo, this.trunkMat);
-    const fol = new THREE.Mesh(this.foliageGeo, this.foliageMat);
-    trunk.castShadow = fol.castShadow = true;
-    inner.add(trunk, fol);
     pivot.add(inner);
     group.add(pivot);
     this.group.add(group);
@@ -317,7 +305,6 @@ export class Forest {
           continue;
         }
       }
-      // Rotate about the axis perpendicular to the fall direction (right-hand rule tips +y toward dir).
       this.q.setFromAxisAngle(f.axis, f.angle);
       f.pivot.quaternion.copy(this.q);
     }
@@ -328,85 +315,89 @@ export class Forest {
     for (const t of this.trees) if (t.state === 'alive') n++;
     return n;
   }
-
 }
 
-/** Rocks, bushes, grass and small collectible stones: all instanced. */
+/** Rocks, bushes, ferns, grass and small collectible stones and sticks: all instanced. */
 export class Props {
   readonly group = new THREE.Group();
   readonly smallRocks: { x: number; y: number; z: number; active: boolean }[] = [];
   readonly smallSticks: { x: number; y: number; z: number; active: boolean }[] = [];
-  private smallRockMesh: THREE.InstancedMesh;
+  private pebbles: InstancedSet;
   private stickMesh: THREE.InstancedMesh;
   private dummy = new THREE.Object3D();
+  private zero = new THREE.Matrix4().makeScale(0, 0, 0);
 
-  constructor(terrain: Terrain, colliders: ColliderGrid, exclusions: Exclusion[], tree: Forest) {
+  constructor(terrain: Terrain, colliders: ColliderGrid, exclusions: Exclusion[], tree: Forest, lib: AssetLibrary) {
     const rand = mulberry32(99);
     const d = this.dummy;
     const color = new THREE.Color();
     const nearTree = (x: number, z: number, r: number) => tree.trees.some((t) => Math.hypot(t.x - x, t.z - z) < r);
     const excluded = (x: number, z: number, pad = 0) => exclusions.some((e) => Math.hypot(x - e.x, z - e.z) < e.r + pad);
 
-    // Boulders: mostly on the northern highland, a few on the beaches.
-    const boulderGeo = new THREE.DodecahedronGeometry(1, 0);
+    // Boulders: CC0 rocks normalised to a 2 m footprint (radius ~1), scaled per instance.
+    // Highland rocks are the big cliff/tall shapes; the lowlands get rounder stones.
+    const highland: AssetName[] = ['rockCliff', 'rockLarge', 'rockTall'];
+    const lowland: AssetName[] = ['rockMedium', 'rockRound', 'rockSmall'];
+    const rockNames = [...highland, ...lowland];
+    // The CC0 rock shapes keep their geometry but share one natural grey stone material
+    // (the detail rock texture with bump), so every rock reads as the same stone.
     const tex = detailTextures();
-    const boulderMat = new THREE.MeshStandardMaterial({ color: new THREE.Color(1.3, 1.3, 1.3), roughness: 0.92, flatShading: true, map: tex.rock, bumpMap: tex.rockBump, bumpScale: 4 });
-    const boulders = new THREE.InstancedMesh(boulderGeo, boulderMat, 170);
+    const stone = new THREE.MeshStandardMaterial({ color: new THREE.Color(0x9a978f).multiplyScalar(1.25), roughness: 0.93, map: tex.rock, bumpMap: tex.rockBump, bumpScale: 3, flatShading: true });
+    const stoneNoUv = new THREE.MeshStandardMaterial({ color: new THREE.Color(0x8e8b84).multiplyScalar(1.1), roughness: 0.93, flatShading: true });
+    const rockSets = rockNames.map((n) => {
+      const parts = lib.parts(n, { by: 'footprint', value: 2 }).map((p) => ({ geometry: p.geometry, material: p.geometry.attributes.uv ? stone : stoneNoUv }));
+      return new InstancedSet(parts, 120, true);
+    });
     let b = 0;
     let tries = 0;
-    while (b < 170 && tries < 20000) {
+    while (b < 190 && tries < 24000) {
       tries++;
       const x = (rand() - 0.5) * 540;
       const z = (rand() - 0.5) * 540;
       const h = terrain.height(x, z);
       if (h < 0.6 || excluded(x, z, 4)) continue;
       const north = smoothstep(30, 150, -z);
-      if (rand() > 0.12 + north * 0.8) continue;
+      const steep = terrain.slope(x, z);
+      if (rand() > 0.1 + north * 0.75 + steep * 0.8) continue;
       if (terrain.isInLake(x, z) || nearTree(x, z, 2.5)) continue;
-      const s = 0.6 + rand() * rand() * 3.2 * (0.6 + north);
-      d.position.set(x, h + s * 0.15, z);
-      d.rotation.set(rand() * 3, rand() * 3, rand() * 3);
-      d.scale.set(s * (0.9 + rand() * 0.5), s * (0.6 + rand() * 0.4), s * (0.9 + rand() * 0.5));
+      const big = north > 0.5 && rand() < 0.7;
+      const s = big ? 1.5 + rand() * rand() * 4 : 0.5 + rand() * rand() * 2.2;
+      const set = big ? Math.floor(rand() * 3) : 3 + Math.floor(rand() * 3);
+      d.position.set(x, h - s * 0.12, z);
+      d.rotation.set((rand() - 0.5) * 0.25, rand() * Math.PI * 2, (rand() - 0.5) * 0.25);
+      d.scale.set(s * (0.9 + rand() * 0.3), s * (0.8 + rand() * 0.4), s * (0.9 + rand() * 0.3));
       d.updateMatrix();
-      boulders.setMatrixAt(b, d.matrix);
-      color.setHSL(0.08, 0.05 + rand() * 0.06, 0.42 + rand() * 0.18);
-      boulders.setColorAt(b, color.multiplyScalar(1.25));
-      if (s > 0.9) colliders.add({ x, z, r: s * 0.95, y0: h - 1, y1: h + s * 0.8, kind: 'rock', ref: b });
+      color.setHSL(0.09, 0.03 + rand() * 0.05, 0.42 + rand() * 0.16).multiplyScalar(1.9);
+      rockSets[set].push(d.matrix, color);
+      if (s > 0.8) colliders.add({ x, z, r: s * 0.85, y0: h - 1, y1: h + s * 1.2, kind: 'rock', ref: b });
       b++;
     }
-    boulders.count = b;
-    boulders.castShadow = true;
-    boulders.receiveShadow = true;
-    this.group.add(boulders);
+    for (const s of rockSets) s.finish(this.group);
 
-    // Bushes.
-    const bushGeo = new THREE.IcosahedronGeometry(1, 0);
-    paint(bushGeo, new THREE.Color(0x2b5226), new THREE.Color(0x5d8f3c), -1, 1, 0.15);
-    const bushMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, flatShading: true });
-    addWind(bushMat, -0.2, 0.05);
-    const bushes = new THREE.InstancedMesh(bushGeo, bushMat, 300);
-    let nb = 0;
+    // Bushes and ferns (CC0), swaying, no cast shadows to keep the shadow pass light.
+    const bushSet = new InstancedSet(lib.parts('bush', { by: 'height', value: 1.2 }, 0), 220, false);
+    const fernSet = new InstancedSet(lib.parts('fern', { by: 'height', value: 0.8 }), 260, false);
+    for (const set of [bushSet, fernSet]) for (const m of set.meshes) addWind(m.material as THREE.Material, 0.1, 0.06);
     tries = 0;
-    while (nb < 300 && tries < 20000) {
+    while ((bushSet.count < 220 || fernSet.count < 260) && tries < 30000) {
       tries++;
       const x = (rand() - 0.5) * 500;
       const z = (rand() - 0.5) * 500;
       if (terrain.surfaceAt(x, z) !== 'grass' || excluded(x, z)) continue;
       const h = terrain.height(x, z);
-      const s = 0.5 + rand() * 0.8;
-      d.position.set(x, h + s * 0.25, z);
+      const fern = nearTree(x, z, 5) ? rand() < 0.7 : rand() < 0.3;
+      const set = fern ? fernSet : bushSet;
+      if (set.count >= (fern ? 260 : 220)) continue;
+      const s = 0.7 + rand() * 0.7;
+      d.position.set(x, h - 0.05, z);
       d.rotation.set(0, rand() * 6, 0);
-      d.scale.set(s * 1.3, s * 0.85, s * 1.2);
+      d.scale.setScalar(s);
       d.updateMatrix();
-      bushes.setMatrixAt(nb, d.matrix);
-      color.setHSL(0.26 + (rand() - 0.5) * 0.08, 0.5, 0.5);
-      bushes.setColorAt(nb, color.multiplyScalar(1.8));
-      nb++;
+      color.setHSL(0.25 + (rand() - 0.5) * 0.06, 0.25, 0.55 + rand() * 0.1).multiplyScalar(1.75);
+      set.push(d.matrix, color);
     }
-    bushes.count = nb;
-    bushes.castShadow = true;
-    bushes.receiveShadow = true;
-    this.group.add(bushes);
+    bushSet.finish(this.group);
+    fernSet.finish(this.group);
 
     // Grass tufts: one draw call, no shadows cast.
     const grassGeo = this.buildGrassTuft();
@@ -438,33 +429,24 @@ export class Props {
     grass.receiveShadow = true;
     this.group.add(grass);
 
-    // Small stones the player can pick up.
-    const smallGeo = new THREE.DodecahedronGeometry(0.16, 0);
-    const smallMat = new THREE.MeshStandardMaterial({ color: 0x9b978f, roughness: 0.85, flatShading: true });
-    this.smallRockMesh = new THREE.InstancedMesh(smallGeo, smallMat, 70);
-    let ns = 0;
+    // Small stones the player can pick up (CC0 pebble).
+    this.pebbles = new InstancedSet(lib.parts('pebble', { by: 'footprint', value: 0.32 }).map((p) => ({ geometry: p.geometry, material: p.geometry.attributes.uv ? stone : stoneNoUv })), 70, true);
     tries = 0;
-    while (ns < 70 && tries < 20000) {
+    while (this.pebbles.count < 70 && tries < 20000) {
       tries++;
       const x = (rand() - 0.5) * 480;
       const z = (rand() - 0.5) * 480;
       const h = terrain.height(x, z);
       if (h < 0.5 || terrain.isInLake(x, z) || terrain.slope(x, z) > 0.3) continue;
-      if (ns < 12) {
-        // A handful near the lake shore and the crash site so players find them early.
-        if (Math.abs(h - LAKE_LEVEL) > 2.5 && z < 120) continue;
-      }
-      d.position.set(x, h + 0.06, z);
-      d.rotation.set(rand() * 3, rand() * 3, rand() * 3);
-      d.scale.set(1 + rand() * 0.4, 0.7, 1 + rand() * 0.3);
+      if (this.pebbles.count < 12 && Math.abs(h - LAKE_LEVEL) > 2.5 && z < 120) continue;
+      d.position.set(x, h - 0.01, z);
+      d.rotation.set(0, rand() * 6, 0);
+      d.scale.setScalar(0.9 + rand() * 0.4);
       d.updateMatrix();
-      this.smallRockMesh.setMatrixAt(ns, d.matrix);
+      this.pebbles.push(d.matrix, color.setRGB(1, 1, 1));
       this.smallRocks.push({ x, y: h + 0.08, z, active: true });
-      ns++;
     }
-    this.smallRockMesh.count = ns;
-    this.smallRockMesh.castShadow = true;
-    this.group.add(this.smallRockMesh);
+    this.pebbles.finish(this.group);
 
     // Sticks (gravetos) under the trees.
     const stickGeo = new THREE.CylinderGeometry(0.022, 0.03, 0.75, 5);
@@ -501,23 +483,14 @@ export class Props {
   }
 
   hideSmallStick(i: number): void {
-    const r = this.smallSticks[i];
-    r.active = false;
-    this.dummy.position.set(r.x, -100, r.z);
-    this.dummy.scale.setScalar(0);
-    this.dummy.updateMatrix();
-    this.stickMesh.setMatrixAt(i, this.dummy.matrix);
+    this.smallSticks[i].active = false;
+    this.stickMesh.setMatrixAt(i, this.zero);
     this.stickMesh.instanceMatrix.needsUpdate = true;
   }
 
   hideSmallRock(i: number): void {
-    const r = this.smallRocks[i];
-    r.active = false;
-    this.dummy.position.set(r.x, -100, r.z);
-    this.dummy.scale.setScalar(0);
-    this.dummy.updateMatrix();
-    this.smallRockMesh.setMatrixAt(i, this.dummy.matrix);
-    this.smallRockMesh.instanceMatrix.needsUpdate = true;
+    this.smallRocks[i].active = false;
+    this.pebbles.set(i, this.zero);
   }
 
   private buildGrassTuft(): THREE.BufferGeometry {

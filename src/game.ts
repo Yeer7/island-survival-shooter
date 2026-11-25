@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { AssetLibrary } from './assets/assets';
 import { SoundEngine } from './audio/soundEngine';
 import { Input } from './core/input';
 import { clamp, smoothstep } from './core/math';
@@ -119,7 +120,7 @@ export class Game implements CombatWorld {
   private moonGlint = new THREE.Color(0x9fb8e8);
   frameMs = 0;
 
-  constructor(private canvas: HTMLCanvasElement) {
+  constructor(private canvas: HTMLCanvasElement, lib: AssetLibrary) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -157,13 +158,13 @@ export class Game implements CombatWorld {
       onFallStart: (t) => this.onTreeFallStart(t),
       onLanded: (t, d) => this.onTreeLanded(t, d),
       onSettled: (t, d) => this.onTreeSettled(t, d),
-    });
+    }, lib);
     this.scene.add(this.forest.group);
-    this.props = new Props(this.terrain, this.colliders, exclusions, this.forest);
+    this.props = new Props(this.terrain, this.colliders, exclusions, this.forest, lib);
     this.scene.add(this.props.group);
     this.props.smallRocks.forEach((r, i) => this.pickups.addInstanced('rock', i, r.x, r.y, r.z));
     this.props.smallSticks.forEach((r, i) => this.pickups.addInstanced('stick', i, r.x, r.y, r.z));
-    this.wildlife = new Wildlife(this.terrain, this.colliders, exclusions, (a) => this.onAnimalDeath(a));
+    this.wildlife = new Wildlife(this.terrain, this.colliders, exclusions, (a) => this.onAnimalDeath(a), lib);
     this.scene.add(this.wildlife.group);
     this.arrows = new Arrows(
       (o, d, max) => {
@@ -1097,7 +1098,7 @@ export class Game implements CombatWorld {
       const a = (k / s.contents.length) * Math.PI * 2 + Math.random();
       const x = s.pos.x + Math.cos(a) * 0.45;
       const z = s.pos.z + Math.sin(a) * 0.45;
-      this.pickups.add(type, this.v1.set(x, this.terrain.height(x, z), z), type === 'stick' ? 3 : 1);
+      this.pickups.add(type, this.v1.set(x, this.terrain.height(x, z), z), 1);
     });
     this.hud.toast('🧳 Mala aberta');
   }

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { library } from '../assets/assets';
 import { mulberry32 } from '../core/math';
 import { PuffEmitter } from '../fx/particles';
 import { buildLog, logMaterials, woodMaterial } from '../weapons/models';
@@ -74,6 +75,15 @@ export function buildModel(kind: BuildKind): THREE.Group {
   const r = mulberry32(kind.length * 7);
   switch (kind) {
     case 'campfire': {
+      const lib = library();
+      if (lib && lib.has('campfire')) {
+        const pit = lib.instance('campfire', { by: 'footprint', value: 1.4 });
+        pit.traverse((o) => {
+          if ((o as THREE.Mesh).isMesh) o.castShadow = o.receiveShadow = true;
+        });
+        g.add(pit);
+        break;
+      }
       const sm = stoneMat();
       for (let i = 0; i < 9; i++) {
         const a = (i / 9) * Math.PI * 2;
@@ -368,6 +378,14 @@ export class BaseSite {
   }
 
   private buildBench(): THREE.Group {
+    const lib = library();
+    if (lib && lib.has('workbench')) {
+      const wb = lib.instance('workbench', { by: 'footprint', value: 1.9 });
+      wb.traverse((o) => {
+        if ((o as THREE.Mesh).isMesh) o.castShadow = o.receiveShadow = true;
+      });
+      return wb;
+    }
     const g = new THREE.Group();
     const pm = plankMat();
     const top = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.1, 0.85), pm);

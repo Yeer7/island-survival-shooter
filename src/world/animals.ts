@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { AssetLibrary } from '../assets/assets';
 import { clamp, mulberry32, wrapAngle } from '../core/math';
 import { ColliderGrid } from './colliders';
 import { Exclusion } from './vegetation';
@@ -18,10 +19,15 @@ interface SpeciesCfg {
   turn: number;
 }
 
+// Wander and flee speeds are tuned against the player's 15 m/s sprint so game can be run down.
 const CFG: Record<Species, SpeciesCfg> = {
-  rabbit: { walk: 1.1, flee: 6.5, scare: 9, hp: 20, radius: 0.3, height: 0.35, stride: 0.45, turn: 2.6 },
-  deer: { walk: 1.4, flee: 8.5, scare: 17, hp: 60, radius: 0.75, height: 1.3, stride: 1.3, turn: 1.6 },
+  rabbit: { walk: 3.5, flee: 9.0, scare: 9, hp: 20, radius: 0.3, height: 0.35, stride: 0.7, turn: 3.0 },
+  deer: { walk: 4.0, flee: 10.5, scare: 17, hp: 60, radius: 0.75, height: 1.3, stride: 1.6, turn: 1.8 },
 };
+
+/** Clip names inside the CC0 deer/stag files. */
+const CLIP = { idle: 'Idle', graze: 'Eating', walk: 'Walk', run: 'Gallop', death: 'Death' } as const;
+type ClipKey = keyof typeof CLIP;
 
 export interface Animal {
   species: Species;
@@ -41,6 +47,11 @@ export interface Animal {
   deadT: number;
   dropped: boolean;
   respawnT: number;
+  /** Rabbits stop for a beat now and then while fleeing. */
+  pauseT: number;
+  mixer: THREE.AnimationMixer | null;
+  actions: Partial<Record<ClipKey, THREE.AnimationAction>>;
+  clip: ClipKey | null;
 }
 
 function colored(geo: THREE.BufferGeometry, hex: number): THREE.BufferGeometry {
@@ -147,7 +158,7 @@ export class Wildlife {
   readonly group = new THREE.Group();
   private rand = mulberry32(777);
 
-  constructor(private terrain: Terrain, private colliders: ColliderGrid, private exclusions: Exclusion[], private onDeath: (a: Animal) => void) {
+  constructor(private terrain: Terrain, private colliders: ColliderGrid, private exclusions: Exclusion[], private onDeath: (a: Animal) => void, private lib: AssetLibrary | null = null) {
     for (let i = 0; i < 14; i++) this.spawn('rabbit', null);
     for (let i = 0; i < 8; i++) this.spawn('deer', null);
   }
@@ -176,9 +187,15 @@ export class Wildlife {
       reuse.speed = 0;
       reuse.body.rotation.set(0, 0, 0);
       reuse.group.visible = true;
+      if (reuse.mixer) {
+        reuse.mixer.stopAllAction();
+        reuse.clip = null;
+        this.play(reuse, 'graze');
+      }
       return;
     }
-    const built = species === 'rabbit' ? buildRabbit() : buildDeer(this.rand);
+    const built: { group: THREE.Group; body: THREE.Group; head: THREE.Object3D | null; legs: THREE.Object3D[]; mixer?: THREE.AnimationMixer; actions?: Partial<Record<ClipKey, THREE.AnimationAction>> } =
+      species === 'rabbit' ? buildRabbit() : this.buildDeerAsset() ?? buildDeer(this.rand);
     const heading = this.rand() * Math.PI * 2;
     const a: Animal = {
       species,
@@ -198,9 +215,64 @@ export class Wildlife {
       deadT: 0,
       dropped: false,
       respawnT: 0,
+      pauseT: 0,
+      mixer: null,
+      actions: {},
+      clip: null,
     };
+    if (built.mixer && built.actions) {
+      a.mixer = built.mixer;
+      a.actions = built.actions;
+      a.mixer.setTime(this.rand() * 3);
+      this.play(a, 'graze');
+    }
     this.group.add(a.group);
     this.animals.push(a);
+  }
+
+  /** CC0 animated doe or stag (Quaternius), with its own mixer. */
+  private buildDeerAsset(): { group: THREE.Group; body: THREE.Group; head: null; legs: THREE.Object3D[]; mixer: THREE.AnimationMixer; actions: Partial<Record<ClipKey, THREE.AnimationAction>> } | null {
+    const lib = this.lib;
+    if (!lib) return null;
+    const stag = this.rand() < 0.4;
+    const name = stag ? 'stag' : 'deer';
+    if (!lib.has(name)) return null;
+    const model = lib.instance(name, { by: 'height', value: stag ? 1.95 : 1.45 });
+    model.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (m.isMesh) {
+        m.castShadow = true;
+        m.frustumCulled = false;
+      }
+    });
+    const body = new THREE.Group();
+    body.add(model);
+    const group = new THREE.Group();
+    group.add(body);
+    const mixer = new THREE.AnimationMixer(model);
+    const clips = lib.raw(name).animations;
+    const actions: Partial<Record<ClipKey, THREE.AnimationAction>> = {};
+    for (const key of Object.keys(CLIP) as ClipKey[]) {
+      const clip = clips.find((c) => c.name === CLIP[key]) ?? clips.find((c) => c.name.endsWith(`|${CLIP[key]}`));
+      if (!clip) continue;
+      const act = mixer.clipAction(clip);
+      if (key === 'death') {
+        act.setLoop(THREE.LoopOnce, 1);
+        act.clampWhenFinished = true;
+      }
+      actions[key] = act;
+    }
+    return { group, body, head: null, legs: [], mixer, actions };
+  }
+
+  private play(a: Animal, key: ClipKey): void {
+    if (!a.mixer || a.clip === key) return;
+    const next = a.actions[key];
+    if (!next) return;
+    const prev = a.clip ? a.actions[a.clip] : null;
+    next.reset().play();
+    if (prev) next.crossFadeFrom(prev, key === 'death' ? 0.15 : 0.35, false);
+    a.clip = key;
   }
 
   /** Ray vs body spheres. */
@@ -266,7 +338,10 @@ export class Wildlife {
 
       if (a.state === 'dead') {
         a.deadT += dt;
-        a.body.rotation.z = Math.min(Math.PI / 2, a.deadT * 5) * 0.95;
+        if (a.mixer) {
+          this.play(a, 'death');
+          a.mixer.update(dt);
+        } else a.body.rotation.z = Math.min(Math.PI / 2, a.deadT * 5) * 0.95;
         if (a.deadT > 1.0 && !a.dropped) {
           a.dropped = true;
           this.onDeath(a);
@@ -303,6 +378,11 @@ export class Wildlife {
           break;
         case 'flee':
           targetSpeed = c.flee;
+          if (a.species === 'rabbit') {
+            a.pauseT -= dt;
+            if (a.pauseT < -1.2 - this.rand() * 1.2) a.pauseT = 0.25 + this.rand() * 0.25;
+            if (a.pauseT > 0) targetSpeed = 0.4;
+          }
           if (dist < c.scare * 2) a.targetHeading = Math.atan2(dx, dz) + Math.sin(a.timer * 1.7) * 0.4;
           if (a.timer <= 0 && dist > c.scare * 2) {
             a.state = 'walk';
@@ -343,6 +423,17 @@ export class Wildlife {
       });
       a.pos.y = this.terrain.height(a.pos.x, a.pos.z);
 
+      if (a.mixer) {
+        // Clip by speed; playback rate follows ground speed so hooves do not slide.
+        const key: ClipKey = a.speed > c.walk * 1.25 ? 'run' : a.speed > 0.35 ? 'walk' : a.state === 'graze' ? 'graze' : 'idle';
+        this.play(a, key);
+        const act = a.actions[key];
+        if (act) act.timeScale = key === 'run' ? clamp(a.speed / (c.flee * 0.75), 0.6, 1.6) : key === 'walk' ? clamp(a.speed / (c.walk * 0.6), 0.5, 2) : 1;
+        if (dist < 90) a.mixer.update(dt);
+        a.group.position.copy(a.pos);
+        a.group.rotation.y = a.heading;
+        continue;
+      }
       // Legs swing with distance travelled.
       a.legPhase += (a.speed * dt) / c.stride * Math.PI;
       const amp = clamp(a.speed / c.walk, 0, 1.4) * (a.species === 'rabbit' ? 0.7 : 0.45);

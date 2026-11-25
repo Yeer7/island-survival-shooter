@@ -1,0 +1,13 @@
+# Binary assets must never be touched by line-ending conversion.
+*.glb -text
+*.gltf -text
+*.bin -text
+*.png -text
+*.jpg -text
+*.jpeg -text
+*.webp -text
+*.ktx2 -text
+*.wav -text
+*.ogg -text
+*.mp3 -text
+public/assets/** -text

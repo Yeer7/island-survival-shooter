@@ -17,15 +17,16 @@ export interface Suitcase {
   broken: boolean;
 }
 
+// Luggage holds only survival supplies; sticks come from the forest floor.
 const CONTENTS: ItemType[][] = [
   ['food', 'bandage'],
-  ['stick', 'cloth'],
-  ['food', 'stick'],
+  ['cloth', 'food'],
+  ['food', 'cloth'],
   ['cloth', 'cloth'],
-  ['bandage', 'stick'],
+  ['bandage', 'cloth'],
   ['food'],
   ['cloth', 'food'],
-  ['stick', 'bandage'],
+  ['bandage', 'food'],
 ];
 const CASE_COLORS = [0x2f4f7f, 0x7a2e2e, 0x2d2d2d, 0x6b5b3e, 0x3e6b4f, 0x8a6a2a, 0x5a3f6b, 0x404a52];
 

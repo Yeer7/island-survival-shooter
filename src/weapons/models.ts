@@ -1,5 +1,27 @@
 import * as THREE from 'three';
+import { AssetName, library } from '../assets/assets';
 import { detailTextures } from '../world/textures';
+
+/**
+ * A CC0 model from public/assets, normalised (base at the origin) and wrapped so
+ * callers keep the conventions below. Returns null before the library loads.
+ */
+function fromAsset(name: AssetName, fit: { by: 'height' | 'max' | 'footprint'; value: number }, setup: (inner: THREE.Group) => void): THREE.Group | null {
+  const lib = library();
+  if (!lib || !lib.has(name)) return null;
+  const inner = lib.instance(name, fit);
+  inner.traverse((o) => {
+    const m = o as THREE.Mesh;
+    if (m.isMesh) {
+      m.castShadow = true;
+      m.frustumCulled = false;
+    }
+  });
+  setup(inner);
+  const g = new THREE.Group();
+  g.add(inner);
+  return g;
+}
 
 const std = (color: number, roughness = 0.7, metalness = 0) => new THREE.MeshStandardMaterial({ color, roughness, metalness });
 
@@ -15,6 +37,14 @@ const MAT = {
 
 /** Emergency fire axe: red head, polished edge, black/orange grip. Origin = grip point. */
 export function buildAxe(): THREE.Group {
+  const a = fromAsset('axe', { by: 'height', value: 0.56 }, (i) => {
+    i.position.y = -0.12;
+    i.rotation.y = -1.1;
+  });
+  if (a) {
+    a.name = 'axe';
+    return a;
+  }
   const g = new THREE.Group();
   g.name = 'axe';
   const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.022, 0.62, 8), MAT.handle);
@@ -36,6 +66,27 @@ export function buildAxe(): THREE.Group {
 
 /** The axe with a glowing, burning head (bench level 3). */
 export function buildFlameAxe(): THREE.Group {
+  const a = fromAsset('axeUpgraded', { by: 'height', value: 0.58 }, (i) => {
+    i.position.y = -0.12;
+    i.rotation.y = -1.1;
+  });
+  if (a) {
+    a.name = 'flameAxe';
+    a.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (m.isMesh) {
+        const mat = (m.material as THREE.MeshStandardMaterial).clone();
+        mat.emissive = new THREE.Color(0xff5a10);
+        mat.emissiveIntensity = 0.35;
+        m.material = mat;
+      }
+    });
+    const flame = new THREE.Object3D();
+    flame.name = 'flame';
+    flame.position.set(0, 0.42, 0);
+    a.add(flame);
+    return a;
+  }
   const g = buildAxe();
   g.name = 'flameAxe';
   g.traverse((o) => {
@@ -97,8 +148,20 @@ export function woodMaterial(): THREE.MeshStandardMaterial {
   return _wood;
 }
 
+/** Set when the CC0 spear's point faces +Z so it is turned to point along -Z. */
+export let SPEAR_FLIP = true;
+export function setSpearFlip(v: boolean): void {
+  SPEAR_FLIP = v;
+}
+
 /** Sharpened wooden spear. Origin = grip, point along -Z. */
 export function buildSpear(): THREE.Group {
+  // The CC0 spear lies along Z; centre it on the grip a third of the way back.
+  const a = fromAsset('spear', { by: 'max', value: 1.8 }, (i) => {
+    i.rotation.y = SPEAR_FLIP ? Math.PI : 0;
+    i.position.set(0, -0.06, -0.4);
+  });
+  if (a) return a;
   const g = new THREE.Group();
   const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.017, 0.02, 1.7, 7), woodMaterial());
   shaft.rotation.x = Math.PI / 2;
@@ -116,6 +179,18 @@ export function buildSpear(): THREE.Group {
 /** Hunting bow: an arc along Y with a string; `string` holds the 3 string points. */
 export function buildBow(): { group: THREE.Group; string: THREE.Line; nock: THREE.Object3D } {
   const g = new THREE.Group();
+  const model = fromAsset('bow', { by: 'height', value: 1.1 }, (i) => {
+    i.position.y = -0.55;
+    i.rotation.y = Math.PI / 2;
+  });
+  const sg0 = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0.53, 0.02), new THREE.Vector3(0, 0, 0.02), new THREE.Vector3(0, -0.53, 0.02)]);
+  if (model) {
+    const string = new THREE.Line(sg0, new THREE.LineBasicMaterial({ color: 0xe8e2cf }));
+    const nock = new THREE.Object3D();
+    nock.position.set(0, 0, 0.02);
+    g.add(model, string, nock);
+    return { group: g, string, nock };
+  }
   const curve = new THREE.QuadraticBezierCurve3(new THREE.Vector3(0, 0.55, 0.06), new THREE.Vector3(0, 0, -0.16), new THREE.Vector3(0, -0.55, 0.06));
   const limb = new THREE.Mesh(new THREE.TubeGeometry(curve, 20, 0.014, 6, false), woodMaterial());
   const grip = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.12, 8), std(0x4a3524, 0.9));
@@ -130,6 +205,9 @@ export function buildBow(): { group: THREE.Group; string: THREE.Line; nock: THRE
 
 /** Arrow pointing along -Z, origin at the nock. */
 export function buildArrow(): THREE.Group {
+  // CC0 arrow stands along +Y with its head up; lay it along -Z with the nock at the origin.
+  const a = fromAsset('arrow', { by: 'max', value: 0.74 }, (i) => (i.rotation.x = -Math.PI / 2));
+  if (a) return a;
   const g = new THREE.Group();
   const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.006, 0.7, 5), std(0xb08a5a, 0.8));
   shaft.rotation.x = Math.PI / 2;
@@ -147,6 +225,14 @@ export function buildArrow(): THREE.Group {
 
 /** Torch: stick with a cloth-wrapped head. `flame` marks where fire sits. */
 export function buildTorch(): THREE.Group {
+  const a = fromAsset('torch', { by: 'height', value: 0.56 }, (i) => (i.position.y = -0.08));
+  if (a) {
+    const flame = new THREE.Object3D();
+    flame.name = 'flame';
+    flame.position.y = 0.5;
+    a.add(flame);
+    return a;
+  }
   const g = new THREE.Group();
   const stick = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.022, 0.5, 7), woodMaterial());
   stick.position.y = 0.12;
@@ -161,6 +247,14 @@ export function buildTorch(): THREE.Group {
 
 /** Fishing rod; `tip` marks the end of the line. */
 export function buildRod(): THREE.Group {
+  const a = fromAsset('rod', { by: 'height', value: 1.45 }, (i) => (i.position.y = -0.12));
+  if (a) {
+    const tip = new THREE.Object3D();
+    tip.name = 'tip';
+    tip.position.y = 1.32;
+    a.add(tip);
+    return a;
+  }
   const g = new THREE.Group();
   const rod = new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.016, 1.4, 6), woodMaterial());
   rod.position.y = 0.55;
@@ -186,6 +280,18 @@ export function buildMeat(cooked: boolean): THREE.Group {
 }
 
 export function buildFish(cooked: boolean): THREE.Group {
+  const a = fromAsset('fish', { by: 'max', value: 0.3 }, (i) => {
+    if (!cooked) return;
+    i.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (m.isMesh) {
+        const mat = (m.material as THREE.MeshStandardMaterial).clone();
+        mat.color.setRGB(0.55, 0.33, 0.16);
+        m.material = mat;
+      }
+    });
+  });
+  if (a) return a;
   const g = new THREE.Group();
   const body = new THREE.Mesh(new THREE.SphereGeometry(0.06, 10, 6), std(cooked ? 0x8a5a2a : 0x8aa0ad, 0.4, cooked ? 0 : 0.3));
   body.scale.set(2.2, 0.8, 0.5);

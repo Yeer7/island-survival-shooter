@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { Simplex2D } from '../core/noise';
+import { detailTextures } from './textures';
 import { clamp, lerp, mulberry32, smoothstep } from '../core/math';
 
 export const SEA_LEVEL = 0;
@@ -26,6 +27,8 @@ export class Terrain {
   readonly grid: Float32Array;
   readonly mesh: THREE.Mesh;
   readonly heightTexture: THREE.DataTexture;
+  private lastSand = 0;
+  private lastRock = 0;
   private colorCache: { sand: THREE.Color; wet: THREE.Color; grass: THREE.Color; forest: THREE.Color; rock: THREE.Color; dark: THREE.Color; mud: THREE.Color; seabed: THREE.Color };
 
   constructor(seed = 1337) {
@@ -154,6 +157,8 @@ export class Terrain {
     const beachTop = 2.3 + south * 0.8;
     const nearLake = Math.hypot(x - LAKE_CENTER.x, z - LAKE_CENTER.z) < LAKE_RADIUS * 1.6;
 
+    this.lastSand = 1;
+    this.lastRock = 0;
     if (h < -0.8) {
       out.copy(c.seabed).lerp(c.wet, smoothstep(-6, -0.8, h));
     } else if (h < 0.55) {
@@ -163,14 +168,17 @@ export class Terrain {
       out.copy(c.grass).lerp(c.forest, forest * 0.8 + v * 0.2);
       const sandMix = 1 - smoothstep(beachTop - 0.4, beachTop + 0.6, h);
       out.lerp(c.sand, sandMix);
+      this.lastSand = sandMix;
     }
     if (nearLake && h < LAKE_LEVEL + 0.8 && h > -0.5) {
       const shore = 1 - smoothstep(LAKE_LEVEL + 0.1, LAKE_LEVEL + 0.8, h);
       out.lerp(c.mud, shore * 0.85);
+      this.lastSand = Math.max(this.lastSand, shore * 0.7);
     }
     const rockMix = Math.max(smoothstep(0.22, 0.4, slope), north * smoothstep(20, 30, h) * 0.85);
     if (rockMix > 0 && h > 0.3) {
       out.lerp(v > 0.5 ? c.rock : c.dark, rockMix);
+      this.lastRock = rockMix;
     }
     const shade = 0.92 + v * 0.16;
     out.multiplyScalar(shade);
@@ -180,6 +188,7 @@ export class Terrain {
     const n = SEG + 1;
     const positions = new Float32Array(n * n * 3);
     const colors = new Float32Array(n * n * 3);
+    const surf = new Float32Array(n * n * 2);
     const col = new THREE.Color();
     for (let iz = 0; iz < n; iz++) {
       for (let ix = 0; ix < n; ix++) {
@@ -197,6 +206,8 @@ export class Terrain {
         colors[i * 3] = col.r;
         colors[i * 3 + 1] = col.g;
         colors[i * 3 + 2] = col.b;
+        surf[i * 2] = this.lastSand;
+        surf[i * 2 + 1] = this.lastRock;
       }
     }
     const indices = new Uint32Array(SEG * SEG * 6);
@@ -218,10 +229,51 @@ export class Terrain {
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    geo.setAttribute('aSurf', new THREE.BufferAttribute(surf, 2));
     geo.setIndex(new THREE.BufferAttribute(indices, 1));
     geo.computeVertexNormals();
     geo.computeBoundingSphere();
     const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.96, metalness: 0 });
+    const tex = detailTextures();
+    // Sand, grass and rock detail blended per vertex, sampled in world space at two
+    // scales so the tiling breaks up.
+    mat.onBeforeCompile = (shader) => {
+      shader.uniforms.tSand = { value: tex.sand };
+      shader.uniforms.tGrass = { value: tex.grass };
+      shader.uniforms.tRock = { value: tex.rock };
+      shader.vertexShader = shader.vertexShader
+        .replace('#include <common>', `#include <common>
+attribute vec2 aSurf;
+varying vec2 vSurf;
+varying vec2 vTPos;`)
+        .replace('#include <begin_vertex>', `#include <begin_vertex>
+vSurf = aSurf;
+vTPos = position.xz;`);
+      shader.fragmentShader = shader.fragmentShader
+        .replace('#include <common>', `#include <common>
+uniform sampler2D tSand;
+uniform sampler2D tGrass;
+uniform sampler2D tRock;
+varying vec2 vSurf;
+varying vec2 vTPos;`)
+        .replace(
+          '#include <map_fragment>',
+          `#include <map_fragment>
+          vec2 tuv = vTPos * 0.33;
+          float dSand = texture2D(tSand, tuv).r;
+          float dGrass = texture2D(tGrass, tuv * 0.8).r;
+          float dRock = texture2D(tRock, tuv * 0.3).r;
+          float macro = texture2D(tGrass, vTPos * 0.011 + 0.3).r;
+          float det = mix(dGrass, dSand, vSurf.x);
+          det = mix(det, dRock, vSurf.y);
+          diffuseColor.rgb *= det * 1.32 * (0.86 + 0.28 * macro);`,
+        )
+        .replace(
+          '#include <roughnessmap_fragment>',
+          `#include <roughnessmap_fragment>
+          roughnessFactor = clamp(roughnessFactor - (det - 0.7) * 0.25 - vSurf.y * 0.08, 0.6, 1.0);`,
+        );
+    };
     const mesh = new THREE.Mesh(geo, mat);
     mesh.receiveShadow = true;
     mesh.name = 'terrain';

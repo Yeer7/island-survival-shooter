@@ -1,16 +1,18 @@
 import * as THREE from 'three';
-import { buildLog, buildPistol } from '../weapons/models';
+import { buildArrow, buildHide, buildLog, buildMeat, buildSticks } from '../weapons/models';
 
-export type ItemType = 'food' | 'bandage' | 'ammo' | 'cloth' | 'log' | 'rock' | 'pistol';
+export type ItemType = 'food' | 'bandage' | 'cloth' | 'stick' | 'log' | 'rock' | 'meat' | 'hide' | 'arrow';
 
 export const ITEM_LABEL: Record<ItemType, string> = {
   food: 'Comida',
   bandage: 'Curativo',
-  ammo: 'Munição',
   cloth: 'Pano',
+  stick: 'Gravetos',
   log: 'Tora',
   rock: 'Pedra',
-  pistol: 'Pistola do Piloto',
+  meat: 'Carne Crua',
+  hide: 'Pele Animal',
+  arrow: 'Flecha',
 };
 
 export interface Pickup {
@@ -22,8 +24,8 @@ export interface Pickup {
   baseY: number;
   phase: number;
   spin: boolean;
-  /** Index in Props.smallRocks for instanced stones. */
-  rockIndex: number;
+  /** Index into Props.smallRocks / smallSticks for instanced ground items. */
+  instIndex: number;
 }
 
 const m = (color: number, rough = 0.6, metal = 0, emissive = 0x000000) =>
@@ -52,16 +54,6 @@ function itemMesh(type: ItemType): THREE.Object3D {
       g.add(box, c1, c2);
       break;
     }
-    case 'ammo': {
-      const box = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.08, 0.09), m(0x4f5a32, 0.8, 0, 0x101405));
-      g.add(box);
-      for (let i = 0; i < 3; i++) {
-        const b = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, 0.035, 6), m(0xd4a63a, 0.3, 0.9, 0x2a1d05));
-        b.position.set(-0.03 + i * 0.03, 0.055, 0);
-        g.add(b);
-      }
-      break;
-    }
     case 'cloth': {
       const a = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.05, 0.22), m(0x3b6ea5, 0.95, 0, 0x08131f));
       const b = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.04, 0.2), m(0xd8cfb8, 0.95, 0, 0x1a1810));
@@ -70,17 +62,21 @@ function itemMesh(type: ItemType): THREE.Object3D {
       g.add(a, b);
       break;
     }
-    case 'pistol': {
-      const p = buildPistol();
-      p.rotation.set(0, 0.6, Math.PI / 2);
-      p.scale.setScalar(1.4);
-      g.add(p);
+    case 'stick':
+      g.add(buildSticks());
       break;
-    }
+    case 'meat':
+      g.add(buildMeat(false));
+      break;
+    case 'hide':
+      g.add(buildHide());
+      break;
+    case 'arrow':
+      g.add(buildArrow());
+      break;
     case 'log': {
       const log = buildLog(1.6, 0.2);
       log.rotation.z = Math.PI / 2;
-      log.castShadow = true;
       g.add(log);
       break;
     }
@@ -102,18 +98,29 @@ export class PickupManager {
 
   add(type: ItemType, pos: THREE.Vector3, amount = 1, rotY = Math.random() * Math.PI * 2): Pickup {
     const mesh = itemMesh(type);
-    const spin = type !== 'log';
-    const baseY = pos.y + (type === 'log' ? 0.2 : 0.12);
+    const still = type === 'log' || type === 'hide' || type === 'stick';
+    const baseY = pos.y + (type === 'log' ? 0.2 : still ? 0.03 : 0.12);
     mesh.position.set(pos.x, baseY, pos.z);
     mesh.rotation.y = rotY;
     this.group.add(mesh);
-    const p: Pickup = { type, pos: new THREE.Vector3(pos.x, baseY, pos.z), mesh, active: true, amount, baseY, phase: Math.random() * 6, spin, rockIndex: -1 };
+    const p: Pickup = { type, pos: new THREE.Vector3(pos.x, baseY, pos.z), mesh, active: true, amount, baseY, phase: Math.random() * 6, spin: !still, instIndex: -1 };
     this.items.push(p);
     return p;
   }
 
-  addRock(index: number, x: number, y: number, z: number): void {
-    this.items.push({ type: 'rock', pos: new THREE.Vector3(x, y, z), mesh: null, active: true, amount: 1, baseY: y, phase: 0, spin: false, rockIndex: index });
+  /** An arrow stuck where it landed, keeping its flight orientation. */
+  addArrow(pos: THREE.Vector3, quat: THREE.Quaternion): Pickup {
+    const mesh = itemMesh('arrow');
+    mesh.position.copy(pos);
+    mesh.quaternion.copy(quat);
+    this.group.add(mesh);
+    const p: Pickup = { type: 'arrow', pos: pos.clone(), mesh, active: true, amount: 1, baseY: pos.y, phase: 0, spin: false, instIndex: -1 };
+    this.items.push(p);
+    return p;
+  }
+
+  addInstanced(type: 'rock' | 'stick', index: number, x: number, y: number, z: number): void {
+    this.items.push({ type, pos: new THREE.Vector3(x, y, z), mesh: null, active: true, amount: type === 'stick' ? 2 : 1, baseY: y, phase: 0, spin: false, instIndex: index });
   }
 
   remove(p: Pickup): void {

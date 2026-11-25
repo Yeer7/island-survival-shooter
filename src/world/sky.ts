@@ -61,7 +61,9 @@ export const DAY_SECONDS = 24 * 60;
 const C = (hex: number) => new THREE.Color(hex);
 const DAY_ZENITH = C(0x3d82c4);
 const DAY_HORIZON = C(0xb2d8ea);
-const DUSK_HORIZON = C(0xf0a46a);
+const DUSK_HORIZON = C(0xf0904e);
+const DAWN_HORIZON = C(0xf4c878);
+const DAWN_ZENITH = C(0x5a78b0);
 const DUSK_ZENITH = C(0x4a5d93);
 const NIGHT_ZENITH = C(0x050b1c);
 const NIGHT_HORIZON = C(0x1c2a46);
@@ -150,6 +152,13 @@ export class DayNight {
     return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
   }
 
+  /** Jump to an hour of the next morning (sleeping). */
+  sleepUntil(hour: number): void {
+    if (this.hours >= hour) this.day++;
+    this.hours = hour;
+    this.compute();
+  }
+
   advance(dt: number): void {
     this.hours += (dt / DAY_SECONDS) * 24;
     if (this.hours >= 24) {
@@ -169,8 +178,9 @@ export class DayNight {
     this.night = 1 - smoothstep(-0.2, 0.05, sunElev);
     const dusk = (1 - smoothstep(0.0, 0.35, Math.abs(sunElev + 0.02))) * (1 - this.night * 0.6);
 
-    this.zenith.copy(NIGHT_ZENITH).lerp(DAY_ZENITH, this.daylight).lerp(DUSK_ZENITH, dusk * 0.5);
-    this.horizon.copy(NIGHT_HORIZON).lerp(DAY_HORIZON, this.daylight).lerp(DUSK_HORIZON, dusk * 0.75);
+    const morning = this.hours < 12;
+    this.zenith.copy(NIGHT_ZENITH).lerp(DAY_ZENITH, this.daylight).lerp(morning ? DAWN_ZENITH : DUSK_ZENITH, dusk * 0.5);
+    this.horizon.copy(NIGHT_HORIZON).lerp(DAY_HORIZON, this.daylight).lerp(morning ? DAWN_HORIZON : DUSK_HORIZON, dusk * 0.8);
     this.sunColor.copy(SUN_LOW).lerp(SUN_HIGH, smoothstep(0.02, 0.4, sunElev));
 
     if (sunElev > -0.03) {
@@ -184,7 +194,7 @@ export class DayNight {
     }
     this.hemi.color.copy(HEMI_NIGHT_SKY).lerp(HEMI_DAY_SKY, this.daylight);
     this.hemi.groundColor.copy(HEMI_NIGHT_GROUND).lerp(HEMI_DAY_GROUND, this.daylight);
-    this.hemi.intensity = lerp(0.6, 0.95, this.daylight);
+    this.hemi.intensity = lerp(0.55, 0.85, this.daylight);
 
     this.fog.color.copy(this.horizon);
     this.fog.density = lerp(0.0034, 0.0022, this.daylight);

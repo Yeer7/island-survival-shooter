@@ -41,6 +41,8 @@ export class PlayerController {
   /** 0 → 1 during the wake-up sequence at the crash site. */
   wake = 1;
   carrySlow = 1;
+  /** Mouse sensitivity multiplier from the pause menu. */
+  sensitivity = 1;
   lookDX = 0;
   lookDY = 0;
   private stepAccum = 0;
@@ -95,8 +97,8 @@ export class PlayerController {
     this.lookDX = canLook ? input.mouseDX : 0;
     this.lookDY = canLook ? input.mouseDY : 0;
     if (canLook) {
-      this.yaw -= input.mouseDX * SENS;
-      this.pitch = clamp(this.pitch - input.mouseDY * SENS, -1.52, 1.52);
+      this.yaw -= input.mouseDX * SENS * this.sensitivity;
+      this.pitch = clamp(this.pitch - input.mouseDY * SENS * this.sensitivity, -1.52, 1.52);
     }
 
     const k = input.keys;

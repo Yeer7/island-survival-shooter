@@ -276,27 +276,86 @@ export class SoundEngine {
     for (let i = 0; i < 6; i++) this.burst({ type: 'highpass', freq: 2200 + Math.random() * 2000, gain: 0.12 * v, decay: 0.12, when: 0.04 + Math.random() * 0.5 });
   }
 
-  gunshot(): void {
+  bowDraw(): void {
     if (!this.ctx) return;
-    this.burst({ type: 'highpass', freq: 900, gain: 1.0, decay: 0.09, toEcho: 0.45 });
-    this.burst({ type: 'lowpass', freq: 2400, endFreq: 300, gain: 0.8, decay: 0.35, toEcho: 0.3 });
-    this.tone({ f0: 170, f1: 38, gain: 0.95, decay: 0.16 });
-    this.tone({ type: 'square', f0: 2400, f1: 1200, gain: 0.05, decay: 0.03 });
+    this.tone({ type: 'sawtooth', f0: 70, f1: 120, gain: 0.03, attack: 0.3, decay: 0.35 });
+    this.burst({ type: 'bandpass', freq: 1400, endFreq: 2200, q: 4, gain: 0.05, attack: 0.25, decay: 0.3 });
   }
 
-  dryFire(): void {
+  bowRelease(power: number): void {
     if (!this.ctx) return;
-    this.tone({ type: 'square', f0: 2200, f1: 1800, gain: 0.06, decay: 0.025 });
-    this.burst({ type: 'highpass', freq: 4000, gain: 0.12, decay: 0.03 });
+    this.tone({ type: 'triangle', f0: 180, f1: 90, gain: 0.25 * (0.5 + power * 0.5), decay: 0.12 });
+    this.burst({ type: 'bandpass', freq: 900, endFreq: 2600, q: 1, gain: 0.18 * power, attack: 0.01, decay: 0.2 });
   }
 
-  reload(): void {
+  arrowHit(surface: 'flesh' | 'wood' | 'ground' | 'water'): void {
     if (!this.ctx) return;
-    this.burst({ type: 'bandpass', freq: 2600, q: 3, gain: 0.25, decay: 0.05, when: 0.15 });
-    this.tone({ type: 'square', f0: 900, f1: 600, gain: 0.05, decay: 0.04, when: 0.18 });
-    this.burst({ type: 'bandpass', freq: 1800, q: 3, gain: 0.3, decay: 0.05, when: 0.85 });
-    this.burst({ type: 'bandpass', freq: 3200, q: 4, gain: 0.35, decay: 0.04, when: 1.05 });
-    this.tone({ type: 'square', f0: 1500, f1: 900, gain: 0.06, decay: 0.03, when: 1.06 });
+    if (surface === 'flesh') {
+      this.tone({ f0: 160, f1: 70, gain: 0.35, decay: 0.08 });
+      this.burst({ type: 'lowpass', freq: 800, gain: 0.25, decay: 0.08 });
+    } else if (surface === 'wood') {
+      this.burst({ type: 'bandpass', freq: 1500, q: 3, gain: 0.35, decay: 0.05 });
+      this.tone({ type: 'triangle', f0: 320, f1: 260, gain: 0.08, decay: 0.15 });
+    } else if (surface === 'water') {
+      this.impact('water');
+    } else {
+      this.burst({ type: 'lowpass', freq: 1200, gain: 0.25, decay: 0.07 });
+    }
+  }
+
+  cast(): void {
+    if (!this.ctx) return;
+    this.burst({ type: 'bandpass', freq: 2500, endFreq: 900, q: 2, gain: 0.12, attack: 0.05, decay: 0.4 });
+    for (let i = 0; i < 6; i++) this.tone({ type: 'square', f0: 2600, gain: 0.015, decay: 0.01, when: 0.05 + i * 0.05 });
+  }
+
+  splash(big = false): void {
+    if (!this.ctx) return;
+    this.burst({ type: 'bandpass', freq: big ? 700 : 1200, endFreq: 300, q: 1, gain: big ? 0.4 : 0.22, attack: 0.01, decay: big ? 0.45 : 0.25 });
+  }
+
+  fishCaught(): void {
+    if (!this.ctx) return;
+    this.splash(true);
+    for (let i = 0; i < 10; i++) this.tone({ type: 'square', f0: 2200, gain: 0.02, decay: 0.008, when: i * 0.035 });
+    this.tone({ type: 'triangle', f0: 660, gain: 0.12, decay: 0.1, when: 0.4 });
+    this.tone({ type: 'triangle', f0: 880, gain: 0.12, decay: 0.14, when: 0.5 });
+  }
+
+  build(): void {
+    if (!this.ctx) return;
+    for (let i = 0; i < 3; i++) {
+      this.tone({ f0: 210, f1: 120, gain: 0.35, decay: 0.08, when: i * 0.18 });
+      this.burst({ type: 'bandpass', freq: 1300, q: 2, gain: 0.25, decay: 0.05, when: i * 0.18 });
+    }
+  }
+
+  craft(): void {
+    if (!this.ctx) return;
+    this.burst({ type: 'bandpass', freq: 1800, q: 2, gain: 0.2, decay: 0.08 });
+    this.tone({ type: 'triangle', f0: 520, gain: 0.1, decay: 0.08, when: 0.1 });
+    this.tone({ type: 'triangle', f0: 780, gain: 0.1, decay: 0.15, when: 0.2 });
+  }
+
+  levelUp(): void {
+    if (!this.ctx) return;
+    [523, 659, 784, 1047].forEach((f, i) => this.tone({ type: 'triangle', f0: f, gain: 0.12, decay: 0.25, when: i * 0.1 }));
+  }
+
+  sleep(): void {
+    if (!this.ctx) return;
+    [392, 330, 262].forEach((f, i) => this.tone({ f0: f, gain: 0.1, attack: 0.1, decay: 0.6, when: i * 0.35 }));
+  }
+
+  animalHurt(big: boolean): void {
+    if (!this.ctx) return;
+    this.tone({ type: 'sawtooth', f0: big ? 420 : 1400, f1: big ? 240 : 900, gain: 0.08, attack: 0.01, decay: big ? 0.3 : 0.12 });
+    this.burst({ type: 'lowpass', freq: 700, gain: 0.25, decay: 0.1 });
+  }
+
+  sizzle(): void {
+    if (!this.ctx) return;
+    this.burst({ type: 'highpass', freq: 3500, gain: 0.12, attack: 0.1, decay: 0.8 });
   }
 
   impact(surface: Surface | 'wood' | 'metal'): void {

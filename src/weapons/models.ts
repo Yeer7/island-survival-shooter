@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { detailTextures } from '../world/textures';
 
 const std = (color: number, roughness = 0.7, metalness = 0) => new THREE.MeshStandardMaterial({ color, roughness, metalness });
 
@@ -7,9 +8,6 @@ const MAT = {
   grip: std(0xd94a1e, 0.55),
   head: std(0xc22a1c, 0.45, 0.2),
   blade: std(0xd6dade, 0.25, 0.9),
-  gunMetal: std(0x2a2d31, 0.38, 0.75),
-  gunGrip: std(0x1a1a1b, 0.8),
-  sight: std(0xe6e1c8, 0.4),
   skin: std(0xc68e68, 0.65),
   sleeve: std(0x5d6b4c, 0.85),
   cuff: std(0x3f4a34, 0.9),
@@ -36,33 +34,20 @@ export function buildAxe(): THREE.Group {
   return g;
 }
 
-/** Compact pilot's pistol. Origin = grip, barrel along -Z. */
-export function buildPistol(): THREE.Group {
-  const g = new THREE.Group();
-  g.name = 'pistol';
-  const slide = new THREE.Mesh(new THREE.BoxGeometry(0.034, 0.038, 0.19), MAT.gunMetal);
-  slide.position.set(0, 0.075, -0.06);
-  const frame = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.022, 0.15), MAT.gunGrip);
-  frame.position.set(0, 0.047, -0.045);
-  const grip = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.11, 0.045), MAT.gunGrip);
-  grip.position.set(0, 0.0, 0.0);
-  grip.rotation.x = -0.22;
-  const guard = new THREE.Mesh(new THREE.TorusGeometry(0.02, 0.004, 4, 10, Math.PI), MAT.gunGrip);
-  guard.rotation.set(0, Math.PI / 2, Math.PI);
-  guard.position.set(0, 0.035, -0.035);
-  const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.007, 0.007, 0.02, 8), MAT.gunGrip);
-  barrel.rotation.x = Math.PI / 2;
-  barrel.position.set(0, 0.075, -0.158);
-  const front = new THREE.Mesh(new THREE.BoxGeometry(0.006, 0.008, 0.008), MAT.sight);
-  front.position.set(0, 0.098, -0.145);
-  const rearL = new THREE.Mesh(new THREE.BoxGeometry(0.006, 0.008, 0.008), MAT.sight);
-  rearL.position.set(-0.01, 0.098, 0.025);
-  const rearR = rearL.clone();
-  rearR.position.x = 0.01;
-  const muzzle = new THREE.Object3D();
-  muzzle.name = 'muzzle';
-  muzzle.position.set(0, 0.075, -0.175);
-  g.add(slide, frame, grip, guard, barrel, front, rearL, rearR, muzzle);
+/** The axe with a glowing, burning head (bench level 3). */
+export function buildFlameAxe(): THREE.Group {
+  const g = buildAxe();
+  g.name = 'flameAxe';
+  g.traverse((o) => {
+    const m = o as THREE.Mesh;
+    if (m.isMesh && m.material === MAT.head) {
+      m.material = new THREE.MeshStandardMaterial({ color: 0x3a1a0c, roughness: 0.5, emissive: 0xff5a10, emissiveIntensity: 1.4 });
+    }
+  });
+  const flame = new THREE.Object3D();
+  flame.name = 'flame';
+  flame.position.set(0, 0.5, -0.03);
+  g.add(flame);
   return g;
 }
 
@@ -95,9 +80,136 @@ export function buildLog(length = 1.6, radius = 0.2): THREE.Mesh {
 let _logMats: THREE.Material[] | null = null;
 export function logMaterials(): THREE.Material[] {
   if (!_logMats) {
-    const bark = std(0x5a3d26, 0.95);
+    const tex = detailTextures();
+    const bark = new THREE.MeshStandardMaterial({ color: new THREE.Color(0x6b4a2e).multiplyScalar(1.35), roughness: 0.95, map: tex.bark, bumpMap: tex.barkBump, bumpScale: 3 });
     const ring = std(0xcaa472, 0.8);
     _logMats = [bark, ring, ring];
   }
   return _logMats;
+}
+
+let _wood: THREE.MeshStandardMaterial | null = null;
+export function woodMaterial(): THREE.MeshStandardMaterial {
+  if (!_wood) {
+    const tex = detailTextures();
+    _wood = new THREE.MeshStandardMaterial({ color: new THREE.Color(0x9a7048).multiplyScalar(1.3), roughness: 0.85, map: tex.bark });
+  }
+  return _wood;
+}
+
+/** Sharpened wooden spear. Origin = grip, point along -Z. */
+export function buildSpear(): THREE.Group {
+  const g = new THREE.Group();
+  const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.017, 0.02, 1.7, 7), woodMaterial());
+  shaft.rotation.x = Math.PI / 2;
+  shaft.position.z = -0.35;
+  const tip = new THREE.Mesh(new THREE.ConeGeometry(0.022, 0.2, 7), std(0xc9a57a, 0.7));
+  tip.rotation.x = -Math.PI / 2;
+  tip.position.z = -1.3;
+  const wrap = new THREE.Mesh(new THREE.CylinderGeometry(0.024, 0.024, 0.12, 7), std(0x6d5a3e, 0.95));
+  wrap.rotation.x = Math.PI / 2;
+  wrap.position.z = -1.12;
+  g.add(shaft, tip, wrap);
+  return g;
+}
+
+/** Hunting bow: an arc along Y with a string; `string` holds the 3 string points. */
+export function buildBow(): { group: THREE.Group; string: THREE.Line; nock: THREE.Object3D } {
+  const g = new THREE.Group();
+  const curve = new THREE.QuadraticBezierCurve3(new THREE.Vector3(0, 0.55, 0.06), new THREE.Vector3(0, 0, -0.16), new THREE.Vector3(0, -0.55, 0.06));
+  const limb = new THREE.Mesh(new THREE.TubeGeometry(curve, 20, 0.014, 6, false), woodMaterial());
+  const grip = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.12, 8), std(0x4a3524, 0.9));
+  grip.position.z = -0.08;
+  const sg = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0.55, 0.06), new THREE.Vector3(0, 0, 0.06), new THREE.Vector3(0, -0.55, 0.06)]);
+  const string = new THREE.Line(sg, new THREE.LineBasicMaterial({ color: 0xe8e2cf }));
+  const nock = new THREE.Object3D();
+  nock.position.set(0, 0, 0.06);
+  g.add(limb, grip, string, nock);
+  return { group: g, string, nock };
+}
+
+/** Arrow pointing along -Z, origin at the nock. */
+export function buildArrow(): THREE.Group {
+  const g = new THREE.Group();
+  const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.006, 0.7, 5), std(0xb08a5a, 0.8));
+  shaft.rotation.x = Math.PI / 2;
+  shaft.position.z = -0.35;
+  const head = new THREE.Mesh(new THREE.ConeGeometry(0.014, 0.06, 5), std(0x6f6f6f, 0.4, 0.4));
+  head.rotation.x = -Math.PI / 2;
+  head.position.z = -0.72;
+  const fl = new THREE.Mesh(new THREE.BoxGeometry(0.002, 0.03, 0.1), std(0xe8e2cf, 0.9));
+  fl.position.z = -0.06;
+  const fl2 = fl.clone();
+  fl2.rotation.z = Math.PI / 2;
+  g.add(shaft, head, fl, fl2);
+  return g;
+}
+
+/** Torch: stick with a cloth-wrapped head. `flame` marks where fire sits. */
+export function buildTorch(): THREE.Group {
+  const g = new THREE.Group();
+  const stick = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.022, 0.5, 7), woodMaterial());
+  stick.position.y = 0.12;
+  const head = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.03, 0.1, 8), std(0x3d2c1c, 1));
+  head.position.y = 0.4;
+  const flame = new THREE.Object3D();
+  flame.name = 'flame';
+  flame.position.y = 0.48;
+  g.add(stick, head, flame);
+  return g;
+}
+
+/** Fishing rod; `tip` marks the end of the line. */
+export function buildRod(): THREE.Group {
+  const g = new THREE.Group();
+  const rod = new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.016, 1.4, 6), woodMaterial());
+  rod.position.y = 0.55;
+  const reel = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.03, 10), std(0x55606a, 0.5, 0.6));
+  reel.rotation.z = Math.PI / 2;
+  reel.position.set(0.03, 0.05, 0);
+  const tip = new THREE.Object3D();
+  tip.name = 'tip';
+  tip.position.y = 1.25;
+  g.add(rod, reel, tip);
+  return g;
+}
+
+export function buildMeat(cooked: boolean): THREE.Group {
+  const g = new THREE.Group();
+  const m = new THREE.Mesh(new THREE.SphereGeometry(0.07, 8, 6), std(cooked ? 0x7a4320 : 0xb4413c, 0.6));
+  m.scale.set(1.3, 0.7, 1);
+  const bone = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.14, 6), std(0xeee6d2, 0.6));
+  bone.rotation.z = Math.PI / 2;
+  bone.position.x = 0.08;
+  g.add(m, bone);
+  return g;
+}
+
+export function buildFish(cooked: boolean): THREE.Group {
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.SphereGeometry(0.06, 10, 6), std(cooked ? 0x8a5a2a : 0x8aa0ad, 0.4, cooked ? 0 : 0.3));
+  body.scale.set(2.2, 0.8, 0.5);
+  const tail = new THREE.Mesh(new THREE.ConeGeometry(0.05, 0.08, 4), std(cooked ? 0x6a4320 : 0x6b8290, 0.5));
+  tail.rotation.z = Math.PI / 2;
+  tail.position.x = 0.15;
+  g.add(body, tail);
+  return g;
+}
+
+export function buildSticks(): THREE.Group {
+  const g = new THREE.Group();
+  for (let i = 0; i < 3; i++) {
+    const s = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.02, 0.5, 5), woodMaterial());
+    s.rotation.set(Math.PI / 2, 0, 0);
+    s.rotation.y = (i - 1) * 0.35;
+    s.position.y = i * 0.025;
+    g.add(s);
+  }
+  return g;
+}
+
+export function buildHide(): THREE.Mesh {
+  const geo = new THREE.BoxGeometry(0.4, 0.025, 0.3, 4, 1, 3);
+  const m = new THREE.Mesh(geo, std(0x8b6a45, 1));
+  return m;
 }

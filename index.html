@@ -78,6 +78,22 @@
         color: #fff;
         font: 600 0.78rem/1.5 system-ui, sans-serif;
       }
+      .sens {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-size: 0.85rem;
+        color: #c8d6d0;
+      }
+      .sens input {
+        width: 180px;
+        accent-color: #d97706;
+      }
+      .sens span {
+        width: 44px;
+        text-align: left;
+        font-variant-numeric: tabular-nums;
+      }
       #play-btn {
         padding: 12px 28px;
         border: none;
@@ -98,12 +114,16 @@
     <div id="crosshair"></div>
     <div id="overlay">
       <h1>ISLAND SURVIVAL SHOOTER</h1>
-      <p>Você acordou na praia, ao lado do avião em chamas. Quebre as malas, ache a pistola do piloto e corte lenha antes do anoitecer.</p>
+      <p>Você acordou na praia, ao lado do avião em chamas. Quebre as malas, corte lenha e erga sua base perto do lago antes do anoitecer.</p>
       <ul class="controls">
         <li><kbd>WASD</kbd> mover · <kbd>Shift</kbd> correr · <kbd>Espaço</kbd> pular</li>
-        <li><kbd>Clique</kbd> usar · <kbd>1</kbd>–<kbd>5</kbd> / roda: trocar item</li>
-        <li><kbd>E</kbd> coletar · <kbd>G</kbd> soltar tora · <kbd>R</kbd> recarregar · <kbd>Esc</kbd> pausa</li>
+        <li><kbd>Clique</kbd> usar / segurar para puxar o arco · <kbd>1</kbd>–<kbd>9</kbd> / roda: trocar item</li>
+        <li><kbd>E</kbd> interagir · <kbd>G</kbd> soltar tora · <kbd>R</kbd> girar construção · <kbd>Q</kbd> cancelar · <kbd>T</kbd> pular tutorial</li>
       </ul>
+      <label class="sens">Sensibilidade do mouse
+        <input id="sens" type="range" min="0.3" max="2.5" step="0.05" value="1" />
+        <span id="sens-val">1.00×</span>
+      </label>
       <button id="play-btn">ENTRAR NA ILHA</button>
     </div>
     <script type="module" src="/src/main.ts"></script>

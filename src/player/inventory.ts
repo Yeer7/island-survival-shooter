@@ -1,56 +1,82 @@
-export type SlotId = 'axe' | 'pistol' | 'food' | 'bandage' | 'cloth';
+export type ToolId = 'axe' | 'flameAxe' | 'spear' | 'bow' | 'torch' | 'rod';
+export type FoodId = 'food' | 'cookedMeat' | 'cookedFish' | 'meat' | 'fish' | 'bandage';
+export type HotbarId = ToolId | FoodId;
+export type MaterialId = 'sticks' | 'rocks' | 'cloth' | 'hide' | 'arrows' | 'totem' | 'relic';
 
-export const SLOTS: { id: SlotId; label: string; icon: string }[] = [
-  { id: 'axe', label: 'Machado', icon: '🪓' },
-  { id: 'pistol', label: 'Pistola', icon: '🔫' },
-  { id: 'food', label: 'Comida', icon: '🥫' },
-  { id: 'bandage', label: 'Curativo', icon: '🩹' },
-  { id: 'cloth', label: 'Pano', icon: '🧵' },
-];
+export const HOTBAR_INFO: Record<HotbarId, { label: string; icon: string }> = {
+  axe: { label: 'Machado de Emergência', icon: '🪓' },
+  flameAxe: { label: 'Machado Flamejante', icon: '🔥' },
+  spear: { label: 'Lança de Madeira', icon: '🔱' },
+  bow: { label: 'Arco de Caça', icon: '🏹' },
+  torch: { label: 'Tocha', icon: '🕯️' },
+  rod: { label: 'Vara de Pesca', icon: '🎣' },
+  food: { label: 'Comida enlatada', icon: '🥫' },
+  cookedMeat: { label: 'Carne Assada', icon: '🍖' },
+  cookedFish: { label: 'Peixe Assado', icon: '🐟' },
+  meat: { label: 'Carne Crua', icon: '🥩' },
+  fish: { label: 'Peixe Cru', icon: '🐠' },
+  bandage: { label: 'Curativo', icon: '🩹' },
+};
 
-export const MAG_SIZE = 12;
+export const MATERIAL_INFO: Record<MaterialId, { label: string; icon: string }> = {
+  sticks: { label: 'Gravetos', icon: '🥢' },
+  rocks: { label: 'Pedras', icon: '🪨' },
+  cloth: { label: 'Pano', icon: '🧵' },
+  hide: { label: 'Pele', icon: '🟫' },
+  arrows: { label: 'Flechas', icon: '➶' },
+  totem: { label: 'Totem Tribal', icon: '🗿' },
+  relic: { label: 'Relíquia da Caverna', icon: '💎' },
+};
+
+/** Effects of eating/using a consumable: hunger and health deltas. */
+export const FOOD_EFFECT: Record<FoodId, { hunger: number; health: number; text: string }> = {
+  food: { hunger: 35, health: 0, text: '+35 Fome' },
+  cookedMeat: { hunger: 45, health: 5, text: '+45 Fome' },
+  cookedFish: { hunger: 32, health: 5, text: '+32 Fome' },
+  meat: { hunger: 12, health: -6, text: '+12 Fome (cru!)' },
+  fish: { hunger: 9, health: -4, text: '+9 Fome (cru!)' },
+  bandage: { hunger: 0, health: 40, text: '+40 Vida' },
+};
+
+const TOOL_ORDER: ToolId[] = ['axe', 'flameAxe', 'spear', 'bow', 'torch', 'rod'];
+const FOOD_ORDER: FoodId[] = ['food', 'cookedMeat', 'cookedFish', 'meat', 'fish', 'bandage'];
+
 export const MAX_LOGS = 3;
 
 export class Inventory {
-  selected = 0;
-  hasPistol = false;
-  mag = 0;
-  reserve = 0;
-  food = 0;
-  bandage = 0;
-  cloth = 0;
-  rocks = 0;
+  readonly tools = new Set<ToolId>(['axe']);
+  readonly food: Record<FoodId, number> = { food: 0, cookedMeat: 0, cookedFish: 0, meat: 0, fish: 0, bandage: 0 };
+  readonly mats: Record<MaterialId, number> = { sticks: 0, rocks: 0, cloth: 0, hide: 0, arrows: 0, totem: 0, relic: 0 };
+  /** Logs carried on the shoulder. */
   logs = 0;
+  armor = 0;
+  selected: HotbarId = 'axe';
 
-  get slot(): SlotId {
-    return SLOTS[this.selected].id;
+  /** Only what the player actually owns, in a stable order. */
+  hotbar(): HotbarId[] {
+    const list: HotbarId[] = [];
+    for (const t of TOOL_ORDER) if (this.tools.has(t)) list.push(t);
+    for (const f of FOOD_ORDER) if (this.food[f] > 0) list.push(f);
+    return list;
   }
 
-  count(id: SlotId): number | null {
-    switch (id) {
-      case 'axe':
-        return null;
-      case 'pistol':
-        return this.hasPistol ? this.mag + this.reserve : 0;
-      case 'food':
-        return this.food;
-      case 'bandage':
-        return this.bandage;
-      case 'cloth':
-        return this.cloth;
-    }
+  isTool(id: HotbarId): id is ToolId {
+    return (TOOL_ORDER as string[]).includes(id);
   }
 
-  available(id: SlotId): boolean {
-    if (id === 'axe') return true;
-    if (id === 'pistol') return this.hasPistol;
-    return (this.count(id) ?? 0) > 0;
+  has(id: HotbarId): boolean {
+    return this.isTool(id) ? this.tools.has(id) : this.food[id as FoodId] > 0;
+  }
+
+  count(id: HotbarId): number | null {
+    if (id === 'bow') return this.mats.arrows;
+    return this.isTool(id) ? null : this.food[id as FoodId];
   }
 }
 
-/** Health and hunger. Hunger empties over ~14 in-game hours of walking. */
 export class Vitals {
   health = 100;
+  maxHealth = 100;
   hunger = 100;
   hurtFlash = 0;
   dead = false;
@@ -59,7 +85,7 @@ export class Vitals {
     if (this.dead) return;
     this.hunger = Math.max(0, this.hunger - dt * (sprinting ? 0.14 : 0.09));
     if (this.hunger <= 0) this.damage(dt * 0.8, false);
-    else if (this.hunger > 60 && this.health < 100) this.health = Math.min(100, this.health + dt * 0.12);
+    else if (this.hunger > 60 && this.health < this.maxHealth) this.health = Math.min(this.maxHealth, this.health + dt * 0.12);
     this.hurtFlash = Math.max(0, this.hurtFlash - dt * 1.5);
   }
 
@@ -68,5 +94,9 @@ export class Vitals {
     this.health = Math.max(0, this.health - amount);
     if (flash) this.hurtFlash = Math.min(1, this.hurtFlash + amount / 25);
     if (this.health <= 0) this.dead = true;
+  }
+
+  heal(amount: number): void {
+    this.health = Math.min(this.maxHealth, this.health + amount);
   }
 }

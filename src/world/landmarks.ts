@@ -19,13 +19,13 @@ export interface Suitcase {
 
 const CONTENTS: ItemType[][] = [
   ['food', 'bandage'],
-  ['ammo'],
-  ['food', 'cloth'],
+  ['stick', 'cloth'],
+  ['food', 'stick'],
   ['cloth', 'cloth'],
-  ['bandage', 'ammo'],
+  ['bandage', 'stick'],
   ['food'],
   ['cloth', 'food'],
-  ['ammo', 'bandage'],
+  ['stick', 'bandage'],
 ];
 const CASE_COLORS = [0x2f4f7f, 0x7a2e2e, 0x2d2d2d, 0x6b5b3e, 0x3e6b4f, 0x8a6a2a, 0x5a3f6b, 0x404a52];
 
@@ -35,7 +35,6 @@ export class CrashSite {
   readonly center = new THREE.Vector3();
   readonly spawn = new THREE.Vector3();
   spawnYaw = 0;
-  readonly pistolPos = new THREE.Vector3();
   readonly firePos = new THREE.Vector3();
   readonly suitcases: Suitcase[] = [];
   readonly smoke: PuffEmitter[] = [];
@@ -214,7 +213,6 @@ export class CrashSite {
       this.suitcases.push({ mesh: g, pos, hp: 50, color, contents: CONTENTS[i], broken: false });
     });
 
-    this.pistolPos.copy(this.localToGround(8.8, -2.6, 0.02));
     this.spawn.copy(this.localToGround(1.5, -7.5, 0));
     // Face the wreck when waking up.
     const toPlane = new THREE.Vector3().subVectors(this.center, this.spawn);

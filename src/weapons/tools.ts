@@ -1,23 +1,35 @@
-import { Inventory, MAG_SIZE } from '../player/inventory';
 import { SoundEngine } from '../audio/soundEngine';
 import { ViewModel } from './viewmodel';
 
+export interface MeleeSpec {
+  kind: 'swing' | 'stab';
+  duration: number;
+  /** Fraction of the motion at which the blow lands. */
+  impactAt: number;
+  reach: number;
+  tree: number;
+  animal: number;
+  luggage: number;
+}
+
+export const MELEE: Record<'axe' | 'flameAxe' | 'spear', MeleeSpec> = {
+  axe: { kind: 'swing', duration: 0.62, impactAt: 0.42, reach: 2.7, tree: 25, animal: 35, luggage: 25 },
+  flameAxe: { kind: 'swing', duration: 0.6, impactAt: 0.42, reach: 2.8, tree: 50, animal: 70, luggage: 50 },
+  spear: { kind: 'stab', duration: 0.55, impactAt: 0.36, reach: 3.6, tree: 5, animal: 50, luggage: 12 },
+};
+
 /** What the tools need from the game world. */
 export interface CombatWorld {
-  /** Resolve the axe blow at the moment the blade arrives. */
-  axeImpact(): void;
-  /** Fire one hitscan round from the eye along the look direction. */
-  fireBullet(): void;
+  meleeImpact(spec: MeleeSpec): void;
+  shootArrow(power: number): void;
   kick(pitch: number, yaw: number, trauma: number): void;
 }
 
-const SWING_TIME = 0.62;
-const IMPACT_AT = 0.42 * SWING_TIME;
-
-/** [1] Emergency axe: fluid swing, impact resolved mid-motion. */
-export class Axe {
+/** Axe, flaming axe and spear: one motion, the blow resolved mid-motion. */
+export class Melee {
   private cooldown = 0;
   private pending = -1;
+  private spec: MeleeSpec = MELEE.axe;
 
   constructor(private vm: ViewModel, private world: CombatWorld, private sound: SoundEngine) {}
 
@@ -25,11 +37,13 @@ export class Axe {
     return this.cooldown <= 0;
   }
 
-  use(): void {
+  use(spec: MeleeSpec): void {
     if (this.cooldown > 0) return;
-    this.cooldown = SWING_TIME;
-    this.pending = IMPACT_AT;
-    this.vm.swing(SWING_TIME);
+    this.spec = spec;
+    this.cooldown = spec.duration;
+    this.pending = spec.duration * spec.impactAt;
+    if (spec.kind === 'swing') this.vm.swing(spec.duration);
+    else this.vm.stab(spec.duration);
     this.sound.whoosh();
   }
 
@@ -41,59 +55,44 @@ export class Axe {
     this.cooldown -= dt;
     if (this.pending > 0) {
       this.pending -= dt;
-      if (this.pending <= 0) this.world.axeImpact();
+      if (this.pending <= 0) this.world.meleeImpact(this.spec);
     }
   }
 }
 
-/** [2] Pilot's pistol: semi-auto hitscan, 12-round magazine, [R] reload. */
-export class Pistol {
+/** Hunting bow: hold to draw (0.7 s to full), release to loose a physical arrow. */
+export class Bow {
+  draw = 0;
+  private drawing = false;
   private cooldown = 0;
-  private reloading = 0;
 
-  constructor(private vm: ViewModel, private world: CombatWorld, private sound: SoundEngine, private inv: Inventory) {}
+  constructor(private vm: ViewModel, private world: CombatWorld, private sound: SoundEngine) {}
 
-  get isReloading(): boolean {
-    return this.reloading > 0;
-  }
-
-  trigger(): void {
-    if (this.cooldown > 0 || this.reloading > 0) return;
-    if (this.inv.mag <= 0) {
-      this.sound.dryFire();
-      this.cooldown = 0.25;
-      if (this.inv.reserve > 0) this.reload();
-      return;
+  update(dt: number, held: boolean, arrows: number): void {
+    this.cooldown -= dt;
+    const canDraw = arrows > 0 && this.cooldown <= 0;
+    if (held && canDraw) {
+      if (!this.drawing) this.sound.bowDraw();
+      this.drawing = true;
+      this.draw = Math.min(1, this.draw + dt / 0.7);
+    } else if (this.drawing) {
+      this.drawing = false;
+      if (this.draw > 0.2) {
+        this.world.shootArrow(this.draw);
+        this.sound.bowRelease(this.draw);
+        this.vm.release();
+        this.cooldown = 0.35;
+      }
+      this.draw = 0;
+    } else {
+      this.draw = Math.max(0, this.draw - dt * 4);
     }
-    this.inv.mag--;
-    this.cooldown = 0.16;
-    this.vm.fire();
-    this.sound.gunshot();
-    this.world.kick(0.9 + Math.random() * 0.3, (Math.random() - 0.5) * 0.35, 0.08);
-    this.world.fireBullet();
-  }
-
-  reload(): void {
-    if (this.reloading > 0 || this.inv.mag >= MAG_SIZE || this.inv.reserve <= 0) return;
-    this.reloading = 1.3;
-    this.vm.reload(1.3);
-    this.sound.reload();
+    this.vm.bowDraw = this.draw;
+    this.vm.arrowNocked = arrows > 0 && this.cooldown < 0.1;
   }
 
   cancel(): void {
-    this.reloading = 0;
-  }
-
-  update(dt: number): void {
-    this.cooldown -= dt;
-    if (this.reloading > 0) {
-      this.reloading -= dt;
-      if (this.reloading <= 0) {
-        const need = MAG_SIZE - this.inv.mag;
-        const take = Math.min(need, this.inv.reserve);
-        this.inv.mag += take;
-        this.inv.reserve -= take;
-      }
-    }
+    this.drawing = false;
+    this.draw = 0;
   }
 }

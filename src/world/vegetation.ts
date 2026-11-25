@@ -3,6 +3,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { mulberry32, smoothstep } from '../core/math';
 import { ColliderGrid, Circle } from './colliders';
 import { LAKE_CENTER, LAKE_LEVEL, LAKE_RADIUS, Terrain } from './terrain';
+import { detailTextures } from './textures';
 
 export interface Exclusion {
   x: number;
@@ -133,8 +134,9 @@ export class Forest {
   constructor(terrain: Terrain, colliders: ColliderGrid, exclusions: Exclusion[], private events: ForestEvents, count = 350) {
     this.trunkGeo = buildTrunkGeometry();
     this.foliageGeo = buildFoliageGeometry();
-    this.trunkMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, flatShading: true });
-    this.foliageMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, flatShading: true });
+    const tex = detailTextures();
+    this.trunkMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, map: tex.bark, bumpMap: tex.barkBump, bumpScale: 3, color: new THREE.Color(1.35, 1.35, 1.35) });
+    this.foliageMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, flatShading: true, map: tex.foliage, color: new THREE.Color(1.4, 1.4, 1.4) });
     addWind(this.foliageMat, 3.0, 0.014);
 
     const rand = mulberry32(4242);
@@ -333,7 +335,9 @@ export class Forest {
 export class Props {
   readonly group = new THREE.Group();
   readonly smallRocks: { x: number; y: number; z: number; active: boolean }[] = [];
+  readonly smallSticks: { x: number; y: number; z: number; active: boolean }[] = [];
   private smallRockMesh: THREE.InstancedMesh;
+  private stickMesh: THREE.InstancedMesh;
   private dummy = new THREE.Object3D();
 
   constructor(terrain: Terrain, colliders: ColliderGrid, exclusions: Exclusion[], tree: Forest) {
@@ -345,7 +349,8 @@ export class Props {
 
     // Boulders: mostly on the northern highland, a few on the beaches.
     const boulderGeo = new THREE.DodecahedronGeometry(1, 0);
-    const boulderMat = new THREE.MeshStandardMaterial({ color: 0x8c8a85, roughness: 0.92, flatShading: true });
+    const tex = detailTextures();
+    const boulderMat = new THREE.MeshStandardMaterial({ color: new THREE.Color(1.3, 1.3, 1.3), roughness: 0.92, flatShading: true, map: tex.rock, bumpMap: tex.rockBump, bumpScale: 4 });
     const boulders = new THREE.InstancedMesh(boulderGeo, boulderMat, 170);
     let b = 0;
     let tries = 0;
@@ -365,7 +370,7 @@ export class Props {
       d.updateMatrix();
       boulders.setMatrixAt(b, d.matrix);
       color.setHSL(0.08, 0.05 + rand() * 0.06, 0.42 + rand() * 0.18);
-      boulders.setColorAt(b, color.multiplyScalar(1.6));
+      boulders.setColorAt(b, color.multiplyScalar(1.25));
       if (s > 0.9) colliders.add({ x, z, r: s * 0.95, y0: h - 1, y1: h + s * 0.8, kind: 'rock', ref: b });
       b++;
     }
@@ -460,6 +465,49 @@ export class Props {
     this.smallRockMesh.count = ns;
     this.smallRockMesh.castShadow = true;
     this.group.add(this.smallRockMesh);
+
+    // Sticks (gravetos) under the trees.
+    const stickGeo = new THREE.CylinderGeometry(0.022, 0.03, 0.75, 5);
+    stickGeo.rotateZ(Math.PI / 2);
+    const twig = new THREE.CylinderGeometry(0.012, 0.016, 0.25, 4);
+    twig.rotateZ(Math.PI / 2 - 0.7);
+    twig.translate(0.12, 0.06, 0);
+    const stickAll = mergeGeometries([stickGeo, twig])!;
+    const stickMat = new THREE.MeshStandardMaterial({ color: new THREE.Color(0x8a6440).multiplyScalar(1.3), roughness: 0.95, map: tex.bark });
+    this.stickMesh = new THREE.InstancedMesh(stickAll, stickMat, 110);
+    let nst = 0;
+    tries = 0;
+    while (nst < 110 && tries < 20000) {
+      tries++;
+      const tr = tree.trees[Math.floor(rand() * tree.trees.length)];
+      if (!tr) break;
+      const a = rand() * Math.PI * 2;
+      const dist = 1.5 + rand() * 4;
+      const x = tr.x + Math.cos(a) * dist;
+      const z = tr.z + Math.sin(a) * dist;
+      if (terrain.slope(x, z) > 0.3 || terrain.isInLake(x, z)) continue;
+      const h = terrain.height(x, z);
+      d.position.set(x, h + 0.04, z);
+      d.rotation.set(0, rand() * 6, 0);
+      d.scale.setScalar(0.9 + rand() * 0.3);
+      d.updateMatrix();
+      this.stickMesh.setMatrixAt(nst, d.matrix);
+      this.smallSticks.push({ x, y: h + 0.05, z, active: true });
+      nst++;
+    }
+    this.stickMesh.count = nst;
+    this.stickMesh.castShadow = true;
+    this.group.add(this.stickMesh);
+  }
+
+  hideSmallStick(i: number): void {
+    const r = this.smallSticks[i];
+    r.active = false;
+    this.dummy.position.set(r.x, -100, r.z);
+    this.dummy.scale.setScalar(0);
+    this.dummy.updateMatrix();
+    this.stickMesh.setMatrixAt(i, this.dummy.matrix);
+    this.stickMesh.instanceMatrix.needsUpdate = true;
   }
 
   hideSmallRock(i: number): void {

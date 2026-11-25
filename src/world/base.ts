@@ -7,7 +7,7 @@ import { Circle, ColliderGrid } from './colliders';
 import { LAKE_CENTER, LAKE_LEVEL, Terrain } from './terrain';
 import { detailTextures } from './textures';
 
-export type BuildKind = 'campfire' | 'logHolder' | 'wall' | 'gate';
+export type BuildKind = 'cabin' | 'campfire' | 'logHolder' | 'wall' | 'gate';
 
 export interface Cost {
   logs?: number;
@@ -28,6 +28,7 @@ export interface Recipe {
 }
 
 export const RECIPES: Recipe[] = [
+  { id: 'cabin', label: 'Cabana de Madeira', icon: '🛖', level: 1, kind: 'build', cost: {}, desc: 'Escolha o lugar; depois entregue 6 toras, 10 gravetos e 6 pedras com [E]. Pronta: dormir.' },
   { id: 'campfire', label: 'Fogueira', icon: '🔥', level: 1, kind: 'build', cost: { logs: 1, sticks: 4, rocks: 4 }, desc: 'Assa carne e peixe, ilumina a noite.' },
   { id: 'logHolder', label: 'Suporte de Toras', icon: '🪵', level: 1, kind: 'build', cost: { logs: 2, sticks: 4 }, desc: 'Guarda até 12 toras perto da base.' },
   { id: 'torch', label: 'Tocha', icon: '🕯️', level: 1, kind: 'tool', cost: { sticks: 2, cloth: 1 }, desc: 'Luz quente para a noite.' },
@@ -74,6 +75,20 @@ export function buildModel(kind: BuildKind): THREE.Group {
   };
   const r = mulberry32(kind.length * 7);
   switch (kind) {
+    case 'cabin': {
+      // Placement preview: floor, walls and roof outline of the cabin footprint.
+      const pm = plankMat();
+      const floor = add(new THREE.Mesh(new THREE.BoxGeometry(5.4, 0.2, 4.4), pm));
+      floor.position.y = 0.45;
+      for (const [w, d2, x, z] of [[5.4, 0.3, 0, 2.05], [0.3, 4.4, -2.55, 0], [0.3, 4.4, 2.55, 0], [1.9, 0.3, -1.75, -2.05], [1.9, 0.3, 1.75, -2.05]] as number[][]) {
+        const wall = add(new THREE.Mesh(new THREE.BoxGeometry(w, 2.4, d2), pm));
+        wall.position.set(x, 1.75, z);
+      }
+      const roof = add(new THREE.Mesh(new THREE.ConeGeometry(4, 1.6, 4), pm));
+      roof.rotation.y = Math.PI / 4;
+      roof.position.y = 3.75;
+      break;
+    }
     case 'campfire': {
       const lib = library();
       if (lib && lib.has('campfire')) {
@@ -169,7 +184,7 @@ export function setGhost(obj: THREE.Object3D, ok: boolean): void {
 }
 
 /** Footprint radius used for placement checks and colliders. */
-export const FOOTPRINT: Record<BuildKind, number> = { campfire: 0.8, logHolder: 1.0, wall: 1.6, gate: 1.6 };
+export const FOOTPRINT: Record<BuildKind, number> = { cabin: 3.6, campfire: 0.8, logHolder: 1.0, wall: 1.6, gate: 1.6 };
 
 export interface Placed {
   kind: BuildKind;
@@ -332,86 +347,28 @@ export class Cabin {
   }
 }
 
-/** Lake-side base: cabin, crafting bench and everything the player builds. */
+/** Everything the player builds anywhere on the island: cabins and free placements. */
 export class BaseSite {
   readonly group = new THREE.Group();
-  readonly center = new THREE.Vector3();
-  readonly benchPos = new THREE.Vector3();
-  readonly cabin: Cabin;
+  readonly cabins: Cabin[] = [];
   readonly placed: Placed[] = [];
+  /** Level of the player's own crafting menu (1 → 3). */
   benchLevel = 1;
-  readonly yaw: number;
 
-  constructor(private terrain: Terrain, private colliders: ColliderGrid, toward: THREE.Vector3) {
-    const dx = toward.x - LAKE_CENTER.x;
-    const dz = toward.z - LAKE_CENTER.z;
-    const len = Math.hypot(dx, dz);
-    const ux = dx / len;
-    const uz = dz / len;
-    let shoreT = 30;
-    for (let t = 0; t < 90; t += 0.25) {
-      if (terrain.height(LAKE_CENTER.x + ux * t, LAKE_CENTER.z + uz * t) > LAKE_LEVEL + 0.3) {
-        shoreT = t;
-        break;
+  constructor(private terrain: Terrain, private colliders: ColliderGrid) {}
+
+  /** Nearest cabin within `radius`, if any. */
+  cabinNear(p: THREE.Vector3, radius: number): Cabin | null {
+    let best: Cabin | null = null;
+    let bd = radius;
+    for (const c of this.cabins) {
+      const d = Math.hypot(c.pos.x - p.x, c.pos.z - p.z);
+      if (d < bd) {
+        bd = d;
+        best = c;
       }
     }
-    // Sideways from the dock line so the dock path stays open.
-    const px = -uz;
-    const pz = ux;
-    const cx = LAKE_CENTER.x + ux * (shoreT + 28) + px * 9;
-    const cz = LAKE_CENTER.z + uz * (shoreT + 28) + pz * 9;
-    this.center.set(cx, terrain.height(cx, cz), cz);
-    // Door faces the lake.
-    this.yaw = Math.atan2(ux, uz);
-    this.cabin = new Cabin(terrain, this.center, this.yaw, colliders);
-    this.group.add(this.cabin.group);
-
-    // Bench in the yard between cabin and lake.
-    const bx = cx - ux * 8 - px * 4;
-    const bz = cz - uz * 8 - pz * 4;
-    this.benchPos.set(bx, terrain.height(bx, bz), bz);
-    const bench = this.buildBench();
-    bench.position.copy(this.benchPos);
-    bench.rotation.y = this.yaw + 0.4;
-    this.group.add(bench);
-    colliders.add({ x: bx, z: bz, r: 0.9, y0: this.benchPos.y - 1, y1: this.benchPos.y + 1.1, kind: 'rock', ref: 0 });
-  }
-
-  private buildBench(): THREE.Group {
-    const lib = library();
-    if (lib && lib.has('workbench')) {
-      const wb = lib.instance('workbench', { by: 'footprint', value: 1.9 });
-      wb.traverse((o) => {
-        if ((o as THREE.Mesh).isMesh) o.castShadow = o.receiveShadow = true;
-      });
-      return wb;
-    }
-    const g = new THREE.Group();
-    const pm = plankMat();
-    const top = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.1, 0.85), pm);
-    top.position.y = 0.92;
-    top.castShadow = top.receiveShadow = true;
-    g.add(top);
-    for (const x of [-0.8, 0.8]) {
-      for (const z of [-0.35, 0.35]) {
-        const leg = buildLog(0.9, 0.06);
-        leg.position.set(x, 0.45, z);
-        leg.castShadow = true;
-        g.add(leg);
-      }
-    }
-    const saw = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.01, 0.12), new THREE.MeshStandardMaterial({ color: 0xbfc4c8, metalness: 0.8, roughness: 0.35 }));
-    saw.position.set(-0.4, 0.98, 0.1);
-    saw.rotation.y = 0.3;
-    const hammerHead = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.05, 0.05), new THREE.MeshStandardMaterial({ color: 0x55595e, metalness: 0.7, roughness: 0.4 }));
-    hammerHead.position.set(0.45, 1.0, -0.15);
-    const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.3, 6), woodMaterial());
-    handle.rotation.x = Math.PI / 2;
-    handle.position.set(0.45, 0.99, -0.02);
-    const sign = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.3, 0.04), pm);
-    sign.position.set(0, 1.35, 0.38);
-    g.add(saw, hammerHead, handle, sign);
-    return g;
+    return best;
   }
 
   canPlace(kind: BuildKind, x: number, z: number): boolean {
@@ -419,8 +376,17 @@ export class BaseSite {
     if (h < LAKE_LEVEL + 0.2 && this.terrain.waterLevelAt(x, z) === LAKE_LEVEL) return false;
     if (h < 0.3) return false;
     if (this.terrain.slope(x, z) > 0.35) return false;
-    if (Math.hypot(x - this.center.x, z - this.center.z) < 4.2) return false;
+    if (this.cabins.some((c) => Math.hypot(x - c.pos.x, z - c.pos.z) < 4.2 + (kind === 'cabin' ? 3 : 0))) return false;
+    if (kind === 'cabin' && this.terrain.slope(x, z) > 0.25) return false;
     return this.colliders.isFree(x, z, FOOTPRINT[kind] * 0.6);
+  }
+
+  /** A cabin blueprint where the player chose; materials are delivered with [E]. */
+  placeCabin(x: number, z: number, yaw: number): Cabin {
+    const cabin = new Cabin(this.terrain, new THREE.Vector3(x, this.terrain.height(x, z), z), yaw, this.colliders);
+    this.cabins.push(cabin);
+    this.group.add(cabin.group);
+    return cabin;
   }
 
   place(kind: BuildKind, x: number, z: number, yaw: number): Placed {

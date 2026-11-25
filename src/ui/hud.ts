@@ -42,6 +42,7 @@ export class Hud {
   private tutorialText: HTMLSpanElement;
   private tutorialStep: HTMLSpanElement;
   onSkipTutorial: () => void = () => {};
+  onCraftButton: () => void = () => {};
   private target: HTMLDivElement;
   private targetFill: HTMLDivElement;
   private targetTimer = 0;
@@ -111,6 +112,8 @@ export class Hud {
 
     const bottom = el('div', 'hud-bottom', this.root);
     this.prompts = el('div', 'hud-prompts', bottom);
+    const craftBtn = el('button', 'hud-craft-btn', bottom, '<kbd>Tab</kbd> Criar / Construir');
+    craftBtn.addEventListener('click', () => this.onCraftButton());
     const row = el('div', 'hud-row', bottom);
     this.mats = el('div', 'hud-mats', row);
     for (const [key, icon] of [['logs', '🪵'], ['sticks', MATERIAL_INFO.sticks.icon], ['rocks', MATERIAL_INFO.rocks.icon], ['cloth', MATERIAL_INFO.cloth.icon], ['hide', MATERIAL_INFO.hide.icon], ['arrows', MATERIAL_INFO.arrows.icon]]) {

@@ -1,7 +1,8 @@
 import * as THREE from 'three';
-import { buildArrow, buildHide, buildLog, buildMeat, buildSticks } from '../weapons/models';
+import { library } from '../assets/assets';
+import { buildArrow, buildHide, buildLog, buildMeat, buildSticks, buildTotem } from '../weapons/models';
 
-export type ItemType = 'food' | 'bandage' | 'cloth' | 'stick' | 'log' | 'rock' | 'meat' | 'hide' | 'arrow';
+export type ItemType = 'food' | 'bandage' | 'cloth' | 'stick' | 'log' | 'rock' | 'meat' | 'hide' | 'arrow' | 'totem';
 
 export const ITEM_LABEL: Record<ItemType, string> = {
   food: 'Comida',
@@ -13,6 +14,7 @@ export const ITEM_LABEL: Record<ItemType, string> = {
   meat: 'Carne Crua',
   hide: 'Pele Animal',
   arrow: 'Flecha',
+  totem: 'Totem Tribal',
 };
 
 export interface Pickup {
@@ -34,7 +36,15 @@ const m = (color: number, rough = 0.6, metal = 0, emissive = 0x000000) =>
 function itemMesh(type: ItemType): THREE.Object3D {
   const g = new THREE.Group();
   switch (type) {
+    case 'totem':
+      g.add(buildTotem());
+      break;
     case 'food': {
+      const lib = library();
+      if (lib?.has('can')) {
+        g.add(lib.instance('can', { by: 'height', value: 0.13 }));
+        break;
+      }
       const can = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.12, 14), m(0xc0392b, 0.5, 0.2, 0x3a0d08));
       const lid = new THREE.Mesh(new THREE.CylinderGeometry(0.071, 0.071, 0.015, 14), m(0xbfc3c7, 0.3, 0.9));
       lid.position.y = 0.065;
@@ -46,6 +56,11 @@ function itemMesh(type: ItemType): THREE.Object3D {
       break;
     }
     case 'bandage': {
+      const lib = library();
+      if (lib?.has('firstAid')) {
+        g.add(lib.instance('firstAid', { by: 'footprint', value: 0.3 }));
+        break;
+      }
       const box = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.07, 0.14), m(0xf3f3f0, 0.6, 0, 0x202020));
       const c1 = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.002, 0.03), m(0xd62828, 0.5));
       c1.position.y = 0.036;
@@ -98,10 +113,13 @@ export class PickupManager {
 
   add(type: ItemType, pos: THREE.Vector3, amount = 1, rotY = Math.random() * Math.PI * 2): Pickup {
     const mesh = itemMesh(type);
-    const still = type === 'log' || type === 'hide' || type === 'stick';
-    const baseY = pos.y + (type === 'log' ? 0.2 : still ? 0.03 : 0.12);
-    mesh.position.set(pos.x, baseY, pos.z);
+    // Every drop rests on the ground: its lowest point sits on the terrain, no floating.
+    const still = type !== 'totem';
     mesh.rotation.y = rotY;
+    mesh.updateMatrixWorld(true);
+    const bb = new THREE.Box3().setFromObject(mesh);
+    const baseY = pos.y - bb.min.y + (type === 'totem' ? 0.08 : 0.005);
+    mesh.position.set(pos.x, baseY, pos.z);
     this.group.add(mesh);
     const p: Pickup = { type, pos: new THREE.Vector3(pos.x, baseY, pos.z), mesh, active: true, amount, baseY, phase: Math.random() * 6, spin: !still, instIndex: -1 };
     this.items.push(p);
@@ -158,8 +176,14 @@ export class PickupManager {
 
   update(time: number): void {
     for (const p of this.items) {
-      if (!p.mesh || !p.spin) continue;
+      if (!p.mesh) continue;
       const hl = p === this.highlighted;
+      if (!p.spin) {
+        // Grounded items: highlight with a slight swell instead of lifting off the ground.
+        const k = hl ? 1.08 + Math.sin(time * 6) * 0.02 : 1;
+        p.mesh.scale.setScalar(k);
+        continue;
+      }
       p.mesh.position.y = p.baseY + Math.sin(time * 2 + p.phase) * 0.03 + (hl ? 0.05 : 0);
       p.mesh.rotation.y = p.phase + time * 0.5;
     }

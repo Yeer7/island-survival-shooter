@@ -12,17 +12,19 @@ import { Hud } from './ui/hud';
 import { Bow, CombatWorld, MELEE, Melee, MeleeSpec } from './weapons/tools';
 import { ViewModel } from './weapons/viewmodel';
 import { Animal, Wildlife } from './world/animals';
-import { BaseSite, BuildKind, CABIN_COST, Cost, LEVEL_UP, Placed, Recipe, buildModel, setGhost } from './world/base';
+import { BaseSite, BuildKind, CABIN_COST, Cabin, Cost, LEVEL_UP, Placed, Recipe, buildModel, setGhost } from './world/base';
 import { ColliderGrid } from './world/colliders';
 import { CrashSite, Dock } from './world/landmarks';
 import { ITEM_LABEL, ItemType, Pickup, PickupManager } from './world/pickups';
 import { DayNight } from './world/sky';
 import { LAKE_CENTER, LAKE_LEVEL, LAKE_RADIUS, Terrain } from './world/terrain';
 import { Forest, Props, Tree, windUniform } from './world/vegetation';
+import { Cannibal, SafeZone, Tribe } from './world/cannibals';
+import { Village } from './world/village';
 import { GrassField } from './world/grass';
 import { Water } from './world/water';
 
-type HitKind = 'tree' | 'case' | 'animal' | 'terrain' | 'water' | 'hard';
+type HitKind = 'tree' | 'case' | 'animal' | 'enemy' | 'terrain' | 'water' | 'hard';
 interface RayHit {
   kind: HitKind;
   t: number;
@@ -41,7 +43,7 @@ const TUTORIAL = [
   'Quebre uma mala perto do avião com o Machado',
   'Corte 1 árvore e pegue 1 tora com [E]',
   'Colete gravetos ou pedras no chão',
-  'Siga [Base] na bússola até a cabana e a bancada no lago',
+  'Aperte [Tab] para abrir seu menu de Criação e Construção!',
 ];
 
 const store = {
@@ -76,6 +78,10 @@ export class Game implements CombatWorld {
   readonly base: BaseSite;
   readonly forest: Forest;
   readonly props: Props;
+  readonly village: Village;
+  readonly tribe: Tribe;
+  private zones: SafeZone[] = [];
+  private spottedT = 0;
   readonly grass: GrassField;
   readonly wildlife: Wildlife;
   readonly pickups = new PickupManager();
@@ -109,7 +115,7 @@ export class Game implements CombatWorld {
   private boatBuilt = false;
   private tutorialStep = 0;
   private tutorialDone = store.get('iss.tutorialDone') === '1';
-  private flags = { caseBroken: false, logTaken: false, gathered: false };
+  private flags = { caseBroken: false, logTaken: false, gathered: false, menuOpened: false };
   private interact: Interactable | null = null;
   private clock = new THREE.Clock();
   private fpsAcc = 0;
@@ -147,14 +153,20 @@ export class Game implements CombatWorld {
 
     this.dock = new Dock(this.terrain, this.crash.center);
     this.scene.add(this.dock.group);
-    this.base = new BaseSite(this.terrain, this.colliders, this.crash.center);
+    this.base = new BaseSite(this.terrain, this.colliders);
     this.scene.add(this.base.group);
+    this.village = new Village(this.terrain, this.colliders);
+    this.scene.add(this.village.group, this.village.fire.points, this.village.smoke.points, this.village.fireLight);
+    // Village crates open exactly like the luggage at the crash site.
+    for (const c of this.village.crates) {
+      this.crash.suitcases.push(c);
+      this.scene.add(c.mesh);
+    }
 
     const exclusions = [
       { x: this.crash.center.x, z: this.crash.center.z, r: 32 },
       { x: this.dock.start.x, z: this.dock.start.z, r: 7 },
-      { x: this.base.center.x, z: this.base.center.z, r: 16 },
-      { x: this.base.benchPos.x, z: this.base.benchPos.z, r: 9 },
+      { x: this.village.center.x, z: this.village.center.z, r: this.village.radius },
     ];
     this.forest = new Forest(this.terrain, this.colliders, exclusions, {
       onFallStart: (t) => this.onTreeFallStart(t),
@@ -170,6 +182,12 @@ export class Game implements CombatWorld {
     this.props.smallSticks.forEach((r, i) => this.pickups.addInstanced('stick', i, r.x, r.y, r.z));
     this.wildlife = new Wildlife(this.terrain, this.colliders, exclusions, (a) => this.onAnimalDeath(a), lib);
     this.scene.add(this.wildlife.group);
+    this.tribe = new Tribe(this.terrain, this.colliders, this.village, {
+      onHitPlayer: (dmg, c) => this.onCannibalHit(dmg, c),
+      onDeath: (c) => this.onCannibalDeath(c),
+      onSpotted: () => this.onScoutSpotted(),
+    });
+    this.scene.add(this.tribe.group);
     this.arrows = new Arrows(
       (o, d, max) => {
         const h = this.raycast(o, d, max, 0);
@@ -213,8 +231,10 @@ export class Game implements CombatWorld {
 
     this.hud = new Hud([
       { name: 'Avião', cls: 'plane', x: this.crash.center.x, z: this.crash.center.z },
-      { name: 'Base', cls: 'lake', x: this.base.benchPos.x, z: this.base.benchPos.z },
+      { name: 'Lago', cls: 'lake', x: LAKE_CENTER.x, z: LAKE_CENTER.z },
+      { name: 'Aldeia', cls: 'plane', x: this.village.center.x, z: this.village.center.z },
     ]);
+    this.hud.onCraftButton = () => (this.menuOpen ? this.closeMenu() : this.openMenu());
     this.hud.setFade(1);
     this.hud.onSkipTutorial = () => this.skipTutorial();
 
@@ -222,7 +242,7 @@ export class Game implements CombatWorld {
     this.craft.onCraft = (r) => this.doCraft(r);
     this.craft.onUpgrade = (l) => this.doUpgrade(l);
     document.addEventListener('keydown', (e) => {
-      if (this.menuOpen && (e.code === 'KeyE' || e.code === 'Escape' || e.code === 'Tab')) {
+      if (this.menuOpen && (e.code === 'KeyE' || e.code === 'Escape' || e.code === 'Tab' || e.code === 'KeyB')) {
         e.preventDefault();
         this.closeMenu();
       }
@@ -333,6 +353,9 @@ export class Game implements CombatWorld {
     this.arrows.update(dt);
     this.crash.update(dt, this.sky.ambient);
     this.base.update(dt, this.time, this.sky.ambient);
+    this.village.update(dt, this.sky.ambient);
+    this.updateZones();
+    this.tribe.update(dt, { player: this.player.pos, alive: !this.vitals.dead, night: this.sky.night > 0.5, day: this.sky.day, zones: this.zones });
     this.updateCooking(dt);
     this.wildlife.update(dt, this.player.pos, this.player.sprinting || (this.player.moving && !this.input.keys.has('ControlLeft')));
     this.pickups.update(this.time);
@@ -398,6 +421,10 @@ export class Game implements CombatWorld {
     }
     if (!this.inv.has(this.inv.selected) && !this.pendingUse) this.select('axe');
     if (inp.justPressed('KeyT') && !this.tutorialDone) this.skipTutorial();
+    if ((inp.justPressed('Tab') || inp.justPressed('KeyB')) && !this.placing) {
+      this.openMenu();
+      return;
+    }
     if (inp.justPressed('F3')) this.showFps = !this.showFps;
 
     const click = inp.consumeClick();
@@ -494,6 +521,11 @@ export class Game implements CombatWorld {
       case 'hide':
         inv.mats.hide += p.amount;
         break;
+      case 'totem':
+        inv.mats.totem += 1;
+        this.sound.levelUp();
+        this.hud.message('TOTEM TRIBAL', 'Abra o menu [Tab] e evolua para o Nível 2: Arco, Muro, Portão e Armadura Reforçada.', 6);
+        break;
       case 'arrow':
         inv.mats.arrows += p.amount;
         break;
@@ -550,19 +582,18 @@ export class Game implements CombatWorld {
       }
       if (pl.kind === 'gate' && d < 2.8) return { key: 'E', text: pl.open ? 'Fechar portão' : 'Abrir portão', run: () => this.base.toggleGate(pl) };
     }
-    const cab = this.base.cabin;
-    if (Math.hypot(cab.pos.x - p.x, cab.pos.z - p.z) < 5.2) {
+    const cab = this.base.cabinNear(p, 5.2);
+    if (cab) {
       if (cab.complete) return { key: 'E', text: 'Dormir até 07:00', run: () => this.startSleep() };
       const d = cab.delivered;
       const text = `Entregar (Toras ${d.logs}/${CABIN_COST.logs} · Gravetos ${d.sticks}/${CABIN_COST.sticks} · Pedras ${d.rocks}/${CABIN_COST.rocks})`;
-      return { key: 'E', text, run: () => this.deliverCabin() };
+      return { key: 'E', text, run: () => this.deliverCabin(cab) };
     }
-    if (Math.hypot(this.base.benchPos.x - p.x, this.base.benchPos.z - p.z) < 2.8) return { key: 'E', text: `Bancada de Criação (Nv ${this.base.benchLevel})`, run: () => this.openMenu() };
     return null;
   }
 
-  private deliverCabin(): void {
-    const take = this.base.cabin.deliver({ logs: this.inv.logs, sticks: this.inv.mats.sticks, rocks: this.inv.mats.rocks });
+  private deliverCabin(cabin: Cabin): void {
+    const take = cabin.deliver({ logs: this.inv.logs, sticks: this.inv.mats.sticks, rocks: this.inv.mats.rocks });
     const n = take.logs + take.sticks + take.rocks;
     if (n === 0) {
       this.sound.denied();
@@ -575,11 +606,11 @@ export class Game implements CombatWorld {
     this.vm.setLogs(this.inv.logs);
     this.sound.build();
     this.player.addTrauma(0.08);
-    if (this.base.cabin.complete) {
+    if (cabin.complete) {
       this.hud.message('CABANA PRONTA', 'Agora você pode dormir [E] para curar e pular a noite.', 5);
       this.sound.levelUp();
     } else {
-      this.hud.toast(`🛖 Cabana ${Math.round(this.base.cabin.progress * 100)}%`);
+      this.hud.toast(`🛖 Cabana ${Math.round(cabin.progress * 100)}%`);
     }
   }
 
@@ -675,6 +706,8 @@ export class Game implements CombatWorld {
 
   private openMenu(): void {
     this.menuOpen = true;
+    this.flags.menuOpened = true;
+    this.cancelPlacement();
     this.craft.open(this.craftState());
     this.setPlaying(false);
     if (document.pointerLockElement) document.exitPointerLock();
@@ -798,10 +831,15 @@ export class Game implements CombatWorld {
       return;
     }
     this.pay(pl.recipe.cost);
-    const placed = this.base.place(pl.kind, pl.x, pl.z, pl.yaw);
-    const ratio = this.renderer.getPixelRatio();
-    placed.fire?.setViewportHeight(innerHeight * ratio);
-    placed.smoke?.setViewportHeight(innerHeight * ratio);
+    if (pl.kind === 'cabin') {
+      this.base.placeCabin(pl.x, pl.z, pl.yaw);
+      this.hud.message('CABANA MARCADA', 'Entregue 6 toras, 10 gravetos e 6 pedras com [E] para erguê-la.', 4.5);
+    } else {
+      const placed = this.base.place(pl.kind, pl.x, pl.z, pl.yaw);
+      const ratio = this.renderer.getPixelRatio();
+      placed.fire?.setViewportHeight(innerHeight * ratio);
+      placed.smoke?.setViewportHeight(innerHeight * ratio);
+    }
     this.sound.build();
     this.debris.burst(this.v1.set(pl.x, this.terrain.height(pl.x, pl.z) + 0.2, pl.z), this.v3.set(0, 1, 0), 14, 0xc2a070, { speed: 2.5, size: 0.07, floor: this.terrain.height(pl.x, pl.z) });
     this.hud.toast(`${pl.recipe.icon} ${pl.recipe.label} construído`);
@@ -903,6 +941,8 @@ export class Game implements CombatWorld {
     if (c) best = { kind: 'case', t: c.t, index: c.index, metal: false };
     const an = this.wildlife.raycast(o, d, best ? best.t : maxDist, inflate * 0.7);
     if (an) best = { kind: 'animal', t: an.t, index: an.index, metal: false };
+    const en = this.tribe.raycast(o, d, best ? best.t : maxDist, inflate * 0.7);
+    if (en) best = { kind: 'enemy', t: en.t, index: en.index, metal: false };
 
     const a = d.x * d.x + d.z * d.z;
     if (a > 1e-6) {
@@ -987,6 +1027,10 @@ export class Game implements CombatWorld {
         this.hitAnimal(hit.index, spec.animal, p, n);
         this.player.addTrauma(0.1);
         break;
+      case 'enemy':
+        this.hitCannibal(hit.index, spec.animal, p, n);
+        this.player.addTrauma(0.14);
+        break;
       case 'hard':
         this.debris.burst(p, n, 8, hit.metal ? 0xffd27a : 0x8c8a85, { speed: 3, size: 0.03, floor, life: hit.metal ? 0.35 : 0.8 });
         this.sound.impact(hit.metal ? 'metal' : 'rock');
@@ -1030,6 +1074,11 @@ export class Game implements CombatWorld {
         this.sound.arrowHit('flesh');
         this.hud.hitMarker();
         // The arrow drops by the animal and can be recovered.
+        this.pickups.addArrow(this.v4.set(tip.x, floor + 0.03, tip.z), new THREE.Quaternion().setFromEuler(new THREE.Euler(0, Math.random() * 6, Math.PI / 2)));
+        break;
+      case 'enemy':
+        this.hitCannibal(hit!.index, 55, tip, n);
+        this.sound.arrowHit('flesh');
         this.pickups.addArrow(this.v4.set(tip.x, floor + 0.03, tip.z), new THREE.Quaternion().setFromEuler(new THREE.Euler(0, Math.random() * 6, Math.PI / 2)));
         break;
       case 'case':
@@ -1228,14 +1277,14 @@ export class Game implements CombatWorld {
       this.flags.caseBroken,
       this.flags.logTaken,
       this.flags.gathered,
-      Math.hypot(this.base.benchPos.x - this.player.pos.x, this.base.benchPos.z - this.player.pos.z) < 12,
+      this.flags.menuOpened,
     ];
     while (this.tutorialStep < TUTORIAL.length && done[this.tutorialStep]) {
       this.tutorialStep++;
       this.sound.pickup();
     }
     if (this.tutorialStep >= TUTORIAL.length) {
-      this.hud.message('TUTORIAL CONCLUÍDO', 'Entregue materiais na cabana e use a bancada [E].', 4);
+      this.hud.message('TUTORIAL CONCLUÍDO', 'Construa sua cabana e uma fogueira antes da noite: o fogo afasta os canibais.', 5);
       this.skipTutorial();
       return;
     }
@@ -1247,6 +1296,7 @@ export class Game implements CombatWorld {
     const coast = this.terrain.coastDistance(p.x, p.z);
     const sea = 1 - smoothstep(0, 130, coast);
     let fire = 1 - smoothstep(3, 32, p.distanceTo(this.crash.firePos));
+    fire = Math.max(fire, (1 - smoothstep(2, 20, p.distanceTo(this.village.fire.origin))) * 0.7);
     for (const pl of this.base.placed) if (pl.kind === 'campfire') fire = Math.max(fire, (1 - smoothstep(1, 14, pl.pos.distanceTo(p))) * 0.6);
     if (this.inv.selected === 'torch') fire = Math.max(fire, 0.25);
     this.sound.updateAmbience(sea, fire, this.sky.night, p.y);
@@ -1281,6 +1331,56 @@ export class Game implements CombatWorld {
       this.player.wake = 0;
       this.fadeIn = 1;
     }
+  }
+
+  /** Lit campfires (16 m) and finished cabins (8 m) keep cannibals out. */
+  private updateZones(): void {
+    this.zones.length = 0;
+    for (const pl of this.base.placed) if (pl.kind === 'campfire') this.zones.push({ x: pl.pos.x, z: pl.pos.z, r: 16 });
+    for (const c of this.base.cabins) if (c.complete) this.zones.push({ x: c.pos.x, z: c.pos.z, r: 8 });
+  }
+
+  private hitCannibal(i: number, dmg: number, p: THREE.Vector3, n: THREE.Vector3): void {
+    const c = this.tribe.list[i];
+    const killed = this.tribe.damage(i, dmg);
+    this.debris.burst(p, n, killed ? 16 : 9, 0x7a1414, { speed: 2.6, size: 0.04, floor: c.pos.y + 0.02, life: 0.9 });
+    this.sound.animalHurt(true);
+    this.hud.showTargetHealth(Math.max(0, c.hp) / c.maxHp);
+    this.hud.hitMarker();
+    if (killed) this.hud.toast(c.role === 'boss' ? '👑 Chefe Tribal derrotado!' : '💀 Canibal derrotado');
+  }
+
+  private onCannibalHit(dmg: number, c: Cannibal): void {
+    this.vitals.damage(dmg);
+    this.sound.hurt();
+    this.player.addTrauma(c.role === 'boss' ? 0.5 : 0.3);
+    // Knock the player back a little from the blow.
+    const dx = this.player.pos.x - c.pos.x;
+    const dz = this.player.pos.z - c.pos.z;
+    const d = Math.hypot(dx, dz) || 1;
+    this.player.vel.x += (dx / d) * 4;
+    this.player.vel.z += (dz / d) * 4;
+  }
+
+  private onCannibalDeath(c: Cannibal): void {
+    const drops: ItemType[] = [];
+    const pool: ItemType[] = ['cloth', 'food', 'bandage'];
+    const count = c.role === 'boss' ? 3 : 1 + (Math.random() < 0.5 ? 1 : 0);
+    for (let k = 0; k < count; k++) drops.push(pool[Math.floor(Math.random() * pool.length)]);
+    if (c.role === 'boss') drops.push('totem');
+    drops.forEach((type, k) => {
+      const a = (k / drops.length) * Math.PI * 2 + Math.random();
+      const x = c.pos.x + Math.cos(a) * 0.8;
+      const z = c.pos.z + Math.sin(a) * 0.8;
+      this.pickups.add(type, this.v4.set(x, this.terrain.height(x, z), z), 1);
+    });
+    if (c.role === 'boss') this.hud.message('O CHEFE CAIU', 'Pegue o Totem Tribal [E] para evoluir seu menu para o Nível 2.', 6);
+  }
+
+  private onScoutSpotted(): void {
+    if (this.time - this.spottedT < 25) return;
+    this.spottedT = this.time;
+    this.hud.toast('👁️ Algo está te observando da floresta…');
   }
 
   /** Debug helper: boss items and a pile of materials to test every recipe. */

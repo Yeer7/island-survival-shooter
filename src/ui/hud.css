@@ -579,3 +579,28 @@
   background: rgba(255, 210, 122, 0.08);
   font-size: 12px;
 }
+
+.hud-craft-btn {
+  pointer-events: auto;
+  border: 0;
+  border-radius: 6px;
+  padding: 3px 10px;
+  background: rgba(10, 16, 20, 0.5);
+  color: #f4f7f5;
+  font: 600 11.5px system-ui, sans-serif;
+  cursor: pointer;
+  opacity: 0.85;
+}
+.hud-craft-btn:hover {
+  background: rgba(217, 119, 6, 0.45);
+  opacity: 1;
+}
+.hud-craft-btn kbd {
+  display: inline-block;
+  padding: 0 5px;
+  margin-right: 5px;
+  border-radius: 4px;
+  background: #f4f7f5;
+  color: #101418;
+  font: 700 10px/16px system-ui, sans-serif;
+}

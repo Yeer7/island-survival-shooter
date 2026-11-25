@@ -268,14 +268,197 @@ export function buildRod(): THREE.Group {
   return g;
 }
 
+function canvasTex(w: number, h: number, draw: (g: CanvasRenderingContext2D) => void): THREE.CanvasTexture {
+  const c = document.createElement('canvas');
+  c.width = w;
+  c.height = h;
+  draw(c.getContext('2d')!);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  return t;
+}
+
+const meatMats: Partial<Record<'raw' | 'cooked', THREE.MeshStandardMaterial[]>> = {};
+
+/** Marbled steak face (raw) or seared crust with grill marks (cooked). */
+function meatMaterials(cooked: boolean): THREE.MeshStandardMaterial[] {
+  const key = cooked ? 'cooked' : 'raw';
+  const cachedMats = meatMats[key];
+  if (cachedMats) return cachedMats;
+  let seed = cooked ? 7 : 3;
+  const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  const face = canvasTex(256, 256, (g) => {
+    g.fillStyle = cooked ? '#6b3417' : '#a8282b';
+    g.fillRect(0, 0, 256, 256);
+    // Fat marbling: thin wandering streaks.
+    g.strokeStyle = cooked ? 'rgba(214,160,96,0.55)' : 'rgba(246,226,214,0.85)';
+    for (let i = 0; i < 26; i++) {
+      g.lineWidth = 1 + rnd() * 3.5;
+      g.beginPath();
+      let x = rnd() * 256;
+      let y = rnd() * 256;
+      g.moveTo(x, y);
+      for (let k = 0; k < 6; k++) {
+        x += (rnd() - 0.5) * 60;
+        y += (rnd() - 0.5) * 60;
+        g.lineTo(x, y);
+      }
+      g.stroke();
+    }
+    for (let i = 0; i < 900; i++) {
+      g.fillStyle = cooked ? `rgba(40,16,6,${rnd() * 0.25})` : `rgba(90,10,14,${rnd() * 0.3})`;
+      g.fillRect(rnd() * 256, rnd() * 256, 3, 3);
+    }
+    if (cooked) {
+      g.strokeStyle = 'rgba(25,10,4,0.85)';
+      g.lineWidth = 9;
+      for (let i = -1; i < 5; i++) {
+        g.beginPath();
+        g.moveTo(i * 60, 0);
+        g.lineTo(i * 60 + 140, 256);
+        g.stroke();
+      }
+    }
+  });
+  const edge = canvasTex(64, 64, (g) => {
+    g.fillStyle = cooked ? '#4a240f' : '#e9d6c2';
+    g.fillRect(0, 0, 64, 64);
+    g.fillStyle = cooked ? '#6b3417' : '#b23a33';
+    g.fillRect(0, 22, 64, 30);
+  });
+  const mats = [
+    new THREE.MeshStandardMaterial({ map: face, roughness: cooked ? 0.75 : 0.45 }),
+    new THREE.MeshStandardMaterial({ map: edge, roughness: cooked ? 0.8 : 0.5 }),
+  ];
+  meatMats[key] = mats;
+  return mats;
+}
+
+/** A cut of meat on the bone: irregular slab with marbled faces and a bone. Origin at its base. */
 export function buildMeat(cooked: boolean): THREE.Group {
   const g = new THREE.Group();
-  const m = new THREE.Mesh(new THREE.SphereGeometry(0.07, 8, 6), std(cooked ? 0x7a4320 : 0xb4413c, 0.6));
-  m.scale.set(1.3, 0.7, 1);
-  const bone = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.14, 6), std(0xeee6d2, 0.6));
+  const shape = new THREE.Shape();
+  const pts = 14;
+  for (let i = 0; i <= pts; i++) {
+    const a = (i / pts) * Math.PI * 2;
+    const r = 0.11 * (1 + 0.16 * Math.sin(a * 3 + 1) + 0.08 * Math.cos(a * 5));
+    const x = Math.cos(a) * r * 1.35;
+    const y = Math.sin(a) * r;
+    if (i === 0) shape.moveTo(x, y);
+    else shape.lineTo(x, y);
+  }
+  const geo = new THREE.ExtrudeGeometry(shape, { depth: 0.045, bevelEnabled: true, bevelThickness: 0.012, bevelSize: 0.012, bevelSegments: 2, curveSegments: 4 });
+  // Planar UVs on the faces so the marbling is not stretched.
+  const pos = geo.attributes.position;
+  const uv = geo.attributes.uv;
+  for (let i = 0; i < pos.count; i++) uv.setXY(i, pos.getX(i) * 3 + 0.5, pos.getY(i) * 3 + 0.5);
+  geo.rotateX(-Math.PI / 2);
+  geo.translate(0, 0.012, 0);
+  const mats = meatMaterials(cooked);
+  const slab = new THREE.Mesh(geo, [mats[0], mats[1]]);
+  slab.castShadow = true;
+  const boneMat = new THREE.MeshStandardMaterial({ color: cooked ? 0xd8c4a0 : 0xf1e8d6, roughness: 0.55 });
+  const bone = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.016, 0.16, 8), boneMat);
   bone.rotation.z = Math.PI / 2;
-  bone.position.x = 0.08;
-  g.add(m, bone);
+  bone.position.set(0.19, 0.035, 0.01);
+  const knob1 = new THREE.Mesh(new THREE.SphereGeometry(0.022, 8, 6), boneMat);
+  knob1.position.set(0.27, 0.04, 0.018);
+  const knob2 = knob1.clone();
+  knob2.position.set(0.27, 0.035, -0.014);
+  g.add(slab, bone, knob1, knob2);
+  return g;
+}
+
+let hideMats: THREE.Material[] | null = null;
+
+/** Rolled animal hide tied with two cords. Origin at its base. */
+export function buildHide(): THREE.Group {
+  if (!hideMats) {
+    let seed = 11;
+    const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+    const leather = canvasTex(128, 128, (g) => {
+      g.fillStyle = '#8a5f3a';
+      g.fillRect(0, 0, 128, 128);
+      for (let i = 0; i < 1400; i++) {
+        const v = rnd();
+        g.fillStyle = v > 0.5 ? `rgba(120,84,52,${rnd() * 0.5})` : `rgba(70,44,24,${rnd() * 0.4})`;
+        g.fillRect(rnd() * 128, rnd() * 128, 2 + rnd() * 4, 1 + rnd() * 2);
+      }
+    });
+    const spiral = canvasTex(128, 128, (g) => {
+      g.fillStyle = '#6e4a2c';
+      g.fillRect(0, 0, 128, 128);
+      g.strokeStyle = '#b48a5e';
+      g.lineWidth = 4;
+      g.beginPath();
+      for (let a = 0; a < Math.PI * 10; a += 0.1) {
+        const r = 4 + a * 1.8;
+        g.lineTo(64 + Math.cos(a) * r, 64 + Math.sin(a) * r);
+      }
+      g.stroke();
+    });
+    spiral.wrapS = spiral.wrapT = THREE.ClampToEdgeWrapping;
+    hideMats = [
+      new THREE.MeshStandardMaterial({ map: leather, roughness: 0.9 }),
+      new THREE.MeshStandardMaterial({ map: spiral, roughness: 0.9 }),
+      new THREE.MeshStandardMaterial({ map: spiral, roughness: 0.9 }),
+    ];
+  }
+  const g = new THREE.Group();
+  const roll = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.46, 14), hideMats);
+  roll.rotation.z = Math.PI / 2;
+  roll.position.y = 0.1;
+  roll.castShadow = true;
+  const cordMat = new THREE.MeshStandardMaterial({ color: 0x3b2a1a, roughness: 1 });
+  for (const x of [-0.13, 0.13]) {
+    const cord = new THREE.Mesh(new THREE.TorusGeometry(0.103, 0.009, 6, 18), cordMat);
+    cord.rotation.y = Math.PI / 2;
+    cord.position.set(x, 0.1, 0);
+    g.add(cord);
+  }
+  // A loose flap of fur on top.
+  const flap = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.01, 0.08), hideMats[0]);
+  flap.position.set(0.02, 0.19, 0.06);
+  flap.rotation.set(0.5, 0.1, 0);
+  g.add(roll, flap);
+  return g;
+}
+
+/** Carved tribal totem dropped by the chief. Origin at its base. */
+export function buildTotem(): THREE.Group {
+  const g = new THREE.Group();
+  const wood = new THREE.MeshStandardMaterial({ color: 0x7a5232, roughness: 0.85, emissive: 0x2a1406, emissiveIntensity: 0.4 });
+  const paint = new THREE.MeshStandardMaterial({ color: 0xb8322a, roughness: 0.7 });
+  const gold = new THREE.MeshStandardMaterial({ color: 0xe8c24a, roughness: 0.6 });
+  const bone = new THREE.MeshStandardMaterial({ color: 0xece3cf, roughness: 0.6 });
+  for (let i = 0; i < 3; i++) {
+    const block = new THREE.Mesh(new THREE.CylinderGeometry(0.09 - i * 0.01, 0.1 - i * 0.01, 0.16, 8), wood);
+    block.position.y = 0.08 + i * 0.16;
+    const band = new THREE.Mesh(new THREE.TorusGeometry(0.095 - i * 0.01, 0.012, 4, 12), paint);
+    band.rotation.x = Math.PI / 2;
+    band.position.y = 0.15 + i * 0.16;
+    g.add(block, band);
+  }
+  const skull = new THREE.Mesh(new THREE.SphereGeometry(0.075, 10, 8), bone);
+  skull.scale.set(1, 0.9, 1.1);
+  skull.position.y = 0.56;
+  const eyeMat = new THREE.MeshStandardMaterial({ color: 0x120a06 });
+  for (const x of [-0.028, 0.028]) {
+    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.018, 6, 4), eyeMat);
+    eye.position.set(x, 0.57, 0.068);
+    g.add(eye);
+  }
+  for (let k = 0; k < 5; k++) {
+    const f = new THREE.Mesh(new THREE.ConeGeometry(0.018, 0.18, 4), k % 2 ? paint : gold);
+    f.position.set((k - 2) * 0.03, 0.66, -0.03);
+    f.rotation.z = (k - 2) * 0.25;
+    g.add(f);
+  }
+  g.add(skull);
+  g.traverse((o) => {
+    if ((o as THREE.Mesh).isMesh) o.castShadow = true;
+  });
   return g;
 }
 
@@ -314,8 +497,4 @@ export function buildSticks(): THREE.Group {
   return g;
 }
 
-export function buildHide(): THREE.Mesh {
-  const geo = new THREE.BoxGeometry(0.4, 0.025, 0.3, 4, 1, 3);
-  const m = new THREE.Mesh(geo, std(0x8b6a45, 1));
-  return m;
-}
+

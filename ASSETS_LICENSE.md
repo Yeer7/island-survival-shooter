@@ -4,7 +4,7 @@ Every third-party file shipped in `public/assets/` is listed here with its sourc
 
 Conventions applied on load (`src/assets/assets.ts`): metres, +Y up, origin at the base (feet), centred on X/Z. Scale is fitted in code, so the files are shipped as downloaded except where noted.
 
-The Ultimate Stylized Nature files come from the pack the owner downloaded (its `License.txt`: CC0 1.0 Universal, Public Domain Dedication).
+The Ultimate Stylized Nature and Survival Pack files come from the pack the owner downloaded (its `License.txt`: CC0 1.0 Universal, Public Domain Dedication).
 
 Run `npm run lint:assets` to check every `.glb`/`.gltf`/`.fbx` and texture (parses, triangle and size budgets, listed in this file).
 
@@ -29,6 +29,10 @@ Run `npm run lint:assets` to check every `.glb`/`.gltf`/`.fbx` and texture (pars
 | `ultimate/PalmTree_1.fbx`, `PalmTree_2.fbx`, `PalmTree_3.fbx` | PalmTree_1–3 | Quaternius — Ultimate Stylized Nature Pack (May 2022) | https://quaternius.com/packs/ultimatenature.html | CC0 1.0 | None (materials rebuilt in code from the textures below) |
 | `ultimate/PalmTree_Trunk.jpg` | PalmTree_Trunk texture | Quaternius — Ultimate Stylized Nature Pack (May 2022) | https://quaternius.com/packs/ultimatenature.html | CC0 1.0 | Resized 2048 → 512 px |
 | `ultimate/PalmTree_Leaves.png` | PalmTree_Leaves texture | Quaternius — Ultimate Stylized Nature Pack (May 2022) | https://quaternius.com/packs/ultimatenature.html | CC0 1.0 | Resized 1024 → 512 px |
+| `survivalpack/FirstAidKit.fbx` | FirstAidKit (Curativo drop) | Quaternius — Survival Pack (Sept 2020) | https://quaternius.com/packs/survival.html | CC0 1.0 | None (flat colours converted to PBR in code) |
+| `survivalpack/Bandages.fbx` | Bandages | Quaternius — Survival Pack (Sept 2020) | https://quaternius.com/packs/survival.html | CC0 1.0 | None |
+| `survivalpack/Can_Closed.fbx` | Can_Closed (Comida drop) | Quaternius — Survival Pack (Sept 2020) | https://quaternius.com/packs/survival.html | CC0 1.0 | None |
+| `survivalpack/Backpack.fbx` | Backpack (reserved for the backpack in phase 3C) | Quaternius — Survival Pack (Sept 2020) | https://quaternius.com/packs/survival.html | CC0 1.0 | None |
 | `nature/fern.glb` | Fern | Quaternius | https://poly.pizza/m/jqcanvH7D6 | CC0 1.0 | Textures resized to 256 px |
 | `animals/deer.glb` | Deer (animated) | Quaternius | https://poly.pizza/m/T6Cs7tmMHJ | CC0 1.0 | None |
 | `animals/stag.glb` | Stag (animated) | Quaternius | https://poly.pizza/m/tQdzbZ1Cmw | CC0 1.0 | None |
@@ -39,7 +43,6 @@ Run `npm run lint:assets` to check every `.glb`/`.gltf`/`.fbx` and texture (pars
 | `tools/fishing_rod.glb` | Fishing Rod | Quaternius | https://poly.pizza/m/0YAR0Lg58p | CC0 1.0 | None |
 | `survival/tool-axe.glb` | tool-axe (Survival Kit 2.0) | Kenney | https://kenney.nl/assets/survival-kit | CC0 1.0 | None |
 | `survival/tool-axe-upgraded.glb` | tool-axe-upgraded (Survival Kit 2.0) | Kenney | https://kenney.nl/assets/survival-kit | CC0 1.0 | None (emissive tint added in code) |
-| `survival/workbench.glb` | workbench (Survival Kit 2.0) | Kenney | https://kenney.nl/assets/survival-kit | CC0 1.0 | None |
 | `survival/campfire-pit.glb` | campfire-pit (Survival Kit 2.0) | Kenney | https://kenney.nl/assets/survival-kit | CC0 1.0 | None |
 | `survival/fish.glb` | fish (Survival Kit 2.0) | Kenney | https://kenney.nl/assets/survival-kit | CC0 1.0 | None |
 | `survival/Textures/colormap.png` | Survival Kit colour atlas | Kenney | https://kenney.nl/assets/survival-kit | CC0 1.0 | None |
@@ -48,6 +51,9 @@ Poly Pizza pages list each Quaternius model as "CC0 1.0 / Public Domain"; the Ke
 
 ## Made in code (no third-party source)
 
+- **Meat (raw/cooked), rolled hide and the Tribal Totem drops**: built in code with procedural marbling, grill-mark, leather and spiral textures (`src/weapons/models.ts`).
+- **Cannibals and the Tribal Chief**: articulated bodies built from primitives with procedural body-paint and carved-mask textures, animated in code (`src/world/cannibals.ts`).
+- **Tribal village**: thatched huts, skull totems, fire and crates built in code (`src/world/village.ts`).
 - **Tree stumps**: a cylinder with the procedural bark texture on the side and a procedural growth-ring texture on the cut top (`src/world/vegetation.ts`, `src/world/textures.ts`).
 - **Rabbits**: multi-part procedural model (`src/world/animals.ts`). No CC0 *animal* rabbit was available: the Quaternius "Rabbit"/"Bunny" files are humanoid characters, and the animal rabbits on Poly Pizza are CC-BY 3.0, so they were not used.
 - **Terrain, bark, needle, sand, grass, rock and plank detail textures**: painted procedurally on canvases at load (`src/world/textures.ts`).

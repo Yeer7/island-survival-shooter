@@ -25,6 +25,10 @@ export const ASSET_FILES = {
   palm2: 'assets/ultimate/PalmTree_2.fbx',
   palm3: 'assets/ultimate/PalmTree_3.fbx',
   fern: 'assets/nature/fern.glb',
+  firstAid: 'assets/survivalpack/FirstAidKit.fbx',
+  bandages: 'assets/survivalpack/Bandages.fbx',
+  can: 'assets/survivalpack/Can_Closed.fbx',
+  backpack: 'assets/survivalpack/Backpack.fbx',
   deer: 'assets/animals/deer.glb',
   stag: 'assets/animals/stag.glb',
   bow: 'assets/tools/bow.glb',
@@ -34,7 +38,6 @@ export const ASSET_FILES = {
   rod: 'assets/tools/fishing_rod.glb',
   axe: 'assets/survival/tool-axe.glb',
   axeUpgraded: 'assets/survival/tool-axe-upgraded.glb',
-  workbench: 'assets/survival/workbench.glb',
   campfire: 'assets/survival/campfire-pit.glb',
   fish: 'assets/survival/fish.glb',
 } as const;
@@ -122,6 +125,11 @@ export class AssetLibrary {
             if (!m.isMesh) return;
             const old = (Array.isArray(m.material) ? m.material : [m.material]) as THREE.Material[];
             const rebuilt = old.map((mat) => {
+              if (!set) {
+                // Flat-coloured low-poly FBX (SurvivalPack): keep its colours, make it PBR.
+                const src = mat as THREE.MeshPhongMaterial;
+                return new THREE.MeshStandardMaterial({ name: mat.name, color: src.color ? src.color.clone() : new THREE.Color(0xcccccc), roughness: 0.75, metalness: 0 });
+              }
               const isLeaf = /leaf|leaves/i.test(mat.name);
               return new THREE.MeshStandardMaterial({
                 name: mat.name,

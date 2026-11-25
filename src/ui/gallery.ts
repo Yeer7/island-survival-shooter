@@ -1,6 +1,9 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { ASSET_FILES, AssetLibrary, AssetName } from '../assets/assets';
+import { buildHide, buildMeat, buildTotem } from '../weapons/models';
+import { buildCannibal } from '../world/cannibals';
+import { normalize } from '../assets/assets';
 
 /**
  * `?assets`: a lit room with an orbit camera showing every loaded model side by
@@ -31,9 +34,18 @@ export function startGallery(canvas: HTMLCanvasElement, lib: AssetLibrary): void
   scene.add(fill);
 
   const names = Object.keys(ASSET_FILES) as AssetName[];
+  // Models built in code, shown next to the files.
+  const extras: { label: string; build: () => THREE.Object3D }[] = [
+    { label: 'code: carne crua', build: () => buildMeat(false) },
+    { label: 'code: carne assada', build: () => buildMeat(true) },
+    { label: 'code: pele (rolo)', build: () => buildHide() },
+    { label: 'code: totem tribal', build: () => buildTotem() },
+    { label: 'code: canibal', build: () => buildCannibal('raider').rig.root },
+    { label: 'code: chefe tribal', build: () => buildCannibal('boss').rig.root },
+  ];
   const cols = 7;
   const spacing = 3.4;
-  const rows = Math.ceil(names.length / cols);
+  const rows = Math.ceil((names.length + extras.length) / cols);
   const floor = new THREE.Mesh(new THREE.PlaneGeometry(cols * spacing + 6, rows * spacing + 6), new THREE.MeshStandardMaterial({ color: 0xb9bec3, roughness: 0.95 }));
   floor.rotation.x = -Math.PI / 2;
   floor.receiveShadow = true;
@@ -70,6 +82,27 @@ export function startGallery(canvas: HTMLCanvasElement, lib: AssetLibrary): void
     scene.add(label(ASSET_FILES[name].replace('assets/', ''), x, z + 1.45));
   });
 
+  extras.forEach((e, k) => {
+    const i = names.length + k;
+    const c = i % cols;
+    const r = Math.floor(i / cols);
+    const x = (c - (cols - 1) / 2) * spacing;
+    const z = (r - (rows - 1) / 2) * spacing;
+    const holder = new THREE.Group();
+    holder.add(e.build());
+    const obj = normalize(holder, { by: 'max', value: 2 });
+    obj.position.set(x, 0, z);
+    obj.traverse((o) => {
+      if ((o as THREE.Mesh).isMesh) o.castShadow = o.receiveShadow = true;
+    });
+    scene.add(obj);
+    const pad = new THREE.Mesh(new THREE.CircleGeometry(1.35, 32), new THREE.MeshStandardMaterial({ color: 0xcfd3d7, roughness: 1 }));
+    pad.rotation.x = -Math.PI / 2;
+    pad.position.set(x, 0.004, z);
+    scene.add(pad);
+    scene.add(label(e.label, x, z + 1.45));
+  });
+
   const camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.1, 300);
   camera.position.set(0, 8.5, rows * spacing * 0.75 + 2);
   const controls = new OrbitControls(camera, canvas);
@@ -90,7 +123,7 @@ export function startGallery(canvas: HTMLCanvasElement, lib: AssetLibrary): void
     controls.update();
     renderer.render(scene, camera);
   });
-  (window as unknown as { __gallery: unknown }).__gallery = { scene, camera, controls, renderer, count: names.filter((n) => lib.has(n)).length };
+  (window as unknown as { __gallery: unknown }).__gallery = { scene, camera, controls, renderer, count: names.filter((n) => lib.has(n)).length + extras.length };
 }
 
 /** File name drawn on a canvas, lying on the floor under each model. */

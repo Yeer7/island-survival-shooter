@@ -57,8 +57,8 @@ export class CraftMenu {
 
   render(state: CraftState): void {
     const h = state.have;
-    let html = `<header><h2>BANCADA DE CRIAÇÃO · NV ${state.level}</h2><button class="ghost" data-close>Fechar (E)</button></header>
-      <div class="have">Toras ${h.logs} (ombro + suportes) · Gravetos ${h.sticks} · Pedras ${h.rocks} · Pano ${h.cloth} · Pele ${h.hide}</div>`;
+    let html = `<header><h2>CRIAÇÃO E CONSTRUÇÃO · NV ${state.level}</h2><button class="ghost" data-close>Fechar (Tab)</button></header>
+      <div class="have">Toras ${h.logs} (ombro + suportes por perto) · Gravetos ${h.sticks} · Pedras ${h.rocks} · Pano ${h.cloth} · Pele ${h.hide}</div>`;
     for (const lvl of [1, 2, 3] as const) {
       const locked = state.level < lvl;
       let lockText = '';

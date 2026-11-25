@@ -16,6 +16,8 @@ export interface CompassTarget {
   cls: string;
   x: number;
   z: number;
+  /** Shown only inside the cave (surface markers hide there). */
+  indoor?: boolean;
 }
 
 /** Minimal HUD: clock + vitals top-right, compass top-centre, hotbar and prompts at the bottom. */
@@ -143,12 +145,13 @@ export class Hud {
     this.root.classList.toggle('on', on);
   }
 
-  private set(key: string, node: HTMLElement, value: string, prop: 'text' | 'html' | 'transform' | 'opacity' = 'text'): void {
+  private set(key: string, node: HTMLElement, value: string, prop: 'text' | 'html' | 'transform' | 'opacity' | 'display' = 'text'): void {
     if (this.cache.get(key) === value) return;
     this.cache.set(key, value);
     if (prop === 'text') node.textContent = value;
     else if (prop === 'html') node.innerHTML = value;
     else if (prop === 'transform') node.style.transform = value;
+    else if (prop === 'display') node.style.display = value;
     else node.style.opacity = value;
   }
 
@@ -236,6 +239,11 @@ export class Hud {
 
   setArmor(text: string): void {
     this.set('armor', this.armorEl, text);
+  }
+
+  /** Inside the cave only its own markers show (surface distances there are meaningless). */
+  setIndoorCompass(on: boolean): void {
+    for (const m of this.markers) this.set(`md-${m.t.name}`, m.el, !!m.t.indoor === on ? '' : 'none', 'display');
   }
 
   setMarkerVisible(name: string, on: boolean): void {

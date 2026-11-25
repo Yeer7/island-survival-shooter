@@ -33,6 +33,8 @@ export const ASSET_FILES = {
   pot: 'assets/survivalpack/Pot.fbx',
   woodTorch: 'assets/survivalpack/WoodenTorch.fbx',
   woodLog: 'assets/survivalpack/WoodLog.fbx',
+  radio: 'assets/survivalpack/Radio.fbx',
+  gasCan: 'assets/survivalpack/GasCan.fbx',
   skull: 'assets/village/skull.glb',
   bone: 'assets/village/bone.glb',
   crate: 'assets/village/crate.glb',

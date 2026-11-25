@@ -37,6 +37,8 @@ Run `npm run lint:assets` to check every `.glb`/`.gltf`/`.fbx` and texture (pars
 | `survivalpack/Pot.fbx` | Pot (village cooking pots) | Quaternius — Survival Pack (Sept 2020) | https://quaternius.com/packs/survival.html | CC0 1.0 | None (flat colours converted to PBR in code) |
 | `survivalpack/WoodenTorch.fbx` | WoodenTorch (village torches; flames are particles in code) | Quaternius — Survival Pack (Sept 2020) | https://quaternius.com/packs/survival.html | CC0 1.0 | None (recoloured in code) |
 | `survivalpack/WoodLog.fbx` | WoodLog (log benches round the village fire) | Quaternius — Survival Pack (Sept 2020) | https://quaternius.com/packs/survival.html | CC0 1.0 | None (recoloured in code) |
+| `survivalpack/Radio.fbx` | Radio (expedition camp table in the cave) | Quaternius — Survival Pack (Sept 2020) | https://quaternius.com/packs/survival.html | CC0 1.0 | None (flat colours converted to PBR in code) |
+| `survivalpack/GasCan.fbx` | GasCan (expedition camp in the cave) | Quaternius — Survival Pack (Sept 2020) | https://quaternius.com/packs/survival.html | CC0 1.0 | None (flat colours converted to PBR in code) |
 | `village/skull.glb` | Skull (effigies, door posts, gates, skull pile) | Quaternius | https://poly.pizza/m/YgmRBtFlcF | CC0 1.0 | None (tinted bone-white in code) |
 | `village/bone.glb` | Bone (effigies, hanging bones, scattered bones) | Quaternius | https://poly.pizza/m/uMs0lDp1u3 | CC0 1.0 | None (tinted bone-white in code) |
 | `village/crate.glb` | Crate (lootable village crates) | Quaternius | https://poly.pizza/m/3VGWnZPXmG | CC0 1.0 | None |
@@ -69,6 +71,7 @@ Poly Pizza pages list each Quaternius model as "CC0 1.0 / Public Domain"; the Ke
 - **North cave (tunnel, stalactites, bridge), east altar, escape sailboat, crash-site dirt patch, coconut, relic, Alpha heart and tactical flashlight drops**: built in code.
 - **Cannibal village structures** (chief's round hut and the smaller hut with stake walls, wattle panels and tiered thatch roofs, the A-frame lodge, drying racks, skull gates and sharpened palisades) and the packed-earth ground, thatch, wattle, hide and straw-fringe textures: built in code (`src/world/village.ts`), dressed with the CC0 models above.
 - **Breakable effigies** (crossed stakes, rope lashings, cloth strips texture) are built in code (`src/world/effigies.ts`) around the CC0 skull and bone models.
+- **Cave interior** (organic FBM tunnel, chasm cliffs, suspension bridge, textured stalactites and stalagmites, expedition table and locked chest): built in code (`src/world/cave.ts`).
 - **Log cabin and survival bed** (linen and leather textures): built in code (`src/world/base.ts`).
 - **Tribal village**: thatched huts, skull totems, fire and crates built in code (`src/world/village.ts`).
 - **Tree stumps**: a cylinder with the procedural bark texture on the side and a procedural growth-ring texture on the cut top (`src/world/vegetation.ts`, `src/world/textures.ts`).

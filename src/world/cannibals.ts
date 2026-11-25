@@ -12,8 +12,8 @@ import { Terrain } from './terrain';
  * guard / boss: the village and its Tribal Chief.
  * guardian: the giant skeleton at the north cave. alpha: the beast at the east altar.
  */
-export type Role = 'scout' | 'stalker' | 'raider' | 'guard' | 'boss' | 'guardian' | 'alpha';
-export type BossRole = 'boss' | 'guardian' | 'alpha';
+export type Role = 'scout' | 'stalker' | 'raider' | 'guard' | 'boss' | 'guardian' | 'alpha' | 'skeleton' | 'skelGuard' | 'deepLord';
+export type BossRole = 'boss' | 'guardian' | 'alpha' | 'deepLord';
 
 export interface SafeZone {
   x: number;
@@ -53,6 +53,9 @@ const ROLE: Record<Role, RoleCfg> = {
   guard: { asset: 'enemyHuman', height: 1.85, hp: 80, walk: 1.6, run: 4.8, damage: 14, reach: 2.1, radius: 0.38, windup: 0.5, attackTime: 1, aggro: 22, leash: 40, name: 'Guarda', clips: HUMAN_CLIPS },
   boss: { asset: 'enemyHuman', height: 2.45, hp: 280, walk: 1.5, run: 4.2, damage: 24, reach: 2.8, radius: 0.5, windup: 0.7, attackTime: 1.3, aggro: 18, leash: 40, name: 'Chefe Tribal', clips: HUMAN_CLIPS },
   guardian: { asset: 'enemySkeleton', height: 3.6, hp: 450, walk: 1.4, run: 3.8, damage: 30, reach: 3.2, radius: 0.9, windup: 0.8, attackTime: 1.5, aggro: 22, leash: 36, name: 'Guardião da Caverna', clips: SKELETON_CLIPS },
+  skeleton: { asset: 'enemySkeleton', height: 1.75, hp: 110, walk: 1.3, run: 4.0, damage: 14, reach: 1.9, radius: 0.38, windup: 0.55, attackTime: 1.1, aggro: 15, leash: 28, name: 'Esqueleto da Caverna', clips: SKELETON_CLIPS },
+  skelGuard: { asset: 'enemySkeleton', height: 1.95, hp: 130, walk: 1.3, run: 4.0, damage: 16, reach: 2.0, radius: 0.42, windup: 0.55, attackTime: 1.1, aggro: 16, leash: 26, name: 'Esqueleto Guarda', clips: SKELETON_CLIPS },
+  deepLord: { asset: 'enemySkeleton', height: 2.8, hp: 340, walk: 1.4, run: 3.8, damage: 28, reach: 2.7, radius: 0.7, windup: 0.75, attackTime: 1.4, aggro: 18, leash: 26, name: 'Senhor das Profundezas', clips: SKELETON_CLIPS },
   alpha: { asset: 'enemyWolf', height: 2.3, hp: 650, walk: 1.8, run: 6.5, damage: 34, reach: 3.0, radius: 0.9, windup: 0.6, attackTime: 1.2, aggro: 26, leash: 45, name: 'Fera Alfa', clips: WOLF_CLIPS },
 };
 
@@ -98,6 +101,8 @@ export interface Cannibal {
   lastZ: number;
   /** Fallback fall (no usable death clip): tilt toward the ground. */
   fallAng: number;
+  /** Lives inside the cave: walks its floor, kept by its walls, only active while the player is in. */
+  cave: boolean;
 }
 
 let maskTex: THREE.CanvasTexture | null = null;
@@ -338,6 +343,14 @@ export interface Lairs {
   village: { center: THREE.Vector3; radius: number };
   cave: THREE.Vector3;
   altar: THREE.Vector3;
+  /** Guard posts inside the cave. */
+  caveInside?: { skeletons: THREE.Vector3[]; guards: THREE.Vector3[]; lord: THREE.Vector3 };
+}
+
+/** The cave's floor and walls, for the enemies that live inside it. */
+export interface CaveSpace {
+  clamp(p: THREE.Vector3): void;
+  blockedAt(x: number, z: number, r: number): boolean;
 }
 
 /** Every hostile: village tribe and chief, the cave guardian, the alpha beast, and the night parties. */
@@ -349,6 +362,8 @@ export class Tribe {
   kills = 0;
   /** Extra footprints the AI treats as solid (village huts), on top of the colliders. */
   blockers: { x: number; z: number; r: number }[] = [];
+  /** Walls of the cave, for its skeletons (set by the game). */
+  caveSpace: CaveSpace | null = null;
   private spawnedNight = -1;
   private tmp = new THREE.Vector3();
 
@@ -360,6 +375,12 @@ export class Tribe {
     this.spawn('guard', new THREE.Vector3(c.x + 9, 0, c.z - 8), false);
     if (!this.defeated.has('guardian')) this.spawn('guardian', lairs.cave.clone(), false);
     if (!this.defeated.has('alpha')) this.spawn('alpha', lairs.altar.clone(), false);
+    const ci = lairs.caveInside;
+    if (ci) {
+      for (const p of ci.skeletons) this.spawn('skeleton', p.clone(), false, true);
+      for (const p of ci.guards) this.spawn('skelGuard', p.clone(), false, true);
+      if (!this.defeated.has('deepLord')) this.spawn('deepLord', ci.lord.clone(), false, true);
+    }
   }
 
   bossOf(role: BossRole): Cannibal | undefined {
@@ -370,7 +391,7 @@ export class Tribe {
     return this.bossOf('boss');
   }
 
-  private spawn(role: Role, at: THREE.Vector3, night: boolean): Cannibal {
+  private spawn(role: Role, at: THREE.Vector3, night: boolean, cave = false): Cannibal {
     const cfg = ROLE[role];
     const root = new THREE.Group();
     const model = this.lib.instance(cfg.asset, { by: 'height', value: cfg.height });
@@ -391,7 +412,7 @@ export class Tribe {
           c.color.multiplyScalar(0.42);
           c.roughness = 0.9;
         } else {
-          c.color.lerp(new THREE.Color(0x9fb1c4), 0.35);
+          c.color.lerp(new THREE.Color(role === 'deepLord' ? 0x4e4366 : 0x9fb1c4), role === 'deepLord' ? 0.55 : 0.35);
         }
         mats.push(c);
         return c;
@@ -412,7 +433,7 @@ export class Tribe {
     } else {
       // Glowing eyes on the head bone: cyan for the guardian, red for the alpha.
       const head = model.getObjectByName('Head');
-      const glow = new THREE.MeshStandardMaterial({ color: 0x000000, emissive: cfg.asset === 'enemyWolf' ? 0xff2a10 : 0x6fe0ff, emissiveIntensity: 2.5 });
+      const glow = new THREE.MeshStandardMaterial({ color: 0x000000, emissive: cfg.asset === 'enemyWolf' ? 0xff2a10 : role === 'deepLord' ? 0xb45cff : 0x6fe0ff, emissiveIntensity: role === 'deepLord' ? 3.2 : 2.5 });
       const eyes = new THREE.Group();
       for (const x of [-0.07, 0.07]) {
         const e = new THREE.Mesh(new THREE.SphereGeometry(0.035, 8, 6), glow);
@@ -435,7 +456,7 @@ export class Tribe {
       }
       actions[key] = act;
     }
-    at.y = this.terrain.height(at.x, at.z);
+    at.y = cave ? 0 : this.terrain.height(at.x, at.z);
     const c: Cannibal = {
       role,
       cfg,
@@ -474,8 +495,9 @@ export class Tribe {
       lastX: at.x,
       lastZ: at.z,
       fallAng: -1,
+      cave,
     };
-    if (role === 'boss' || role === 'guardian' || role === 'alpha') {
+    if (role === 'boss' || role === 'guardian' || role === 'alpha' || role === 'deepLord') {
       const cv = document.createElement('canvas');
       cv.width = 256;
       cv.height = 40;
@@ -605,7 +627,7 @@ export class Tribe {
       c.deadT = 0;
       c.speed = 0;
       this.kills++;
-      if (c.role === 'boss' || c.role === 'guardian' || c.role === 'alpha') this.defeated.add(c.role);
+      if (c.role === 'boss' || c.role === 'guardian' || c.role === 'alpha' || c.role === 'deepLord') this.defeated.add(c.role);
       if (c.hpBar) c.hpBar.visible = false;
       this.die(c);
       return true;
@@ -655,6 +677,10 @@ export class Tribe {
     for (const d of [Math.min(0.7, range), Math.min(1.45, range), range]) {
       const px = c.pos.x + sx * d;
       const pz = c.pos.z + sz * d;
+      if (c.cave) {
+        if (this.caveSpace?.blockedAt(px, pz, rad)) return true;
+        continue;
+      }
       this.colliders.query(px, pz, 2.5, (col) => {
         if (!hit && Math.hypot(col.x - px, col.z - pz) < col.r + rad) hit = true;
       });
@@ -722,7 +748,9 @@ export class Tribe {
       const cfg = c.cfg;
       const dx = player.x - c.pos.x;
       const dz = player.z - c.pos.z;
-      const dist = ctx.indoors ? 1e4 : Math.hypot(dx, dz);
+      const away = c.cave ? !ctx.indoors : ctx.indoors;
+      const safe = c.cave ? false : playerSafe;
+      const dist = away ? 1e4 : Math.hypot(dx, dz);
       const toPlayer = Math.atan2(dx, dz);
 
       if (c.flashT > 0) {
@@ -783,7 +811,7 @@ export class Tribe {
       let targetSpeed = 0;
       let wantAttack = false;
 
-      if (c.leaving || !ctx.alive || ctx.indoors) {
+      if (c.leaving || !ctx.alive || away) {
         if (c.night) {
           targetHeading = toPlayer + Math.PI;
           targetSpeed = c.leaving ? cfg.run : cfg.walk;
@@ -839,7 +867,7 @@ export class Tribe {
             const aggro = c.provoked || fromHome < cfg.aggro;
             const leash = Math.hypot(c.pos.x - c.home.x, c.pos.z - c.home.z);
             if (aggro && leash < cfg.leash) {
-              if (c.roarT <= 0 && (c.role === 'boss' || c.role === 'guardian' || c.role === 'alpha')) {
+              if (c.roarT <= 0 && (c.role === 'boss' || c.role === 'guardian' || c.role === 'alpha' || c.role === 'deepLord')) {
                 c.roarT = 9;
                 this.events.onRoar(c);
               }
@@ -857,7 +885,7 @@ export class Tribe {
       }
       c.roarT -= dt;
       // First time it turns on the player: a tense sting (scouts only watch, they never hunt).
-      const hunting = !c.leaving && ctx.alive && !ctx.indoors && c.role !== 'scout' && targetSpeed > 0 && Math.abs(wrapAngle(targetHeading - toPlayer)) < 0.6 && dist < 45 && (c.role !== 'stalker' || c.provoked);
+      const hunting = !c.leaving && ctx.alive && !away && c.role !== 'scout' && targetSpeed > 0 && Math.abs(wrapAngle(targetHeading - toPlayer)) < 0.6 && dist < 45 && (c.role !== 'stalker' || c.provoked);
       if (hunting && !c.alerted) {
         c.alerted = true;
         this.events.onAlert(c);
@@ -877,11 +905,11 @@ export class Tribe {
           wantAttack = false;
         }
       }
-      if (playerSafe) wantAttack = false;
+      if (safe) wantAttack = false;
 
       const lx = c.pos.x + Math.sin(targetHeading) * 2;
       const lz = c.pos.z + Math.cos(targetHeading) * 2;
-      if (this.terrain.height(lx, lz) < this.terrain.waterLevelAt(lx, lz) + 0.2) targetHeading += c.circleDir * 1.3;
+      if (!c.cave && this.terrain.height(lx, lz) < this.terrain.waterLevelAt(lx, lz) + 0.2) targetHeading += c.circleDir * 1.3;
       // Walk round tents, trees, rocks and fires instead of running into them.
       if (targetSpeed > 0.1 && c.state !== 'attack') targetHeading = this.steer(c, targetHeading, dist, dt);
 
@@ -891,10 +919,10 @@ export class Tribe {
         c.attackT += dt;
         targetSpeed = 0;
         targetHeading = toPlayer;
-        if (c.attackT >= cfg.windup && c.attackT - dt < cfg.windup && dist <= cfg.reach + 0.5 && !playerSafe && ctx.alive) this.events.onHitPlayer(cfg.damage, c);
+        if (c.attackT >= cfg.windup && c.attackT - dt < cfg.windup && dist <= cfg.reach + 0.5 && !safe && ctx.alive) this.events.onHitPlayer(cfg.damage, c);
         if (c.attackT >= cfg.attackTime) {
           c.state = 'move';
-          c.attackCd = c.role === 'boss' || c.role === 'guardian' || c.role === 'alpha' ? 1.2 : 1.0;
+          c.attackCd = c.role === 'boss' || c.role === 'guardian' || c.role === 'alpha' || c.role === 'deepLord' ? 1.2 : 1.0;
         }
       } else if (wantAttack && c.attackCd <= 0 && cfg.damage > 0) {
         c.state = 'attack';
@@ -914,7 +942,16 @@ export class Tribe {
       c.heading = wrapAngle(c.heading + clamp(diff, -3.2 * dt, 3.2 * dt));
       c.pos.x += Math.sin(c.heading) * c.speed * dt;
       c.pos.z += Math.cos(c.heading) * c.speed * dt;
-      this.colliders.query(c.pos.x, c.pos.z, 4, (col) => {
+      if (c.cave) {
+        // Inside: the cave walls, chasm edge and props hold it, on a flat floor.
+        if (this.caveSpace) {
+          if (this.caveSpace.blockedAt(c.pos.x, c.pos.z, 0)) {
+            c.pos.x = c.lastX;
+            c.pos.z = c.lastZ;
+          }
+          this.caveSpace.clamp(c.pos);
+        }
+      } else this.colliders.query(c.pos.x, c.pos.z, 4, (col) => {
         const ox = c.pos.x - col.x;
         const oz = c.pos.z - col.z;
         const d = Math.hypot(ox, oz);
@@ -924,7 +961,7 @@ export class Tribe {
           c.pos.z += (oz / d) * (min - d);
         }
       });
-      for (const b of this.blockers) {
+      if (!c.cave) for (const b of this.blockers) {
         const ox = c.pos.x - b.x;
         const oz = c.pos.z - b.z;
         const d = Math.hypot(ox, oz);
@@ -934,7 +971,7 @@ export class Tribe {
           c.pos.z += (oz / d) * (min - d);
         }
       }
-      c.pos.y = this.terrain.height(c.pos.x, c.pos.z);
+      c.pos.y = c.cave ? 0 : this.terrain.height(c.pos.x, c.pos.z);
       // Pinned: it moved far less than its speed says it should have.
       const expected = c.speed * dt;
       const moved = Math.hypot(c.pos.x - c.lastX, c.pos.z - c.lastZ);

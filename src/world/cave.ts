@@ -15,6 +15,8 @@ const CHASM_Z0 = 35;
 const CHASM_Z1 = 46;
 const WATER_Y = -14;
 const END_Z = 87;
+/** How far the repaired bridge dips at its middle. */
+const BRIDGE_SAG = 0.32;
 
 // ------------------------------------------------------------------ noise
 
@@ -118,6 +120,45 @@ function buildPath(): Sample[] {
 
 // ------------------------------------------------------------------ textures
 
+let speleoMat: THREE.MeshStandardMaterial | null = null;
+/** Wet limestone: rock texture with bump, slightly glossy. */
+function limestone(): THREE.MeshStandardMaterial {
+  if (!speleoMat) {
+    const t = detailTextures();
+    speleoMat = new THREE.MeshStandardMaterial({ color: 0x9a948a, roughness: 0.5, map: t.rock, bumpMap: t.rockBump, bumpScale: 3, flatShading: true });
+  }
+  return speleoMat;
+}
+
+/**
+ * A stalactite or stalagmite: a lathe with dripping bulges and rings, then every vertex
+ * nudged by noise so no two are alike. Base at y=0, tip at y=h (flip for stalactites).
+ */
+function speleothem(h: number, r0: number, seed: number): THREE.Mesh {
+  const pts: THREE.Vector2[] = [];
+  const n = 9;
+  for (let i = 0; i <= n; i++) {
+    const t = i / n;
+    const bulge = 1 + 0.22 * Math.sin(t * 9 + seed) + 0.1 * Math.sin(t * 23 + seed * 2);
+    const r = i === n ? 0.001 : r0 * Math.pow(1 - t, 0.75) * bulge;
+    pts.push(new THREE.Vector2(Math.max(0.001, r), t * h));
+  }
+  const g = new THREE.LatheGeometry(pts, 8);
+  const p = g.attributes.position;
+  for (let i = 0; i < p.count; i++) {
+    const x = p.getX(i);
+    const y = p.getY(i);
+    const z = p.getZ(i);
+    const k = 1 + (vnoise(x * 6 + seed, y * 3, z * 6) - 0.5) * 0.5;
+    const lean = (vnoise(seed, y * 0.4, 1) - 0.5) * 0.25 * y;
+    p.setXYZ(i, x * k + lean, y, z * k + lean * 0.5);
+  }
+  g.computeVertexNormals();
+  const m = new THREE.Mesh(g, limestone());
+  m.castShadow = true;
+  return m;
+}
+
 function causticTexture(): THREE.CanvasTexture {
   const c = document.createElement('canvas');
   c.width = c.height = 128;
@@ -189,6 +230,15 @@ export class Cave {
   private obstacles: { x: number; z: number; r: number }[] = [];
   private water: THREE.MeshStandardMaterial[] = [];
   private t = 0;
+  /** Where the cave's skeletons and the Lord of the Depths stand guard. */
+  readonly enemySpots = { skeletons: [] as THREE.Vector3[], guards: [] as THREE.Vector3[], lord: new THREE.Vector3() };
+  /** The expedition chest in the hall (locked until the Lord of the Depths falls). */
+  readonly chestPos = new THREE.Vector3();
+  chestOpen = false;
+  private chestLid = new THREE.Group();
+  private lostCampCrate = new THREE.Vector3();
+  private chestGlow: CaveLight | null = null;
+  private chestGlowMat: THREE.MeshStandardMaterial | null = null;
 
   constructor(
     private terrain: Terrain,
@@ -658,6 +708,8 @@ export class Cave {
       this.obstacles.push({ x: tentP.x, z: tentP.z, r: 1.3 });
     }
     const crateP = this.at(cd - 1.2, side + 0.4, 0);
+    this.lostCampCrate.copy(crateP);
+    this.enemySpots.skeletons.push(this.at(cd - 5, -1, 0), this.at(cd + 6, 1, 0));
     const crate = this.model('crate', { by: 'height', value: 0.55 });
     if (crate) {
       crate.position.copy(crateP);
@@ -736,57 +788,127 @@ export class Cave {
       r.rotation.y = rand() * 6;
       root.add(r);
     }
-    // Bridge: posts at both lips, hand ropes, snapped deck ropes and broken planks.
+    // Solid cliff faces dropping from both lips into the water (no floating floor edge).
+    for (const [dd, face] of [
+      [CHASM_Z0, 1],
+      [CHASM_Z1, -1],
+    ] as [number, number][]) {
+      const w = halfWidth(dd) + 1.8;
+      const cols = 18;
+      const rows = 14;
+      const cp: number[] = [];
+      const cu: number[] = [];
+      const ci: number[] = [];
+      for (let r = 0; r <= rows; r++) {
+        const y = 0.02 + ((WATER_Y - 2.5 - 0.02) * r) / rows;
+        for (let c = 0; c <= cols; c++) {
+          const lat = -w + (2 * w * c) / cols;
+          const base = this.at(dd, lat, y);
+          const bump = (fbm(base.x * 0.5, y * 0.5, base.z * 0.5, 4) - 0.35) * 1.6 * Math.min(1, r / 2);
+          const p = this.at(dd + face * bump, lat, y);
+          cp.push(p.x, p.y, p.z);
+          cu.push(lat / 2.5, y / 2.5);
+        }
+      }
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          const a = r * (cols + 1) + c;
+          const b = a + cols + 1;
+          ci.push(a, b, a + 1, b, b + 1, a + 1);
+        }
+      }
+      const cg = new THREE.BufferGeometry();
+      cg.setAttribute('position', new THREE.Float32BufferAttribute(cp, 3));
+      cg.setAttribute('uv', new THREE.Float32BufferAttribute(cu, 2));
+      cg.setIndex(ci);
+      cg.computeVertexNormals();
+      const cliff = new THREE.Mesh(cg, new THREE.MeshStandardMaterial({ color: 0x55585e, map: detailTextures().rock, bumpMap: detailTextures().rockBump, bumpScale: 3, roughness: 0.6, side: THREE.DoubleSide, flatShading: true }));
+      cliff.receiveShadow = true;
+      root.add(cliff);
+      // Boulders bulging out of each face.
+      for (let k = 0; k < 4; k++) {
+        const r = this.model('rockCliff', { by: 'footprint', value: 2.5 + rand() * 2 });
+        if (!r) continue;
+        r.position.copy(this.at(dd + face * 0.6, (rand() - 0.5) * w * 1.6, -3 - rand() * 9));
+        r.rotation.set(rand() * 3, rand() * 6, rand() * 3);
+        root.add(r);
+      }
+    }
+    // Suspension bridge: posts at both lips, two thick cables under the deck, hand ropes,
+    // vertical hangers every 1.2 m. Broken: only stubs and dangling planks remain.
     const plank = new THREE.MeshStandardMaterial({ color: new THREE.Color(0x8a6440).multiplyScalar(1.15), roughness: 0.9, map: detailTextures().plank });
     const rope = new THREE.MeshStandardMaterial({ color: 0x6b5a3e, roughness: 1 });
     const z0 = CHASM_Z0 - 0.6;
     const z1 = CHASM_Z1 + 0.6;
+    const span = z1 - z0;
+    const sagAt = (dd: number) => -BRIDGE_SAG * Math.sin(Math.min(1, Math.max(0, (dd - z0) / span)) * Math.PI);
     const postTop: Record<string, THREE.Vector3> = {};
     for (const [dd, key] of [
       [z0, 'n'],
       [z1, 'f'],
     ] as [number, string][]) {
       for (const s of [-1, 1]) {
-        const b = this.at(dd, s * 1.3, -0.5);
-        const t = this.at(dd, s * 1.3, 1.35);
-        root.add(this.logBetween(b, t, 0.1));
-        postTop[key + s] = t.clone().setY(1.05);
+        const b = this.at(dd, s * 1.35, -0.6);
+        const t = this.at(dd, s * 1.35, 1.4);
+        root.add(this.logBetween(b, t, 0.11));
+        postTop[key + s] = t.clone().setY(1.1);
         this.obstacles.push({ x: b.x, z: b.z, r: 0.2 });
       }
     }
-    const ropeAlong = (a: THREE.Vector3, b: THREE.Vector3, sag: number, r: number, parent: THREE.Object3D, mat = rope) => {
+    const tube = (pts: THREE.Vector3[], r: number, parent: THREE.Object3D) => parent.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), Math.max(8, pts.length * 2), r, 6, false), rope));
+    /** A rope following the bridge's catenary at height `y` above the deck line, `extra` more sag. */
+    const cable = (lat: number, y: number, extra: number, parent: THREE.Object3D, from = z0, to = z1) => {
       const pts: THREE.Vector3[] = [];
-      for (let i = 0; i <= 10; i++) {
-        const t = i / 10;
-        pts.push(a.clone().lerp(b, t).setY(a.y + (b.y - a.y) * t - Math.sin(t * Math.PI) * sag));
+      for (let i = 0; i <= 16; i++) {
+        const dd = from + ((to - from) * i) / 16;
+        const t = (dd - z0) / span;
+        pts.push(this.at(dd, lat, y + sagAt(dd) - extra * Math.sin(t * Math.PI)));
       }
-      parent.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 20, r, 5, false), mat));
+      tube(pts, lat === 0 ? 0.02 : 0.045, parent);
     };
-    // Hand ropes still hang across (sagging).
-    for (const s of [-1, 1]) ropeAlong(postTop['n' + s], postTop['f' + s], 0.9, 0.025, root);
-    // Snapped deck ropes and planks dangling from each lip.
+    const hangers = (parent: THREE.Object3D, from: number, to: number) => {
+      for (let dd = from; dd <= to + 0.01; dd += 1.2) {
+        for (const s of [-1, 1]) {
+          const t = (dd - z0) / span;
+          const top = this.at(dd, s * 1.25, 1.05 + sagAt(dd) - 0.1 * Math.sin(t * Math.PI));
+          const bot = this.at(dd, s * 1.2, sagAt(dd) - 0.04);
+          tube([top, bot], 0.014, parent);
+        }
+      }
+    };
+    // Hand ropes still hang across when broken (sagging more).
+    for (const s of [-1, 1]) {
+      const pts: THREE.Vector3[] = [];
+      for (let i = 0; i <= 12; i++) {
+        const t = i / 12;
+        pts.push(postTop['n' + s].clone().lerp(postTop['f' + s], t).setY(1.1 - Math.sin(t * Math.PI) * 1.2));
+      }
+      tube(pts, 0.03, this.brokenBits);
+    }
+    // Snapped deck cables and planks dangling from each lip.
     for (const [dd, dir] of [
       [z0, 1],
       [z1, -1],
     ] as [number, number][]) {
       for (const s of [-1, 1]) {
-        const a = this.at(dd, s * 1.15, -0.05);
+        const a = this.at(dd, s * 1.2, -0.05);
+        const m = this.at(dd + dir * 0.9, s * 1.15, -2.2);
         const b = this.at(dd + dir * 1.2, s * 1.0, -4.5 - rand() * 2);
-        ropeAlong(a, b, -0.2, 0.02, this.brokenBits);
+        tube([a, m, b], 0.04, this.brokenBits);
       }
       for (let k = 0; k < 2; k++) {
-        const p = this.at(dd + dir * (0.25 + k * 0.42), 0, -0.02);
-        const b = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.08, 0.36), plank);
+        const p = this.at(dd + dir * (0.25 + k * 0.42), 0, -0.03);
+        const b = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.08, 0.34), plank);
         b.position.copy(p);
-        b.rotation.y = this.headingAt(dd) + Math.PI / 2;
+        b.rotation.y = this.headingAt(dd);
         b.rotation.z = (rand() - 0.5) * 0.08;
         this.brokenBits.add(b);
       }
       for (let k = 0; k < 4; k++) {
         const p = this.at(dd + dir * 1.0, (rand() - 0.5) * 1.6, -1.2 - k * 0.9);
-        const b = new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.08, 0.36), plank);
+        const b = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.08, 0.34), plank);
         b.position.copy(p);
-        b.rotation.set(rand() * 0.5 + 1.1, this.headingAt(dd) + Math.PI / 2 + (rand() - 0.5) * 0.6, (rand() - 0.5) * 0.4, 'YXZ');
+        b.rotation.set(rand() * 0.5 + 1.1, this.headingAt(dd) + (rand() - 0.5) * 0.6, (rand() - 0.5) * 0.4, 'YXZ');
         this.brokenBits.add(b);
       }
     }
@@ -796,20 +918,22 @@ export class Cave {
     lantern.position.set(lp.x, lp.y + 0.32, lp.z);
     root.add(lantern);
     this.lights.push({ pos: lp.clone().setY(lp.y + 0.6), color: 0xffa84e, intensity: 9, distance: 16, flicker: true });
-    // The repaired deck: planks across with fresh rope rails.
-    for (let dd = z0; dd <= z1; dd += 0.42) {
-      const p = this.at(dd, 0, -0.02);
-      const b = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.08, 0.36), plank);
+    // The repaired deck: 2.4 m planks laid across two thick cables, following the sag.
+    for (let dd = z0; dd <= z1 + 0.01; dd += 0.4) {
+      const p = this.at(dd, 0, sagAt(dd) - 0.02);
+      const b = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.07, 0.34), plank);
       b.position.copy(p);
-      b.rotation.y = this.headingAt(dd) + Math.PI / 2;
+      b.rotation.y = this.headingAt(dd);
       b.rotation.z = (rand() - 0.5) * 0.04;
       b.castShadow = true;
+      b.receiveShadow = true;
       this.bridgeDeck.add(b);
     }
     for (const s of [-1, 1]) {
-      ropeAlong(this.at(z0, s * 1.15, -0.05), this.at(z1, s * 1.15, -0.05), 0.0, 0.03, this.bridgeDeck);
-      ropeAlong(postTop['n' + s].clone().setY(1.0), postTop['f' + s].clone().setY(1.0), 0.15, 0.03, this.bridgeDeck);
+      cable(s * 1.05, -0.09, 0, this.bridgeDeck);
+      cable(s * 1.25, 1.05, 0.1, this.bridgeDeck);
     }
+    hangers(this.bridgeDeck, z0 + 0.6, z1 - 0.6);
     this.bridgePos.copy(this.at(CHASM_Z0 - 1.2, 0, 0));
   }
 
@@ -846,7 +970,7 @@ export class Cave {
       this.obstacles.push({ x: p.x, z: p.z, r: 1.4 });
     }
     // Stalactite clusters hanging from the vault, stalagmites rising to meet them.
-    const spike = new THREE.MeshStandardMaterial({ color: 0x7d7a74, roughness: 0.55, flatShading: true });
+    const spike = limestone();
     for (let k = 0; k < 16; k++) {
       const dd = C - 11 + rand() * 22;
       const w = halfWidth(dd);
@@ -855,8 +979,8 @@ export class Cave {
       const n = 3 + Math.floor(rand() * 4);
       for (let q = 0; q < n; q++) {
         const h = 0.8 + rand() * 3.2;
-        const c = new THREE.Mesh(new THREE.ConeGeometry(0.1 + h * 0.08, h, 7), spike);
-        const p = this.at(dd + (rand() - 0.5) * 1.4, lat + (rand() - 0.5) * 1.4, top + 0.4 - h / 2);
+        const c = speleothem(h, 0.12 + h * 0.09, k * 7 + q);
+        const p = this.at(dd + (rand() - 0.5) * 1.4, lat + (rand() - 0.5) * 1.4, top + 0.4);
         c.position.copy(p);
         c.rotation.set(Math.PI + (rand() - 0.5) * 0.15, rand() * 6, (rand() - 0.5) * 0.15);
         root.add(c);
@@ -867,8 +991,8 @@ export class Cave {
       const w = halfWidth(dd);
       const lat = (rand() < 0.5 ? -1 : 1) * (w * (0.45 + rand() * 0.5));
       const h = 0.5 + rand() * 2.4;
-      const p = this.at(dd, lat, h / 2 - 0.05);
-      const c = new THREE.Mesh(new THREE.ConeGeometry(0.15 + h * 0.12, h, 7), spike);
+      const p = this.at(dd, lat, -0.05);
+      const c = speleothem(h, 0.18 + h * 0.13, k * 13 + 3);
       c.position.copy(p);
       c.rotation.y = rand() * 6;
       root.add(c);
@@ -909,24 +1033,61 @@ export class Cave {
       b.rotation.set(k % 4 === 0 ? (rand() - 0.5) * 0.6 : 0, rand() * 6, (rand() - 0.5) * 0.3);
       root.add(b);
     }
-    // The treasure table: planks on two crates under a camp floodlight.
-    const tp = this.at(C + 6, 3.2, 0);
+    // The expedition camp: a proper table with a radio, a tent, a fuel can and the locked chest.
+    const tp = this.at(C + 6, 3.4, 0);
     const hd = this.headingAt(C + 6);
     const across = new THREE.Vector3(Math.cos(hd), 0, -Math.sin(hd));
-    for (const s of [-1, 1]) {
-      const c = this.model('crate', { by: 'height', value: 0.62 });
-      if (!c) continue;
-      c.position.copy(tp).addScaledVector(across, s * 0.75);
-      c.rotation.y = hd;
-      root.add(c);
+    const along = new THREE.Vector3(Math.sin(hd), 0, Math.cos(hd));
+    const table = this.buildTable();
+    table.position.copy(tp);
+    table.rotation.y = hd;
+    root.add(table);
+    this.obstacles.push({ x: tp.x, z: tp.z, r: 0.9 });
+    const radio = this.model('radio', { by: 'max', value: 0.42 });
+    if (radio) {
+      radio.position.copy(tp).addScaledVector(across, -0.35).setY(0.79);
+      radio.rotation.y = hd + Math.PI + 0.3;
+      root.add(radio);
     }
-    const top = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.06, 0.9), new THREE.MeshStandardMaterial({ color: 0x8a6440, roughness: 0.85, map: detailTextures().plank }));
-    top.position.copy(tp).setY(0.65);
-    top.rotation.y = hd + Math.PI / 2;
-    root.add(top);
-    this.obstacles.push({ x: tp.x, z: tp.z, r: 1.0 });
-    this.lootPos.copy(tp).addScaledVector(across, -0.55).setY(0.68);
-    this.backpackPos.copy(tp).addScaledVector(across, 0.55).setY(0.68);
+    const lamp = this.lantern(0xffc070);
+    lamp.position.copy(tp).addScaledVector(across, 0.45).addScaledVector(along, 0.1).setY(0.79);
+    root.add(lamp);
+    // A map weighed down on the table.
+    const map = new THREE.Mesh(new THREE.PlaneGeometry(0.5, 0.36), new THREE.MeshStandardMaterial({ color: 0xd8c9a2, roughness: 0.95 }));
+    map.rotation.set(-Math.PI / 2, 0, hd + 0.2);
+    map.position.copy(tp).addScaledVector(across, 0.05).setY(0.795);
+    root.add(map);
+    const gas = this.model('gasCan', { by: 'height', value: 0.45 });
+    if (gas) {
+      gas.position.copy(tp).addScaledVector(across, 1.3).addScaledVector(along, -0.4);
+      gas.rotation.y = hd + 0.6;
+      root.add(gas);
+    }
+    const tentP = this.at(C + 9.5, -3.5, 0);
+    const tent = this.model('tent', { by: 'max', value: 3.6 });
+    if (tent) {
+      tent.position.copy(tentP);
+      tent.rotation.y = this.headingAt(C + 9.5) + Math.PI / 2;
+      root.add(tent);
+      this.obstacles.push({ x: tentP.x, z: tentP.z, r: 1.4 });
+    }
+    // The locked expedition chest (kept apart: its lid opens).
+    const chestP = this.at(C + 3, 6.0, 0);
+    const chest = this.buildChest();
+    chest.position.copy(chestP);
+    chest.rotation.y = Math.atan2(tp.x - chestP.x, tp.z - chestP.z);
+    this.inside.add(chest);
+    this.chestPos.copy(chestP);
+    this.obstacles.push({ x: chestP.x, z: chestP.z, r: 0.6 });
+    const front = new THREE.Vector3(Math.sin(chest.rotation.y), 0, Math.cos(chest.rotation.y));
+    this.backpackPos.copy(chestP).addScaledVector(front, 0.85).setY(0);
+    this.chestGlow = { pos: chestP.clone().setY(0.9), color: 0xffc76a, intensity: 0, distance: 8, flicker: false };
+    this.lights.push(this.chestGlow);
+    // The flashlight waits at the lost camp in the first chamber.
+    this.lootPos.copy(this.lostCampCrate).setY(0.56);
+    // Where the guards stand.
+    this.enemySpots.guards.push(this.at(C - 6, -3, 0), this.at(C - 3, 4.5, 0));
+    this.enemySpots.lord.copy(this.at(C + 2, -1, 0));
     // Floodlight on a tripod aimed at the table.
     const fp = this.at(C + 3.6, 5.2, 0);
     const metal = new THREE.MeshStandardMaterial({ color: 0x3a3d42, roughness: 0.5, metalness: 0.4 });
@@ -946,12 +1107,122 @@ export class Cave {
     lens.position.z = 0.101;
     box.add(shell, lens);
     box.position.copy(head);
-    box.lookAt(tp.x, 0.7, tp.z);
+    box.lookAt(tp.x, 0.75, tp.z);
     root.add(box);
     this.obstacles.push({ x: fp.x, z: fp.z, r: 0.5 });
     this.lights.push({ pos: head.clone().lerp(new THREE.Vector3(tp.x, 0.9, tp.z), 0.3), color: 0xe6eeff, intensity: 26, distance: 18, flicker: false });
     // A cold fill high in the vault so the hall reads as big.
     this.lights.push({ pos: this.at(C - 2, 0, 8), color: 0x6f8fb8, intensity: 18, distance: 30, flicker: false });
+  }
+
+  /** A camp table: plank top on four legs with cross braces. Origin on the floor, long side across. */
+  private buildTable(): THREE.Group {
+    const g = new THREE.Group();
+    const wood = new THREE.MeshStandardMaterial({ color: 0x8a6440, roughness: 0.85, map: detailTextures().plank });
+    const dark = new THREE.MeshStandardMaterial({ color: 0x4e3826, roughness: 0.9, map: detailTextures().plank });
+    for (let k = -1; k <= 1; k++) {
+      const board = new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.05, 0.27), wood);
+      board.position.set(0, 0.76, k * 0.28);
+      board.rotation.y = (k * 0.01);
+      g.add(board);
+    }
+    for (const x of [-0.88, 0.88]) {
+      for (const z of [-0.33, 0.33]) {
+        const leg = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.74, 0.07), dark);
+        leg.position.set(x, 0.37, z);
+        g.add(leg);
+      }
+      const brace = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, 0.7), dark);
+      brace.position.set(x, 0.2, 0);
+      g.add(brace);
+      const apron = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.1, 0.76), dark);
+      apron.position.set(x, 0.68, 0);
+      g.add(apron);
+    }
+    const stretcher = new THREE.Mesh(new THREE.BoxGeometry(1.76, 0.05, 0.05), dark);
+    stretcher.position.set(0, 0.2, 0);
+    g.add(stretcher);
+    g.traverse((o) => {
+      if ((o as THREE.Mesh).isMesh) o.castShadow = o.receiveShadow = true;
+    });
+    return g;
+  }
+
+  /** The expedition chest: banded planks, iron corners, a heavy padlock. Front faces +Z. */
+  private buildChest(): THREE.Group {
+    const g = new THREE.Group();
+    const wood = new THREE.MeshStandardMaterial({ color: 0x6e4a2c, roughness: 0.85, map: detailTextures().plank });
+    const iron = new THREE.MeshStandardMaterial({ color: 0x3b3a38, roughness: 0.5, metalness: 0.5 });
+    const brass = new THREE.MeshStandardMaterial({ color: 0xb08a3e, roughness: 0.4, metalness: 0.6 });
+    const body = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.5, 0.62), wood);
+    body.position.y = 0.25;
+    g.add(body);
+    for (const x of [-0.42, 0.42]) {
+      const band = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.52, 0.64), iron);
+      band.position.set(x, 0.25, 0);
+      g.add(band);
+    }
+    // Lid on a hinge at the back edge.
+    this.chestLid.position.set(0, 0.5, -0.31);
+    const lid = new THREE.Mesh(new THREE.CylinderGeometry(0.31, 0.31, 1.1, 12, 1, false, 0, Math.PI), wood);
+    lid.rotation.z = Math.PI / 2;
+    lid.position.set(0, 0, 0.31);
+    this.chestLid.add(lid);
+    for (const x of [-0.42, 0.42]) {
+      const lb = new THREE.Mesh(new THREE.CylinderGeometry(0.325, 0.325, 0.06, 12, 1, false, 0, Math.PI), iron);
+      lb.rotation.z = Math.PI / 2;
+      lb.position.set(x, 0, 0.31);
+      this.chestLid.add(lb);
+    }
+    g.add(this.chestLid);
+    // Padlock and hasp on the front.
+    const hasp = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.16, 0.03), iron);
+    hasp.position.set(0, 0.46, 0.32);
+    const lock = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.11, 0.05), brass);
+    lock.position.set(0, 0.36, 0.34);
+    const shackle = new THREE.Mesh(new THREE.TorusGeometry(0.035, 0.01, 5, 10, Math.PI), iron);
+    shackle.position.set(0, 0.42, 0.34);
+    lock.name = 'lock';
+    shackle.name = 'shackle';
+    g.add(hasp, lock, shackle);
+    // Treasure glow inside, shown when it opens.
+    this.chestGlowMat = new THREE.MeshStandardMaterial({ color: 0xffd27a, emissive: 0xffb040, emissiveIntensity: 0, transparent: true, opacity: 0 });
+    const glow = new THREE.Mesh(new THREE.PlaneGeometry(1.0, 0.55), this.chestGlowMat);
+    glow.rotation.x = -Math.PI / 2;
+    glow.position.y = 0.49;
+    g.add(glow);
+    g.traverse((o) => {
+      if ((o as THREE.Mesh).isMesh) o.castShadow = o.receiveShadow = true;
+    });
+    return g;
+  }
+
+  /** The Lord of the Depths has fallen: the padlock drops, the lid swings up, gold light spills out. */
+  unlockChest(): void {
+    if (this.chestOpen) return;
+    this.chestOpen = true;
+    const g = this.chestLid.parent;
+    if (g) {
+      for (const n of ['lock', 'shackle']) {
+        const o = g.getObjectByName(n);
+        if (o) o.visible = false;
+      }
+    }
+    if (this.chestGlow) this.chestGlow.intensity = 5;
+    if (this.chestGlowMat) {
+      this.chestGlowMat.opacity = 0.85;
+      this.chestGlowMat.emissiveIntensity = 2;
+    }
+  }
+
+  /** For enemies inside: is (x, z) off the floor, in the chasm or inside a prop? */
+  blockedAt(x: number, z: number, r: number): boolean {
+    const { d, lat } = this.locate(x, z);
+    if (d < 0.8 || d > END_Z - 3.2) return true;
+    if (Math.abs(lat) > halfWidth(d) - 0.35 - r * 0.5) return true;
+    if (this.groundAt(x, z) < -5) return true;
+    for (const o of this.obstacles) if (Math.hypot(o.x - x, o.z - z) < o.r + r) return true;
+    return false;
   }
 
   // ---------------------------------------------------------------- behaviour
@@ -968,6 +1239,10 @@ export class Cave {
     if (d > CHASM_Z0 && d < CHASM_Z1) {
       if (!this.bridgeRepaired || Math.abs(lat) > 1.1) return -30;
     }
+    // On the bridge the deck follows its sag.
+    const z0 = CHASM_Z0 - 0.6;
+    const z1 = CHASM_Z1 + 0.6;
+    if (this.bridgeRepaired && d > z0 && d < z1 && Math.abs(lat) <= 1.2) return -BRIDGE_SAG * Math.sin(((d - z0) / (z1 - z0)) * Math.PI) + 0.02;
     return 0;
   }
 
@@ -1013,6 +1288,7 @@ export class Cave {
     const near = Math.hypot(player.x - this.mouth.x, player.z - this.mouth.z) < 120;
     if (near) for (const e of this.fx) e.update(dt);
     if (this.isInside(player)) {
+      if (this.chestOpen && this.chestLid.rotation.x > -1.9) this.chestLid.rotation.x = Math.max(-1.9, this.chestLid.rotation.x - dt * 2.5);
       for (const m of this.water) {
         if (m.map) {
           m.map.offset.x = Math.sin(this.t * 0.11) * 0.2;

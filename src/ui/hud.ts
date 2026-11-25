@@ -49,6 +49,9 @@ export class Hud {
   private targetTimer = 0;
   private toasts: HTMLDivElement;
   private hit: HTMLDivElement;
+  private charge!: HTMLDivElement;
+  private chargeFg!: SVGCircleElement;
+  private chargeShown = -1;
   private vignette: HTMLDivElement;
   private fade: HTMLDivElement;
   private msg: HTMLDivElement;
@@ -113,6 +116,10 @@ export class Hud {
     this.targetFill = el('div', 'fill', this.target);
     this.toasts = el('div', 'hud-toasts', this.root);
     this.hit = el('div', 'hud-hit', this.root);
+    // Bow tension: a thin ring round the crosshair that closes as the string is drawn.
+    this.charge = el('div', 'hud-charge', this.root);
+    this.charge.innerHTML = '<svg viewBox="0 0 40 40" width="40" height="40"><circle class="bg" cx="20" cy="20" r="14"/><circle class="fg" cx="20" cy="20" r="14" pathLength="100" stroke-dasharray="100" stroke-dashoffset="100"/></svg>';
+    this.chargeFg = this.charge.querySelector('.fg') as SVGCircleElement;
 
     const bottom = el('div', 'hud-bottom', this.root);
     this.prompts = el('div', 'hud-prompts', bottom);
@@ -272,10 +279,21 @@ export class Hud {
     while (this.toasts.children.length > 4) this.toasts.firstChild?.remove();
   }
 
-  hitMarker(): void {
-    this.hit.classList.remove('on');
+  /** Hit confirmation X for 120 ms: white on animals/trees, red on enemies, larger red on a kill. */
+  hitMarker(kind: 'white' | 'red' | 'kill' = 'white'): void {
+    this.hit.className = 'hud-hit';
     void this.hit.offsetWidth;
-    this.hit.classList.add('on');
+    this.hit.className = `hud-hit on ${kind}`;
+  }
+
+  /** 0..1 bow draw; hidden at 0. Full charge glows. */
+  setCharge(v: number): void {
+    const q = Math.round(v * 50) / 50;
+    if (q === this.chargeShown) return;
+    this.chargeShown = q;
+    this.charge.style.opacity = q > 0 ? '1' : '0';
+    this.chargeFg.setAttribute('stroke-dashoffset', String(100 - q * 100));
+    this.charge.classList.toggle('full', q >= 1);
   }
 
   message(title: string, body: string, seconds: number): void {

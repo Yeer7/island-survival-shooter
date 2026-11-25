@@ -322,8 +322,55 @@
 .hud-hit::after {
   transform: rotate(-45deg);
 }
+.hud-hit::before,
+.hud-hit::after {
+  box-shadow: 0 0 2px rgba(0, 0, 0, 0.7);
+}
 .hud-hit.on {
-  animation: hud-hit 0.18s ease-out;
+  animation: hud-hit 0.12s ease-out;
+}
+.hud-hit.red::before,
+.hud-hit.red::after,
+.hud-hit.kill::before,
+.hud-hit.kill::after {
+  background: #ff3b30;
+}
+.hud-hit.kill {
+  width: 24px;
+  height: 24px;
+  margin: -12px 0 0 -12px;
+}
+.hud-hit.kill.on {
+  animation: hud-hit 0.2s ease-out;
+}
+.hud-charge {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 40px;
+  height: 40px;
+  margin: -20px 0 0 -20px;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.hud-charge svg {
+  transform: rotate(-90deg);
+}
+.hud-charge circle {
+  fill: none;
+  stroke-width: 2;
+}
+.hud-charge .bg {
+  stroke: rgba(255, 255, 255, 0.18);
+}
+.hud-charge .fg {
+  stroke: rgba(255, 255, 255, 0.9);
+  stroke-linecap: round;
+  filter: drop-shadow(0 0 1px rgba(0, 0, 0, 0.8));
+}
+.hud-charge.full .fg {
+  stroke: #ffd27a;
+  filter: drop-shadow(0 0 3px rgba(255, 196, 90, 0.9));
 }
 @keyframes hud-hit {
   0% {

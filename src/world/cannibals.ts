@@ -84,6 +84,11 @@ export interface Cannibal {
   hpCanvas: HTMLCanvasElement | null;
   shownHp: number;
   roarT: number;
+  /** Seconds left on fire (flaming axe / torch), and the damage-tick clock. */
+  burnT: number;
+  burnTick: number;
+  /** True once it has started hunting the player (plays the alert sting once). */
+  alerted: boolean;
 }
 
 let maskTex: THREE.CanvasTexture | null = null;
@@ -189,6 +194,10 @@ export interface TribeEvents {
   onDeath(c: Cannibal): void;
   onSpotted(c: Cannibal): void;
   onRoar(c: Cannibal): void;
+  /** First time this enemy turns to hunt the player. */
+  onAlert(c: Cannibal): void;
+  /** Damage from burning, after a tick. */
+  onBurn(c: Cannibal, killed: boolean): void;
 }
 
 export interface Lairs {
@@ -320,6 +329,9 @@ export class Tribe {
       hpCanvas: null,
       shownHp: -1,
       roarT: 0,
+      burnT: 0,
+      burnTick: 0,
+      alerted: false,
     };
     if (role === 'boss' || role === 'guardian' || role === 'alpha') {
       const cv = document.createElement('canvas');
@@ -459,6 +471,13 @@ export class Tribe {
     return false;
   }
 
+  /** Set it alight: burns for `seconds`, 8 damage per second, small flames on the body. */
+  ignite(i: number, seconds: number): void {
+    const c = this.list[i];
+    if (!c || c.state === 'dead') return;
+    c.burnT = Math.max(c.burnT, seconds);
+  }
+
   private zoneAt(x: number, z: number, zones: SafeZone[]): SafeZone | null {
     for (const s of zones) if (Math.hypot(x - s.x, z - s.z) < s.r) return s;
     return null;
@@ -508,6 +527,17 @@ export class Tribe {
         this.group.remove(c.root);
         this.list.splice(i, 1);
         continue;
+      }
+
+      if (c.burnT > 0) {
+        c.burnT -= dt;
+        c.burnTick += dt;
+        if (c.burnTick >= 0.5) {
+          c.burnTick = 0;
+          const killed = this.damage(i, 4);
+          this.events.onBurn(c, killed);
+          if (killed) continue;
+        }
       }
 
       let targetHeading = c.heading;
@@ -587,6 +617,12 @@ export class Tribe {
         }
       }
       c.roarT -= dt;
+      // First time it turns on the player: a tense sting (scouts only watch, they never hunt).
+      const hunting = !c.leaving && ctx.alive && !ctx.indoors && c.role !== 'scout' && targetSpeed > 0 && Math.abs(wrapAngle(targetHeading - toPlayer)) < 0.6 && dist < 45 && (c.role !== 'stalker' || c.provoked);
+      if (hunting && !c.alerted) {
+        c.alerted = true;
+        this.events.onAlert(c);
+      }
 
       // Fear of fire and respect for the player's shelters.
       const here = this.zoneAt(c.pos.x, c.pos.z, zones);

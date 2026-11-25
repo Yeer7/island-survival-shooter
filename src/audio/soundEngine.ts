@@ -465,29 +465,71 @@ export class SoundEngine {
     this.burst({ type: 'lowpass', freq: 500, gain: 0.3, decay: 0.2 });
   }
 
-  footstep(surface: Surface, sprint: boolean): void {
+  /**
+   * One footfall, by the ground under the player: muffled grainy sand, grass with a
+   * leafy rustle, dry stone (with a cave echo indoors), hollow planks, shallow splash.
+   */
+  footstep(surface: Surface, sprint: boolean, indoor = false): void {
     if (!this.ctx) return;
     const v = sprint ? 1.25 : 1;
+    const j = 0.9 + Math.random() * 0.2;
     switch (surface) {
       case 'sand':
-        this.burst({ type: 'lowpass', freq: 900 + Math.random() * 300, gain: 0.16 * v, attack: 0.01, decay: 0.1 });
+        // Soft thud plus a short crunch of grains.
+        this.burst({ type: 'lowpass', freq: 700 * j, gain: 0.17 * v, attack: 0.012, decay: 0.12 });
+        for (let i = 0; i < 4; i++) this.burst({ type: 'bandpass', freq: 3000 + Math.random() * 2500, q: 2, gain: 0.025 * v, decay: 0.012, when: 0.015 + i * 0.018 });
         break;
       case 'grass':
-        this.burst({ type: 'bandpass', freq: 2600 + Math.random() * 800, q: 0.8, gain: 0.1 * v, attack: 0.01, decay: 0.08 });
-        this.burst({ type: 'lowpass', freq: 400, gain: 0.08 * v, decay: 0.06 });
+        // Low step and a brushing rustle of blades and leaves.
+        this.burst({ type: 'lowpass', freq: 420 * j, gain: 0.09 * v, decay: 0.06 });
+        this.burst({ type: 'bandpass', freq: 3200 * j, endFreq: 1800, q: 0.7, gain: 0.08 * v, attack: 0.02, decay: 0.14 });
+        if (Math.random() < 0.5) this.burst({ type: 'highpass', freq: 5000, gain: 0.025 * v, attack: 0.03, decay: 0.08, when: 0.05 });
         break;
       case 'rock':
-        this.burst({ type: 'bandpass', freq: 1500, q: 1.5, gain: 0.16 * v, decay: 0.05 });
-        this.tone({ f0: 220, f1: 140, gain: 0.05 * v, decay: 0.04 });
+        // Dry click of a heel on stone; in the cave it rings back off the walls.
+        this.burst({ type: 'bandpass', freq: 1700 * j, q: 2.2, gain: 0.17 * v, decay: 0.04, toEcho: indoor ? 0.55 : 0 });
+        this.tone({ type: 'triangle', f0: 260 * j, f1: 170, gain: 0.05 * v, decay: 0.035, toEcho: indoor ? 0.3 : 0 });
+        if (Math.random() < 0.4) this.burst({ type: 'highpass', freq: 4500, gain: 0.04 * v, decay: 0.02, when: 0.03 });
         break;
       case 'wood':
-        this.tone({ f0: 180 + Math.random() * 30, f1: 110, gain: 0.25 * v, decay: 0.09 });
-        this.burst({ type: 'bandpass', freq: 900, q: 2, gain: 0.12 * v, decay: 0.05 });
+        // Hollow plank: a resonant knock over a short body tone.
+        this.tone({ f0: 150 * j, f1: 95, gain: 0.26 * v, decay: 0.11 });
+        this.burst({ type: 'bandpass', freq: 780 * j, q: 5, gain: 0.16 * v, decay: 0.09 });
+        this.tone({ type: 'triangle', f0: 420 * j, f1: 360, gain: 0.04 * v, decay: 0.06, when: 0.01 });
         break;
       case 'water':
-        this.burst({ type: 'bandpass', freq: 700 + Math.random() * 300, endFreq: 300, q: 1, gain: 0.2 * v, attack: 0.03, decay: 0.22 });
+        // Light splash at the water's edge.
+        this.burst({ type: 'bandpass', freq: 1400 * j, endFreq: 500, q: 0.9, gain: 0.16 * v, attack: 0.015, decay: 0.2 });
+        this.burst({ type: 'highpass', freq: 3800, gain: 0.05 * v, attack: 0.03, decay: 0.12, when: 0.04 });
         break;
     }
+  }
+
+  /** Hit confirmation on the hit frame: a bright tick, harder and lower on enemies. */
+  hitConfirm(enemy: boolean, kill = false): void {
+    if (!this.ctx) return;
+    if (enemy) {
+      this.tone({ type: 'square', f0: kill ? 900 : 1300, f1: kill ? 500 : 900, gain: kill ? 0.08 : 0.06, decay: kill ? 0.09 : 0.05 });
+      this.burst({ type: 'bandpass', freq: 2400, q: 3, gain: 0.12, decay: 0.03 });
+    } else {
+      this.tone({ type: 'triangle', f0: 1800, f1: 1500, gain: 0.05, decay: 0.035 });
+    }
+  }
+
+  /** A tense sting when a cannibal first turns to hunt the player. */
+  alert(): void {
+    if (!this.ctx) return;
+    this.tone({ type: 'sawtooth', f0: 233, f1: 247, gain: 0.05, attack: 0.04, decay: 0.7 });
+    this.tone({ type: 'sawtooth', f0: 349, f1: 370, gain: 0.04, attack: 0.04, decay: 0.7 });
+    this.tone({ f0: 70, f1: 45, gain: 0.35, decay: 0.25 });
+    this.burst({ type: 'lowpass', freq: 300, gain: 0.25, decay: 0.2 });
+  }
+
+  /** Burning blow: a whoosh of flame on top of the strike. */
+  fireHit(): void {
+    if (!this.ctx) return;
+    this.burst({ type: 'bandpass', freq: 900, endFreq: 2600, q: 0.8, gain: 0.16, attack: 0.02, decay: 0.3 });
+    for (let i = 0; i < 4; i++) this.burst({ type: 'highpass', freq: 3000 + Math.random() * 2500, gain: 0.06, decay: 0.02, when: 0.04 + i * 0.05 });
   }
 
   private crackle(level: number): void {

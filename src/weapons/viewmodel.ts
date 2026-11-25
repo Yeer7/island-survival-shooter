@@ -375,6 +375,9 @@ export class ViewModel {
       this.bowArrow.visible = this.arrowNocked;
       const shown = this.action === 'draw' ? clamp(this.actionT / this.actionDur, 0, 1) : 1;
       this.bowArm.position.y = -0.2 - (1 - easeOutCubic(shown)) * 0.3;
+      // The whole bow eases back toward the eye as it is drawn (and cants a touch).
+      this.bowArm.position.z = -0.62 + this.bowDraw * 0.07;
+      this.bowArm.rotation.z = this.bowDraw * 0.06;
     }
 
     // Bob follows the feet; a still player sees a still tool.

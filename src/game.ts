@@ -5,6 +5,7 @@ import { Input } from './core/input';
 import { clamp, smoothstep } from './core/math';
 import { Arrows, ArrowHitInfo } from './fx/arrows';
 import { Debris } from './fx/particles';
+import { BurnFlames, Sparks } from './fx/sparks';
 import { PlayerController } from './player/controller';
 import { FOOD_EFFECT, FoodId, HOTBAR_INFO, HotbarId, Inventory, ToolId, Vitals } from './player/inventory';
 import { CraftMenu, CraftState } from './ui/craftMenu';
@@ -104,6 +105,13 @@ export class Game implements CombatWorld {
   readonly wildlife: Wildlife;
   readonly pickups = new PickupManager();
   readonly debris = new Debris();
+  readonly sparks = new Sparks();
+  readonly burnFx = new BurnFlames();
+  private burning: { owner: object; x: number; y: number; z: number; h: number }[] = [];
+  /** Hitstop: the simulation runs at 8% for a few ms while render and look keep going. */
+  private hitstopT = 0;
+  private hitstopCooldown = 0;
+  private lastAlertAt = -99;
   readonly arrows: Arrows;
   readonly player: PlayerController;
   readonly vm: ViewModel;
@@ -228,6 +236,10 @@ export class Game implements CombatWorld {
         onDeath: (c) => this.onCannibalDeath(c),
         onSpotted: () => this.onScoutSpotted(),
         onRoar: (c) => this.sound.roar(c.role === 'alpha' ? 'alpha' : c.role === 'guardian' ? 'guardian' : 'boss'),
+        onAlert: (c) => this.onCannibalAlert(c),
+        onBurn: (c, killed) => {
+          if (killed) this.hud.toast(`🔥 ${c.cfg.name} queimou até cair`);
+        },
       },
       (save?.defeated ?? []) as BossRole[],
     );
@@ -240,7 +252,7 @@ export class Game implements CombatWorld {
       },
       (info) => this.onArrowHit(info),
     );
-    this.scene.add(this.pickups.group, this.debris.mesh, this.arrows.group);
+    this.scene.add(this.pickups.group, this.debris.mesh, this.arrows.group, this.sparks.points, this.burnFx.group);
 
     this.torchLight = new THREE.PointLight(0xffa860, 0, 20, 1.5);
     this.scene.add(this.torchLight);
@@ -263,7 +275,7 @@ export class Game implements CombatWorld {
     this.scene.add(this.flashlight, this.flashlight.target);
 
     this.player = new PlayerController(this.camera, this.terrain, this.colliders, this.dock, {
-      onStep: (s, sprint) => this.sound.footstep(s, sprint),
+      onStep: (s, sprint) => this.sound.footstep(s, sprint, this.indoors),
       onLand: (v) => this.onLand(v),
     });
     this.player.teleport(this.crash.spawn.x, this.crash.spawn.z, this.crash.spawnYaw);
@@ -298,6 +310,10 @@ export class Game implements CombatWorld {
       }
     });
 
+    this.player.platforms.push(
+      (x, z) => this.base.cabinFloorAt(x, z),
+      (x, z) => this.boat.deckAt(x, z),
+    );
     if (save) this.applySave(save);
     this.onResize();
     window.addEventListener('resize', () => this.onResize());
@@ -339,6 +355,8 @@ export class Game implements CombatWorld {
     this.camera.updateProjectionMatrix();
     this.vm.setAspect(w / h);
     for (const e of [...this.crash.smoke, ...this.crash.fire]) e.setViewportHeight(h * ratio);
+    this.sparks.setViewportHeight(h * ratio);
+    this.burnFx.setViewportHeight(h * ratio);
     for (const p of this.base.placed) {
       p.fire?.setViewportHeight(h * ratio);
       p.smoke?.setViewportHeight(h * ratio);
@@ -383,13 +401,21 @@ export class Game implements CombatWorld {
     }
   }
 
-  private tick(dt: number): void {
+  private tick(realDt: number): void {
+    // Hitstop: world and weapon motion run at 8% for the hold; input, look and render don't stop.
+    this.hitstopCooldown -= realDt;
+    let dt = realDt;
+    if (this.hitstopT > 0) {
+      this.hitstopT -= realDt;
+      dt = realDt * 0.08;
+    }
     this.time += dt;
     const alive = !this.vitals.dead && this.sleepT < 0;
     this.handleInput(alive);
 
     this.player.carrySlow = 1 - this.inv.logs * 0.06;
-    this.player.update(dt, this.input, alive);
+    this.player.aimZoom = this.inv.selected === 'bow' ? this.bow.draw : 0;
+    this.player.update(realDt, this.input, alive);
     this.vitals.update(dt, this.player.sprinting);
     this.melee.update(dt);
     this.bow.update(dt, alive && this.inv.selected === 'bow' && this.input.mouseDown && !this.placing, this.inv.mats.arrows);
@@ -406,6 +432,8 @@ export class Game implements CombatWorld {
     this.forest.update(dt);
     this.debris.update(dt);
     this.arrows.update(dt);
+    this.sparks.update(dt);
+    this.updateBurning(dt);
     this.crash.update(dt, this.sky.ambient);
     this.base.update(dt, this.time, this.sky.ambient);
     this.village.update(dt, this.sky.ambient);
@@ -496,13 +524,15 @@ export class Game implements CombatWorld {
       case 'axe':
       case 'flameAxe':
       case 'spear':
+      case 'torch':
         if (inp.mouseDown && this.melee.ready && !this.vm.busy) this.melee.use(MELEE[id]);
+        break;
+      case 'flashlight':
         break;
       case 'rod':
         if (click) this.useRod();
         break;
       case 'bow':
-      case 'torch':
         break;
       default:
         if (click) this.tryEat(id as FoodId);
@@ -677,6 +707,17 @@ export class Game implements CombatWorld {
       return { key: 'E', text: 'O Guardião bloqueia a entrada', run: () => this.hud.toast('💀 Derrote o Guardião da Caverna primeiro') };
     }
     if (Math.hypot(p.x - this.boat.pos.x, p.z - this.boat.pos.z) < 8.5) {
+      if (this.player.swimming) {
+        return {
+          key: 'E',
+          text: 'Subir pela escada do Veleiro',
+          run: () => {
+            const d = this.boat.sternDeck(this.v4);
+            this.player.placeAt(d.x, d.y, d.z, this.player.yaw);
+            this.sound.footstep('wood', false);
+          },
+        };
+      }
       if (this.escaped) return null;
       if (this.boat.complete) return { key: 'E', text: 'Zarpar no Veleiro', run: () => this.sail() };
       const d = this.boat.delivered;
@@ -1081,6 +1122,20 @@ export class Game implements CombatWorld {
     return best;
   }
 
+  /** Hold the simulation briefly on a solid hit (rate-capped so holds never stack into stutter). */
+  private hitStop(ms: number): void {
+    if (this.hitstopCooldown > 0) return;
+    this.hitstopT = ms / 1000;
+    this.hitstopCooldown = 0.25;
+  }
+
+  /** Weight on impact: a short hold plus a small camera jolt toward the side that was struck. */
+  private impactFeel(heavy: boolean): void {
+    this.hitStop(heavy ? 45 : 35);
+    const side = this.inv.selected === 'spear' ? 0 : -1;
+    this.player.addRecoil(heavy ? 0.5 : 0.32, side * (heavy ? 0.28 : 0.18));
+  }
+
   meleeImpact(spec: MeleeSpec): void {
     const o = this.camera.position;
     const d = this.camera.getWorldDirection(this.v2);
@@ -1090,6 +1145,14 @@ export class Game implements CombatWorld {
     const n = this.v3.copy(d).negate().setY(0.3).normalize();
     const floor = this.terrain.height(p.x, p.z) + 0.02;
     const flame = this.inv.selected === 'flameAxe';
+    const fiery = flame || this.inv.selected === 'torch';
+    const solid = hit.kind === 'tree' || hit.kind === 'case' || hit.kind === 'animal' || hit.kind === 'enemy' || hit.kind === 'hard';
+    if (solid) this.impactFeel(hit.kind === 'enemy' || flame);
+    if (fiery && solid) {
+      // Burning weapons throw sparks off whatever they strike.
+      this.sparks.burst(p, n, flame ? 26 : 16, flame ? 6 : 4.5);
+      this.sound.fireHit();
+    }
     switch (hit.kind) {
       case 'tree': {
         const tree = this.forest.trees[hit.index];
@@ -1099,11 +1162,14 @@ export class Game implements CombatWorld {
         if (spec.kind === 'swing') this.sound.chopWood();
         else this.sound.impact('wood');
         this.hud.showTargetHealth(tree.hp / tree.maxHp);
+        this.hud.hitMarker('white');
+        this.sound.hitConfirm(false);
         this.player.addTrauma(felled ? 0.25 : spec.kind === 'stab' ? 0.06 : 0.14);
         break;
       }
       case 'case':
         this.hitCase(hit.index, spec.luggage, p, n);
+        this.hud.hitMarker('white');
         this.player.addTrauma(0.12);
         break;
       case 'animal':
@@ -1112,6 +1178,8 @@ export class Game implements CombatWorld {
         break;
       case 'enemy':
         this.hitCannibal(hit.index, spec.animal, p, n);
+        // Fire sets them alight: the flaming axe for longer than the torch.
+        if (fiery) this.tribe.ignite(hit.index, flame ? 5 : 3.5);
         this.player.addTrauma(0.14);
         break;
       case 'hard':
@@ -1155,7 +1223,6 @@ export class Game implements CombatWorld {
       case 'animal':
         this.hitAnimal(hit!.index, 55, tip, n);
         this.sound.arrowHit('flesh');
-        this.hud.hitMarker();
         // The arrow drops by the animal and can be recovered.
         this.pickups.addArrow(this.v4.set(tip.x, floor + 0.03, tip.z), new THREE.Quaternion().setFromEuler(new THREE.Euler(0, Math.random() * 6, Math.PI / 2)));
         break;
@@ -1167,6 +1234,7 @@ export class Game implements CombatWorld {
       case 'case':
         this.hitCase(hit!.index, 25, tip, n);
         this.sound.arrowHit('wood');
+        this.hud.hitMarker('white');
         this.pickups.addArrow(this.v4.set(tip.x, floor + 0.03, tip.z), new THREE.Quaternion().setFromEuler(new THREE.Euler(0, Math.random() * 6, Math.PI / 2)));
         break;
       case 'water':
@@ -1187,6 +1255,8 @@ export class Game implements CombatWorld {
           const tree = this.forest.trees[hit.index];
           this.forest.damage(hit.index, 4, this.player.pos);
           this.hud.showTargetHealth(tree.hp / tree.maxHp);
+          this.hud.hitMarker('white');
+          this.sound.hitConfirm(false);
         }
         break;
     }
@@ -1198,7 +1268,8 @@ export class Game implements CombatWorld {
     this.debris.burst(p, n, killed ? 14 : 8, 0x8a1c1c, { speed: 2.5, size: 0.04, floor: a.pos.y + 0.02, life: 0.9 });
     this.sound.animalHurt(a.species === 'deer');
     this.hud.showTargetHealth(Math.max(0, a.hp) / a.cfg.hp);
-    this.hud.hitMarker();
+    this.hud.hitMarker(killed ? 'kill' : 'white');
+    this.sound.hitConfirm(false, killed);
     if (killed) this.hud.toast(a.species === 'deer' ? '🦌 Cervo abatido' : a.species === 'turtle' ? '🐢 Tartaruga abatida' : '🐇 Coelho abatido');
   }
 
@@ -1423,6 +1494,7 @@ export class Game implements CombatWorld {
     const heading = (((Math.atan2(f.x, -f.z) * 180) / Math.PI) + 360) % 360;
     this.hud.updateCompass(heading, this.player.pos.x, this.player.pos.z);
     this.hud.updateInventory(this.inv);
+    this.hud.setCharge(this.inv.selected === 'bow' ? this.bow.draw : 0);
     this.hud.setHurt(this.vitals.hurtFlash * 0.9 + (this.vitals.health < this.vitals.maxHealth * 0.25 ? 0.25 + Math.sin(this.time * 4) * 0.1 : 0));
     if (this.fadeIn > 0 && !this.vitals.dead && this.sleepT < 0) {
       this.fadeIn = Math.max(0, this.fadeIn - dt / 2.6);
@@ -1671,7 +1743,8 @@ export class Game implements CombatWorld {
     this.debris.burst(p, n, killed ? 16 : 9, 0x7a1414, { speed: 2.6, size: 0.04, floor: c.pos.y + 0.02, life: 0.9 });
     this.sound.animalHurt(true);
     this.hud.showTargetHealth(Math.max(0, c.hp) / c.maxHp);
-    this.hud.hitMarker();
+    this.hud.hitMarker(killed ? 'kill' : 'red');
+    this.sound.hitConfirm(true, killed);
     if (killed) this.hud.toast(c.role === 'boss' || c.role === 'guardian' || c.role === 'alpha' ? `👑 ${c.cfg.name} derrotado!` : '💀 Canibal derrotado');
   }
 
@@ -1708,6 +1781,24 @@ export class Game implements CombatWorld {
     if (c.role === 'guardian') this.hud.message('O GUARDIÃO CAIU', 'Pegue a Relíquia [E]. A entrada da caverna está livre.', 6);
     if (c.role === 'alpha') this.hud.message('A FERA ALFA CAIU', 'Pegue o Coração Alfa [E] e leve-o ao Veleiro.', 6);
     if (bossKill) this.saveGame();
+  }
+
+  /** Small flames follow each burning enemy (fixed emitter pool). */
+  private updateBurning(dt: number): void {
+    this.burning.length = 0;
+    for (const c of this.tribe.list) {
+      if (c.burnT > 0 && c.state !== 'dead') this.burning.push({ owner: c, x: c.pos.x, y: c.pos.y, z: c.pos.z, h: c.cfg.height });
+    }
+    this.burnFx.update(dt, this.burning);
+  }
+
+  private onCannibalAlert(c: Cannibal): void {
+    // A group that spots you together plays one sting, not a stack of them.
+    const since = this.time - this.lastAlertAt;
+    if (since >= 0 && since < 4) return;
+    this.lastAlertAt = this.time;
+    this.sound.alert();
+    if (c.night) this.hud.toast('⚠️ Você foi avistado!');
   }
 
   private onScoutSpotted(): void {

@@ -356,6 +356,20 @@ export class BaseSite {
 
   constructor(private terrain: Terrain, private colliders: ColliderGrid) {}
 
+  /** Floor height inside a finished cabin (plank floor you can walk on), else null. */
+  cabinFloorAt(x: number, z: number): number | null {
+    for (const c of this.cabins) {
+      if (!c.complete) continue;
+      const dx = x - c.pos.x;
+      const dz = z - c.pos.z;
+      const yaw = c.group.rotation.y;
+      const lx = dx * Math.cos(yaw) - dz * Math.sin(yaw);
+      const lz = dx * Math.sin(yaw) + dz * Math.cos(yaw);
+      if (Math.abs(lx) < 2.55 && Math.abs(lz) < 2.05) return c.pos.y + 0.54;
+    }
+    return null;
+  }
+
   /** Nearest cabin within `radius`, if any. */
   cabinNear(p: THREE.Vector3, radius: number): Cabin | null {
     let best: Cabin | null = null;

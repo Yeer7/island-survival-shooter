@@ -127,12 +127,13 @@ export class Sailboat {
     this.group.add(ladder);
     this.refresh();
 
-    // Colliders along the hull so a swimmer goes around it.
+    // Colliders along the hull so a swimmer goes around it. Their top sits below the
+    // lowest point the bobbing deck reaches, so someone standing on deck is never pushed off.
     const yaw = this.group.rotation.y;
     for (let x = -L / 2; x <= L / 2 + 1; x += 1.2) {
       const wx = this.pos.x + Math.cos(yaw) * x;
       const wz = this.pos.z - Math.sin(yaw) * x;
-      colliders.add({ x: wx, z: wz, r: 1.0, y0: -3, y1: 6, kind: 'rock', ref: 0 });
+      colliders.add({ x: wx, z: wz, r: 1.0, y0: -3, y1: -0.35, kind: 'rock', ref: 0 });
     }
   }
 
@@ -165,6 +166,24 @@ export class Sailboat {
       p.mesh.castShadow = solid;
     });
     this.complete = this.progress >= 1;
+  }
+
+  /** Deck height when (x, z) is over the deck boards, else null (walkable planks). */
+  deckAt(x: number, z: number): number | null {
+    const yaw = this.group.rotation.y;
+    const dx = x - this.pos.x;
+    const dz = z - this.pos.z;
+    const lx = dx * Math.cos(yaw) - dz * Math.sin(yaw);
+    const lz = dx * Math.sin(yaw) + dz * Math.cos(yaw);
+    if (Math.abs(lx) < 3.6 && Math.abs(lz) < 0.85) return this.group.position.y + 0.36;
+    return null;
+  }
+
+  /** World point at the top of the stern ladder (where a swimmer climbs aboard). */
+  sternDeck(out: THREE.Vector3): THREE.Vector3 {
+    const yaw = this.group.rotation.y;
+    const lx = -3.0;
+    return out.set(this.pos.x + lx * Math.cos(yaw), this.group.position.y + 0.36, this.pos.z - lx * Math.sin(yaw));
   }
 
   update(dt: number, time: number): void {

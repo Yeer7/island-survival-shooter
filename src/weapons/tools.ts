@@ -12,7 +12,8 @@ export interface MeleeSpec {
   luggage: number;
 }
 
-export const MELEE: Record<'axe' | 'flameAxe' | 'spear', MeleeSpec> = {
+export const MELEE: Record<'axe' | 'flameAxe' | 'spear' | 'torch', MeleeSpec> = {
+  torch: { kind: 'swing', duration: 0.5, impactAt: 0.42, reach: 2.4, tree: 3, animal: 14, luggage: 8 },
   axe: { kind: 'swing', duration: 0.62, impactAt: 0.42, reach: 2.7, tree: 25, animal: 35, luggage: 25 },
   flameAxe: { kind: 'swing', duration: 0.6, impactAt: 0.42, reach: 2.8, tree: 50, animal: 70, luggage: 50 },
   spear: { kind: 'stab', duration: 0.55, impactAt: 0.36, reach: 3.6, tree: 5, animal: 50, luggage: 12 },

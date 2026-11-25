@@ -92,12 +92,27 @@ export class PlayerController {
   /** Indoors (the cave): a floor function and wall clamp replace the terrain and the sea. */
   interior: { ground(x: number, z: number): number; clamp(p: THREE.Vector3): void } | null = null;
 
+  /** Extra walkable wooden floors (cabin floors, the boat deck), on top of the dock. */
+  platforms: ((x: number, z: number) => number | null)[] = [];
+  /** 0..1 aim zoom while the bow is drawn: the FOV narrows from 80 to 70. */
+  aimZoom = 0;
+
+  private platformAt(x: number, z: number, feetY: number): number | null {
+    let best: number | null = null;
+    const d = this.dock.groundAt(x, z);
+    if (d !== null && feetY >= d - 0.6) best = d;
+    for (const p of this.platforms) {
+      const h = p(x, z);
+      if (h !== null && feetY >= h - 0.6 && (best === null || h > best)) best = h;
+    }
+    return best;
+  }
+
   private groundAt(x: number, z: number, feetY: number): number {
     if (this.interior) return this.interior.ground(x, z);
-    let g = this.terrain.height(x, z);
-    const d = this.dock.groundAt(x, z);
-    if (d !== null && feetY >= d - 0.6) g = Math.max(g, d);
-    return g;
+    const g = this.terrain.height(x, z);
+    const p = this.platformAt(x, z, feetY);
+    return p !== null ? Math.max(g, p) : g;
   }
 
   update(dt: number, input: Input, enabled: boolean): void {
@@ -199,8 +214,8 @@ export class PlayerController {
       this.bobPhase += ((hs * dt) / stride) * Math.PI;
       if (this.stepAccum >= stride) {
         this.stepAccum -= stride;
-        const dockY = this.dock.groundAt(this.pos.x, this.pos.z);
-        this.surface = this.interior ? 'rock' : this.swimming ? 'water' : dockY !== null && Math.abs(this.pos.y - dockY) < 0.1 ? 'wood' : this.terrain.surfaceAt(this.pos.x, this.pos.z);
+        const floorY = this.interior ? null : this.platformAt(this.pos.x, this.pos.z, this.pos.y);
+        this.surface = this.interior ? 'rock' : this.swimming ? 'water' : floorY !== null && Math.abs(this.pos.y - floorY) < 0.12 ? 'wood' : this.terrain.surfaceAt(this.pos.x, this.pos.z);
         if (depth > 0.15 && !this.swimming && this.surface !== 'wood') this.surface = 'water';
         this.events.onStep(this.surface, this.sprinting);
       }
@@ -235,8 +250,8 @@ export class PlayerController {
     this.camera.position.copy(this.eye);
     this.camera.rotation.set(this.pitch + this.recoilPitch + sP + (wakeActive ? wakePitch : 0), this.yaw + this.recoilYaw + sY, sR + wakeRoll, 'YXZ');
 
-    const targetFov = BASE_FOV + (this.sprinting && hs > WALK ? 8 : 0);
-    this.fov = damp(this.fov, targetFov, 6, dt);
+    const targetFov = BASE_FOV - 10 * this.aimZoom + (this.sprinting && hs > WALK && this.aimZoom < 0.05 ? 8 : 0);
+    this.fov = damp(this.fov, targetFov, this.aimZoom > 0 ? 9 : 6, dt);
     if (Math.abs(this.camera.fov - this.fov) > 0.01) {
       this.camera.fov = this.fov;
       this.camera.updateProjectionMatrix();

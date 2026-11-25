@@ -258,6 +258,8 @@ export class Village {
   /** Where the village's breakable effigies stand (built by the effigy system). */
   readonly effigySpots: { x: number; z: number; yaw: number }[] = [];
   readonly radius = 26;
+  /** Hut footprints enemies treat as solid (they walk round a hut, never into its doorway). */
+  readonly aiBlockers: { x: number; z: number; r: number }[] = [];
   private flicker = 0;
   private occupied: Spot[] = [];
 
@@ -407,7 +409,8 @@ export class Village {
     ]) {
       const yaw = Math.atan2(-tx, -tz);
       if (this.put('tent', { by: 'max', value: 3.6 }, tx, tz, yaw, 0.04, root)) {
-        for (const s of [-1, 1]) this.collide(tx + Math.cos(yaw) * s * 0.9, tz - Math.sin(yaw) * s * 0.9, 0.9, 1.6, 'plane');
+        // The tent's long side runs along its local Z: three colliders down its length.
+        for (const s of [-1, 0, 1]) this.collide(tx + Math.sin(yaw) * s * 1.15, tz + Math.cos(yaw) * s * 1.15, 0.95, 1.6, 'plane');
       }
       this.occupied.push({ x: tx, z: tz, r: 2.8 });
     }
@@ -666,6 +669,7 @@ export class Village {
   ): void {
     const r = mulberry32(Math.round(dx * 31 + dz * 7) + 99);
     const c = this.at(dx, dz);
+    this.aiBlockers.push({ x: c.x, z: c.z, r: R + 0.25 });
     const eave = c.y + wallH;
     const door = Math.atan2(-dx, -dz);
     const gap = 0.68 / R;
@@ -756,6 +760,7 @@ export class Village {
     const W = 4.0;
     const H = 3.1;
     const c = this.at(dx, dz);
+    this.aiBlockers.push({ x: c.x, z: c.z, r: 2.8 });
     // Open end (local -X) faces the fire.
     const yaw = Math.atan2(-dz, dx);
     const g = new THREE.Group();

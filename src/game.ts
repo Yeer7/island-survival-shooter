@@ -277,6 +277,7 @@ export class Game implements CombatWorld {
       },
       (save?.defeated ?? []) as BossRole[],
     );
+    this.tribe.blockers = this.village.aiBlockers;
     this.scene.add(this.tribe.group);
     this.arrows = new Arrows(
       (o, d, max) => {

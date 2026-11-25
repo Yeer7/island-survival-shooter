@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { AssetLibrary, AssetName } from '../assets/assets';
 import { clamp, wrapAngle } from '../core/math';
+import { buildBone, buildFeather, buildHorn } from '../weapons/models';
 import { ColliderGrid } from './colliders';
 import { Terrain } from './terrain';
 
@@ -89,6 +90,14 @@ export interface Cannibal {
   burnTick: number;
   /** True once it has started hunting the player (plays the alert sting once). */
   alerted: boolean;
+  /** Steering: time pinned against something, the side-step it chose and for how long. */
+  stuckT: number;
+  avoidOff: number;
+  avoidT: number;
+  lastX: number;
+  lastZ: number;
+  /** Fallback fall (no usable death clip): tilt toward the ground. */
+  fallAng: number;
 }
 
 let maskTex: THREE.CanvasTexture | null = null;
@@ -142,12 +151,150 @@ function attach(bone: THREE.Object3D | undefined, obj: THREE.Object3D, worldScal
   bone.add(obj);
 }
 
+let chiefTex: THREE.CanvasTexture | null = null;
+
+/** The chief's mask: blackened wood, bone-white skull paint round deep sockets, dried blood. */
+function chiefMaskPaint(): THREE.CanvasTexture {
+  if (chiefTex) return chiefTex;
+  const c = document.createElement('canvas');
+  c.width = c.height = 256;
+  const g = c.getContext('2d')!;
+  const grd = g.createLinearGradient(0, 0, 0, 256);
+  grd.addColorStop(0, '#2a1d14');
+  grd.addColorStop(1, '#17100b');
+  g.fillStyle = grd;
+  g.fillRect(0, 0, 256, 256);
+  // Wood grain.
+  g.strokeStyle = 'rgba(80,56,36,0.35)';
+  for (let x = 0; x < 256; x += 5) {
+    g.beginPath();
+    g.moveTo(x, 0);
+    g.bezierCurveTo(x + 6, 80, x - 6, 170, x + 3, 256);
+    g.stroke();
+  }
+  // Skull paint: pale band over the eyes and down the cheeks.
+  g.fillStyle = 'rgba(214,202,176,0.88)';
+  g.beginPath();
+  g.ellipse(128, 104, 104, 46, 0, 0, Math.PI * 2);
+  g.fill();
+  g.fillRect(70, 120, 116, 70);
+  // Deep sockets and a slit nose.
+  g.fillStyle = '#060302';
+  for (const x of [84, 172]) {
+    g.beginPath();
+    g.ellipse(x, 106, 30, 22, x < 128 ? 0.25 : -0.25, 0, Math.PI * 2);
+    g.fill();
+  }
+  g.beginPath();
+  g.moveTo(128, 120);
+  g.lineTo(116, 160);
+  g.lineTo(140, 160);
+  g.fill();
+  // Stitched mouth with filed teeth.
+  g.fillRect(78, 184, 100, 26);
+  g.fillStyle = '#d6caae';
+  for (let x = 80; x < 176; x += 10) {
+    g.beginPath();
+    g.moveTo(x, 184);
+    g.lineTo(x + 5, 199);
+    g.lineTo(x + 10, 184);
+    g.fill();
+    g.beginPath();
+    g.moveTo(x, 210);
+    g.lineTo(x + 5, 197);
+    g.lineTo(x + 10, 210);
+    g.fill();
+  }
+  // Dried blood streaks running from the sockets.
+  g.strokeStyle = 'rgba(96,18,12,0.85)';
+  g.lineWidth = 6;
+  for (const x of [70, 96, 160, 188]) {
+    g.beginPath();
+    g.moveTo(x, 122);
+    g.bezierCurveTo(x + 4, 160, x - 3, 200, x + 2, 250);
+    g.stroke();
+  }
+  chiefTex = new THREE.CanvasTexture(c);
+  chiefTex.colorSpace = THREE.SRGBColorSpace;
+  return chiefTex;
+}
+
+/** Organic carved mask for the chief: bulging cheeks, narrow chin, brow ridge, tusks. Faces +Z. */
+function chiefMask(): THREE.Group {
+  const g = new THREE.Group();
+  const geo = new THREE.CylinderGeometry(0.145, 0.125, 0.34, 18, 8, true, -Math.PI * 0.46, Math.PI * 0.92);
+  const p = geo.attributes.position;
+  for (let i = 0; i < p.count; i++) {
+    const v = p.getY(i) / 0.34;
+    let k = 1 + 0.1 * Math.cos(v * Math.PI * 1.4);
+    if (v < -0.2) k *= 1 - (-0.2 - v) * 1.1;
+    p.setX(i, p.getX(i) * k);
+    p.setZ(i, p.getZ(i) * k);
+  }
+  geo.computeVertexNormals();
+  g.add(new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ map: chiefMaskPaint(), roughness: 0.8, side: THREE.DoubleSide })));
+  const dark = new THREE.MeshStandardMaterial({ color: 0x24170e, roughness: 0.9 });
+  const bone = new THREE.MeshStandardMaterial({ color: 0xc9bc9c, roughness: 0.7 });
+  const brow = new THREE.Mesh(new THREE.TorusGeometry(0.13, 0.018, 6, 16, Math.PI * 0.7), dark);
+  brow.rotation.set(Math.PI / 2, 0, Math.PI * 0.15 + Math.PI / 2);
+  brow.position.set(0, 0.05, 0.012);
+  brow.scale.set(1, 1, 0.6);
+  g.add(brow);
+  const nose = new THREE.Mesh(new THREE.ConeGeometry(0.022, 0.08, 4), dark);
+  nose.position.set(0, 0.0, 0.15);
+  nose.rotation.x = 0.4;
+  g.add(nose);
+  for (const sx of [-1, 1]) {
+    const tusk = buildHorn(0.09, 0.012, 1.2, bone);
+    tusk.position.set(sx * 0.06, -0.09, 0.13);
+    tusk.rotation.set(0.2, Math.PI, sx * 0.25);
+    g.add(tusk);
+  }
+  return g;
+}
+
+/** The chief's headdress: braided band, swept-back horns, a fan of dark feathers, bone and beads. */
+function chiefCrown(): THREE.Group {
+  const crown = new THREE.Group();
+  const cord = new THREE.MeshStandardMaterial({ color: 0x3a2a1c, roughness: 1 });
+  const horn = new THREE.MeshStandardMaterial({ color: 0x9c8e72, roughness: 0.7 });
+  const bone = new THREE.MeshStandardMaterial({ color: 0xcfc3a6, roughness: 0.65 });
+  const blood = new THREE.MeshStandardMaterial({ color: 0x5a1a12, roughness: 0.8 });
+  const band = new THREE.Mesh(new THREE.TorusGeometry(0.135, 0.032, 6, 18), cord);
+  band.rotation.x = Math.PI / 2;
+  crown.add(band);
+  for (const sx of [-1, 1]) {
+    const h = buildHorn(0.36, 0.034, 1.7, horn);
+    h.position.set(sx * 0.12, 0.02, -0.01);
+    h.rotation.set(0, -sx * Math.PI / 2, -sx * 0.55);
+    crown.add(h);
+  }
+  for (let k = 0; k < 9; k++) {
+    const a = (k - 4) * 0.2;
+    const f = buildFeather(0.4 + (k % 2) * 0.08, 'dark');
+    f.position.set(Math.sin(a) * 0.1, 0.02, -0.1 - Math.cos(a) * 0.02);
+    f.rotation.set(-0.45, a * 0.4, -a);
+    crown.add(f);
+  }
+  const brow = buildBone(0.2, bone);
+  brow.position.set(0, 0.01, 0.15);
+  crown.add(brow);
+  for (const sx of [-1, 1]) {
+    for (let k = 0; k < 5; k++) {
+      const bead = new THREE.Mesh(new THREE.SphereGeometry(0.014, 6, 4), k % 2 ? bone : blood);
+      bead.position.set(sx * 0.15, -0.04 - k * 0.035, 0.02);
+      crown.add(bead);
+    }
+  }
+  return crown;
+}
+
 function tribalProps(role: Role): { mask: THREE.Object3D; weapon: THREE.Object3D; skirt: THREE.Object3D; crown: THREE.Object3D | null } {
   const wood = new THREE.MeshStandardMaterial({ color: 0x5d3f26, roughness: 0.9 });
   const bone = new THREE.MeshStandardMaterial({ color: 0xe6dcc6, roughness: 0.6 });
   const mask = new THREE.Group();
-  const face = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.115, 0.28, 12, 1, true, -Math.PI * 0.42, Math.PI * 0.84), new THREE.MeshStandardMaterial({ map: maskPaint(), roughness: 0.7, side: THREE.DoubleSide }));
-  mask.add(face);
+  if (role === 'boss') mask.add(chiefMask());
+  else mask.add(new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.115, 0.28, 12, 1, true, -Math.PI * 0.42, Math.PI * 0.84), new THREE.MeshStandardMaterial({ map: maskPaint(), roughness: 0.7, side: THREE.DoubleSide })));
 
   const weapon = new THREE.Group();
   if (role === 'stalker') {
@@ -172,20 +319,7 @@ function tribalProps(role: Role): { mask: THREE.Object3D; weapon: THREE.Object3D
   }
   const skirt = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.3, 0.32, 10, 1, true), new THREE.MeshStandardMaterial({ color: 0x5b4a2a, roughness: 1, side: THREE.DoubleSide }));
   let crown: THREE.Object3D | null = null;
-  if (role === 'boss') {
-    crown = new THREE.Group();
-    const colors = [0xb8322a, 0xe8c24a, 0xf2efe6, 0x1f6fb0];
-    for (let k = 0; k < 11; k++) {
-      const a = -Math.PI * 0.55 + (k / 10) * Math.PI * 1.1;
-      const f = new THREE.Mesh(new THREE.ConeGeometry(0.035, 0.42, 4), new THREE.MeshStandardMaterial({ color: colors[k % 4], roughness: 0.8 }));
-      f.position.set(Math.sin(a) * 0.15, 0.16 + Math.cos(a) * 0.08, -Math.cos(a) * 0.06 - 0.03);
-      f.rotation.set(-0.35, 0, -a * 0.6);
-      crown.add(f);
-    }
-    const band = new THREE.Mesh(new THREE.TorusGeometry(0.13, 0.03, 4, 14), new THREE.MeshStandardMaterial({ color: 0x9e2a22 }));
-    band.rotation.x = Math.PI / 2;
-    crown.add(band);
-  }
+  if (role === 'boss') crown = chiefCrown();
   return { mask, weapon, skirt, crown };
 }
 
@@ -213,6 +347,8 @@ export class Tribe {
   /** Bosses already beaten (persisted in the save). */
   readonly defeated = new Set<BossRole>();
   kills = 0;
+  /** Extra footprints the AI treats as solid (village huts), on top of the colliders. */
+  blockers: { x: number; z: number; r: number }[] = [];
   private spawnedNight = -1;
   private tmp = new THREE.Vector3();
 
@@ -332,6 +468,12 @@ export class Tribe {
       burnT: 0,
       burnTick: 0,
       alerted: false,
+      stuckT: 0,
+      avoidOff: 0,
+      avoidT: 0,
+      lastX: at.x,
+      lastZ: at.z,
+      fallAng: -1,
     };
     if (role === 'boss' || role === 'guardian' || role === 'alpha') {
       const cv = document.createElement('canvas');
@@ -465,10 +607,36 @@ export class Tribe {
       this.kills++;
       if (c.role === 'boss' || c.role === 'guardian' || c.role === 'alpha') this.defeated.add(c.role);
       if (c.hpBar) c.hpBar.visible = false;
-      this.play(c, 'death', 0.12);
+      this.die(c);
       return true;
     }
     return false;
+  }
+
+  /**
+   * Death: every other clip fades out (nothing keeps running under the fall) and the
+   * death clip plays once from the start at full weight, holding its last pose.
+   */
+  private die(c: Cannibal): void {
+    for (const key of Object.keys(c.actions) as ClipKey[]) {
+      const a = c.actions[key];
+      if (!a || key === 'death') continue;
+      a.fadeOut(0.12);
+    }
+    const d = c.actions.death;
+    if (d) {
+      d.reset();
+      d.setLoop(THREE.LoopOnce, 1);
+      d.clampWhenFinished = true;
+      d.setEffectiveTimeScale(1);
+      d.setEffectiveWeight(1);
+      d.play();
+      c.clip = 'death';
+      c.fallAng = -1;
+    } else {
+      c.clip = null;
+      c.fallAng = 0;
+    }
   }
 
   /** Set it alight: burns for `seconds`, 8 damage per second, small flames on the body. */
@@ -476,6 +644,64 @@ export class Tribe {
     const c = this.list[i];
     if (!c || c.state === 'dead') return;
     c.burnT = Math.max(c.burnT, seconds);
+  }
+
+  /** Any collider in the way along `heading`, out to `range` metres (probes at three points). */
+  private blocked(c: Cannibal, heading: number, range: number): boolean {
+    const sx = Math.sin(heading);
+    const sz = Math.cos(heading);
+    const rad = c.cfg.radius * 0.9;
+    let hit = false;
+    for (const d of [Math.min(0.7, range), Math.min(1.45, range), range]) {
+      const px = c.pos.x + sx * d;
+      const pz = c.pos.z + sz * d;
+      this.colliders.query(px, pz, 2.5, (col) => {
+        if (!hit && Math.hypot(col.x - px, col.z - pz) < col.r + rad) hit = true;
+      });
+      for (const b of this.blockers) if (Math.hypot(b.x - px, b.z - pz) < b.r + rad) hit = true;
+      if (hit) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Obstacle avoidance: keep the wanted heading when the way is clear; otherwise try
+   * side-steps of 40, 75 and 110 degrees, its own circling side first (so it does not
+   * dither), and hold the chosen detour briefly to get round the corner.
+   */
+  private steer(c: Cannibal, want: number, dist: number, dt: number): number {
+    const range = Math.max(0.6, Math.min(2.2, dist - c.cfg.reach * 0.5));
+    c.avoidT -= dt;
+    const stuck = c.stuckT > 0.35;
+    if (c.avoidT > 0 && c.avoidOff !== 0 && !stuck && !this.blocked(c, want + c.avoidOff, range)) {
+      // Back on the direct line as soon as it is clear and the corner is passed.
+      if (c.avoidT < 0.25 && !this.blocked(c, want, range)) c.avoidOff = 0;
+      return want + c.avoidOff;
+    }
+    if (!stuck && !this.blocked(c, want, range)) {
+      c.avoidOff = 0;
+      return want;
+    }
+    for (const deg of [40, 75, 110]) {
+      for (const side of [c.circleDir, -c.circleDir]) {
+        const off = side * (deg * Math.PI) / 180;
+        if (!this.blocked(c, want + off, range)) {
+          c.avoidOff = off;
+          c.avoidT = 0.7;
+          c.circleDir = side;
+          if (stuck) c.stuckT = 0;
+          return want + off;
+        }
+      }
+    }
+    // Boxed in: back away to the other side and try again.
+    if (stuck) {
+      c.circleDir = -c.circleDir;
+      c.stuckT = 0;
+    }
+    c.avoidOff = c.circleDir * 2.2;
+    c.avoidT = 0.5;
+    return want + c.avoidOff;
   }
 
   private zoneAt(x: number, z: number, zones: SafeZone[]): SafeZone | null {
@@ -509,13 +735,26 @@ export class Tribe {
 
       if (c.state === 'dead') {
         c.deadT += dt;
+        // Once the fades are done, nothing but the death clip may still be running.
+        if (c.deadT > 0.2) {
+          for (const key of Object.keys(c.actions) as ClipKey[]) {
+            const a = c.actions[key];
+            if (a && key !== 'death' && a.isRunning()) a.stop();
+          }
+        }
         c.mixer.update(dt);
+        if (c.fallAng >= 0) {
+          // No usable death clip: topple over backwards onto the ground.
+          c.fallAng = Math.min(Math.PI / 2, c.fallAng + dt * (1.5 + c.fallAng * 4));
+          c.model.rotation.x = -c.fallAng;
+        }
         if (c.deadT > 1.0 && !c.dropped) {
           c.dropped = true;
           this.events.onDeath(c);
         }
-        // Bodies stay while the player can see them; cleared later, out of sight.
-        if (c.deadT > 25 && dist > 35) {
+        // The body lies there for a few seconds, then sinks into the ground, wherever the player is.
+        if (c.deadT > 6) c.root.position.y = c.pos.y - (c.deadT - 6) * 0.55;
+        if (c.deadT > 7.6) {
           this.group.remove(c.root);
           this.list.splice(i, 1);
         }
@@ -643,6 +882,8 @@ export class Tribe {
       const lx = c.pos.x + Math.sin(targetHeading) * 2;
       const lz = c.pos.z + Math.cos(targetHeading) * 2;
       if (this.terrain.height(lx, lz) < this.terrain.waterLevelAt(lx, lz) + 0.2) targetHeading += c.circleDir * 1.3;
+      // Walk round tents, trees, rocks and fires instead of running into them.
+      if (targetSpeed > 0.1 && c.state !== 'attack') targetHeading = this.steer(c, targetHeading, dist, dt);
 
       // Attack: the clip's wind-up is the telegraph; the blow lands at `windup`.
       c.attackCd -= dt;
@@ -683,7 +924,24 @@ export class Tribe {
           c.pos.z += (oz / d) * (min - d);
         }
       });
+      for (const b of this.blockers) {
+        const ox = c.pos.x - b.x;
+        const oz = c.pos.z - b.z;
+        const d = Math.hypot(ox, oz);
+        const min = b.r + cfg.radius;
+        if (d < min && d > 1e-4) {
+          c.pos.x += (ox / d) * (min - d);
+          c.pos.z += (oz / d) * (min - d);
+        }
+      }
       c.pos.y = this.terrain.height(c.pos.x, c.pos.z);
+      // Pinned: it moved far less than its speed says it should have.
+      const expected = c.speed * dt;
+      const moved = Math.hypot(c.pos.x - c.lastX, c.pos.z - c.lastZ);
+      if (expected > 0.015 && moved < expected * 0.35) c.stuckT += dt;
+      else c.stuckT = Math.max(0, c.stuckT - dt * 2);
+      c.lastX = c.pos.x;
+      c.lastZ = c.pos.z;
 
       // Locomotion clip by speed, played at the rate the ground moves (no sliding feet).
       if (c.state !== 'attack') {

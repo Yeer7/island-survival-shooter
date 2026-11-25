@@ -1,5 +1,6 @@
 import { AssetLibrary, setLibrary } from './assets/assets';
 import { Game } from './game';
+import { startGallery } from './ui/gallery';
 
 const canvas = document.getElementById('game-canvas') as HTMLCanvasElement;
 const overlay = document.getElementById('overlay') as HTMLDivElement;
@@ -20,6 +21,12 @@ async function boot(): Promise<void> {
     console.warn('Some models failed to load; using built-in shapes where needed.', e);
   }
   setLibrary(lib);
+  if (params.has('assets')) {
+    // Asset inspection gallery instead of the game.
+    overlay.style.display = 'none';
+    startGallery(canvas, lib);
+    return;
+  }
   const game = new Game(canvas, lib);
   if (import.meta.env.DEV || debug) (window as unknown as { __game: Game }).__game = game;
   playBtn.disabled = false;

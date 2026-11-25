@@ -12,6 +12,9 @@ interface SpeciesCfg {
   walk: number;
   flee: number;
   scare: number;
+  /** Seconds of flight per scare, then a rest during which they cannot be startled again. */
+  fleeTime: number;
+  rest: number;
   hp: number;
   radius: number;
   height: number;
@@ -19,10 +22,10 @@ interface SpeciesCfg {
   turn: number;
 }
 
-// Wander and flee speeds are tuned against the player's 15 m/s sprint so game can be run down.
+// Short bursts of flight against the player's 10 m/s sprint: hunting is a chase, not a marathon.
 const CFG: Record<Species, SpeciesCfg> = {
-  rabbit: { walk: 3.5, flee: 9.0, scare: 9, hp: 20, radius: 0.3, height: 0.35, stride: 0.7, turn: 3.0 },
-  deer: { walk: 4.0, flee: 10.5, scare: 17, hp: 60, radius: 0.75, height: 1.3, stride: 1.6, turn: 1.8 },
+  rabbit: { walk: 2.0, flee: 6.5, scare: 12, fleeTime: 2.5, rest: 4, hp: 20, radius: 0.3, height: 0.35, stride: 0.55, turn: 3.0 },
+  deer: { walk: 2.2, flee: 8.0, scare: 14, fleeTime: 3.5, rest: 4, hp: 60, radius: 0.75, height: 1.3, stride: 1.4, turn: 1.8 },
 };
 
 /** Clip names inside the CC0 deer/stag files. */
@@ -49,6 +52,8 @@ export interface Animal {
   respawnT: number;
   /** Rabbits stop for a beat now and then while fleeing. */
   pauseT: number;
+  /** Time left before a resting animal can be startled again. */
+  calmT: number;
   mixer: THREE.AnimationMixer | null;
   actions: Partial<Record<ClipKey, THREE.AnimationAction>>;
   clip: ClipKey | null;
@@ -216,6 +221,7 @@ export class Wildlife {
       dropped: false,
       respawnT: 0,
       pauseT: 0,
+      calmT: 0,
       mixer: null,
       actions: {},
       clip: null,
@@ -318,7 +324,7 @@ export class Wildlife {
 
   private startFlee(a: Animal, from: THREE.Vector3): void {
     a.state = 'flee';
-    a.timer = 6 + this.rand() * 4;
+    a.timer = a.cfg.fleeTime;
     a.targetHeading = Math.atan2(a.pos.x - from.x, a.pos.z - from.z);
   }
 
@@ -355,7 +361,9 @@ export class Wildlife {
 
       const c = a.cfg;
       // Perception: running or close players scare animals.
-      if (a.state !== 'flee' && (dist < c.scare * 0.5 || (dist < c.scare && playerMoving))) this.startFlee(a, player);
+      a.calmT -= dt;
+      if (a.state !== 'flee' && a.calmT <= 0 && dist <= c.scare) this.startFlee(a, player);
+      void playerMoving;
 
       a.timer -= dt;
       let targetSpeed = 0;
@@ -378,15 +386,12 @@ export class Wildlife {
           break;
         case 'flee':
           targetSpeed = c.flee;
-          if (a.species === 'rabbit') {
-            a.pauseT -= dt;
-            if (a.pauseT < -1.2 - this.rand() * 1.2) a.pauseT = 0.25 + this.rand() * 0.25;
-            if (a.pauseT > 0) targetSpeed = 0.4;
-          }
-          if (dist < c.scare * 2) a.targetHeading = Math.atan2(dx, dz) + Math.sin(a.timer * 1.7) * 0.4;
-          if (a.timer <= 0 && dist > c.scare * 2) {
-            a.state = 'walk';
-            a.timer = 2 + this.rand() * 3;
+          a.targetHeading = Math.atan2(dx, dz) + Math.sin(a.timer * 1.7) * 0.35;
+          if (a.timer <= 0) {
+            // Out of breath: stop and graze/rest before it can be startled again.
+            a.state = 'graze';
+            a.timer = 3 + this.rand() * 3;
+            a.calmT = c.rest;
           }
           break;
       }

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
 
@@ -18,9 +19,13 @@ export const ASSET_FILES = {
   rockRound: 'assets/nature/rock_round.glb',
   rockSmall: 'assets/nature/rock_small.glb',
   pebble: 'assets/nature/pebble.glb',
-  bush: 'assets/nature/bush.glb',
+  bush: 'assets/ultimate/Bush.gltf',
+  bushSmall: 'assets/ultimate/Bush_Small.gltf',
+  bushLarge: 'assets/ultimate/Bush_Large.gltf',
+  palm1: 'assets/ultimate/PalmTree_1.fbx',
+  palm2: 'assets/ultimate/PalmTree_2.fbx',
+  palm3: 'assets/ultimate/PalmTree_3.fbx',
   fern: 'assets/nature/fern.glb',
-  stump: 'assets/nature/stump.glb',
   deer: 'assets/animals/deer.glb',
   stag: 'assets/animals/stag.glb',
   bow: 'assets/tools/bow.glb',
@@ -36,6 +41,12 @@ export const ASSET_FILES = {
 } as const;
 
 export type AssetName = keyof typeof ASSET_FILES;
+
+/** FBX files reference textures by absolute paths from the author's disk, so their
+ *  materials are rebuilt from these resized copies (matched by material name). */
+const FBX_TEXTURES: Record<string, { leaves: string; bark: string }> = {
+  palm: { leaves: 'assets/ultimate/PalmTree_Leaves.png', bark: 'assets/ultimate/PalmTree_Trunk.jpg' },
+};
 
 export interface LoadedAsset {
   scene: THREE.Group;
@@ -78,13 +89,61 @@ export class AssetLibrary {
 
   async load(onProgress: (done: number, total: number) => void): Promise<void> {
     const loader = new GLTFLoader();
+    // Point the FBX's own texture lookups at a 1-pixel image so they never 404;
+    // the real (resized) textures are assigned below.
+    const fbxManager = new THREE.LoadingManager();
+    const BLANK = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
+    fbxManager.setURLModifier((u) => (/\.(png|jpe?g|tga|bmp|psd)$/i.test(u) ? BLANK : u));
+    const fbx = new FBXLoader(fbxManager);
+    const texLoader = new THREE.TextureLoader();
+    const texCache = new Map<string, Promise<THREE.Texture>>();
+    const tex = (url: string, srgb: boolean) => {
+      let t = texCache.get(url);
+      if (!t) {
+        t = texLoader.loadAsync(url).then((x) => {
+          if (srgb) x.colorSpace = THREE.SRGBColorSpace;
+          return x;
+        });
+        texCache.set(url, t);
+      }
+      return t;
+    };
     const names = Object.keys(ASSET_FILES) as AssetName[];
     let done = 0;
     await Promise.all(
       names.map(async (name) => {
-        const gltf = await loader.loadAsync(ASSET_FILES[name]);
-        fixMaterials(gltf.scene);
-        this.items.set(name, { scene: gltf.scene, animations: gltf.animations });
+        const url = ASSET_FILES[name];
+        if (url.endsWith('.fbx')) {
+          const group = await fbx.loadAsync(url);
+          const set = FBX_TEXTURES[name.replace(/\d+$/, '')];
+          const leaves = set ? await tex(set.leaves, true) : null;
+          const bark = set ? await tex(set.bark, true) : null;
+          group.traverse((o) => {
+            const m = o as THREE.Mesh;
+            if (!m.isMesh) return;
+            const old = (Array.isArray(m.material) ? m.material : [m.material]) as THREE.Material[];
+            const rebuilt = old.map((mat) => {
+              const isLeaf = /leaf|leaves/i.test(mat.name);
+              return new THREE.MeshStandardMaterial({
+                name: mat.name,
+                map: isLeaf ? leaves : bark,
+                roughness: 0.9,
+                metalness: 0,
+                alphaTest: isLeaf ? 0.45 : 0,
+                side: isLeaf ? THREE.DoubleSide : THREE.FrontSide,
+              });
+            });
+            m.material = rebuilt.length === 1 ? rebuilt[0] : rebuilt;
+          });
+          const wrap = new THREE.Group();
+          wrap.add(group);
+          fixMaterials(wrap);
+          this.items.set(name, { scene: wrap, animations: [] });
+        } else {
+          const gltf = await loader.loadAsync(url);
+          fixMaterials(gltf.scene);
+          this.items.set(name, { scene: gltf.scene, animations: gltf.animations });
+        }
         onProgress(++done, names.length);
       }),
     );
@@ -136,10 +195,26 @@ export class AssetLibrary {
       const geo = m.geometry.clone().applyMatrix4(m.matrixWorld);
       const keep = ['position', 'normal', 'uv', 'color'];
       for (const k of Object.keys(geo.attributes)) if (!keep.includes(k)) geo.deleteAttribute(k);
-      const mat = Array.isArray(m.material) ? m.material[0] : m.material;
-      const list = byMat.get(mat) ?? [];
-      list.push(geo.index ? geo.toNonIndexed() : geo);
-      byMat.set(mat, list);
+      const flat = geo.index ? geo.toNonIndexed() : geo;
+      const add = (mat: THREE.Material, g2: THREE.BufferGeometry) => {
+        const list = byMat.get(mat) ?? [];
+        list.push(g2);
+        byMat.set(mat, list);
+      };
+      if (Array.isArray(m.material) && flat.groups.length) {
+        // Multi-material meshes (e.g. FBX trunk + leaves): one geometry per material group.
+        for (const grp of flat.groups) {
+          const sub = new THREE.BufferGeometry();
+          for (const [k, attr] of Object.entries(flat.attributes)) {
+            const a = attr as THREE.BufferAttribute;
+            const arr = (a.array as Float32Array).slice(grp.start * a.itemSize, (grp.start + grp.count) * a.itemSize);
+            sub.setAttribute(k, new THREE.BufferAttribute(arr, a.itemSize));
+          }
+          add(m.material[grp.materialIndex ?? 0], sub);
+        }
+      } else {
+        add(Array.isArray(m.material) ? m.material[0] : m.material, flat);
+      }
     });
     const out: InstancePart[] = [];
     byMat.forEach((geos, material) => {

@@ -93,6 +93,8 @@ export interface DetailSet {
   rock: THREE.CanvasTexture;
   rockBump: THREE.CanvasTexture;
   plank: THREE.CanvasTexture;
+  /** Cut end of a log: growth rings around the centre (CylinderGeometry cap UVs). */
+  rings: THREE.CanvasTexture;
 }
 
 let cached: DetailSet | null = null;
@@ -170,7 +172,19 @@ export function detailTextures(): DetailSet {
     return 0.58 + grain * 0.35 + seam + ((board * 0.13) % 0.1);
   }, 256);
 
+  const rings = makeTexture(256, (u, v) => {
+    const dx = u - 0.5;
+    const dy = v - 0.5;
+    const r = Math.sqrt(dx * dx + dy * dy) * 2;
+    const wob = n.fbm(u, v, 6, 6, 2) * 0.06;
+    const ring = Math.sin((r + wob) * 70) * 0.5 + 0.5;
+    const edge = r > 0.9 ? 0.45 : 1;
+    return (0.78 + ring * 0.14 - r * 0.08) * edge;
+  });
+  rings.colorSpace = THREE.SRGBColorSpace;
+  rings.wrapS = rings.wrapT = THREE.ClampToEdgeWrapping;
+
   for (const t of [bark, barkBump]) t.repeat.set(1, 2);
-  cached = { bark, barkBump, foliage, sand, grass, rock, rockBump, plank };
+  cached = { bark, barkBump, foliage, sand, grass, rock, rockBump, plank, rings };
   return cached;
 }

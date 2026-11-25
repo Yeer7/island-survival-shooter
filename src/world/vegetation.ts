@@ -168,7 +168,18 @@ export class Forest {
     }
 
     this.sets = this.variants.map((parts) => new InstancedSet(parts, placed.length, true));
-    this.stumps = new InstancedSet(lib.parts('stump', { by: 'footprint', value: 1 }), placed.length, true);
+    // Cut stump: dark bark on the side (same as the logs) and a pale ring-cut top.
+    const tex = detailTextures();
+    const stumpGeo = new THREE.CylinderGeometry(0.4, 0.5, 0.7, 12, 1);
+    stumpGeo.translate(0, 0.35, 0);
+    const bark = new THREE.MeshStandardMaterial({ color: new THREE.Color(0x5a3d26).multiplyScalar(1.35), roughness: 0.95, map: tex.bark, bumpMap: tex.barkBump, bumpScale: 3 });
+    const cut = new THREE.MeshStandardMaterial({ color: new THREE.Color(0xd9b98a), roughness: 0.85, map: tex.rings });
+    const stumpMesh = new THREE.InstancedMesh(stumpGeo, [bark, cut, bark], Math.max(1, placed.length));
+    this.stumps = new InstancedSet([], placed.length, true);
+    stumpMesh.castShadow = true;
+    stumpMesh.receiveShadow = true;
+    stumpMesh.count = 0;
+    this.stumps.meshes.push(stumpMesh);
     const tint = new THREE.Color();
     placed.forEach((p, i) => {
       const scale = 0.8 + rand() * 0.5;
@@ -194,7 +205,7 @@ export class Forest {
     this.sets[t.variant].set(t.slot, this.zero);
     this.dummy.position.set(t.x, t.y + 0.05, t.z);
     this.dummy.rotation.set(0, t.rotY, 0);
-    this.dummy.scale.set(t.scale * 0.95, t.scale * 0.8, t.scale * 0.95);
+    this.dummy.scale.set(t.scale, t.scale * (0.85 + (t.slot % 5) * 0.06), t.scale);
     this.dummy.updateMatrix();
     this.stumps.set(i, this.dummy.matrix);
   }
@@ -375,19 +386,21 @@ export class Props {
     for (const s of rockSets) s.finish(this.group);
 
     // Bushes and ferns (CC0), swaying, no cast shadows to keep the shadow pass light.
-    const bushSet = new InstancedSet(lib.parts('bush', { by: 'height', value: 1.2 }, 0), 220, false);
+    // Ultimate Stylized Nature bushes (three sizes) plus ferns under the trees.
+    const bushSets = (['bushSmall', 'bush', 'bushLarge'] as AssetName[]).map((n, k) => new InstancedSet(lib.parts(n, { by: 'height', value: [0.7, 1.1, 1.6][k] }), 90, false));
     const fernSet = new InstancedSet(lib.parts('fern', { by: 'height', value: 0.8 }), 260, false);
-    for (const set of [bushSet, fernSet]) for (const m of set.meshes) addWind(m.material as THREE.Material, 0.1, 0.06);
+    for (const set of [...bushSets, fernSet]) for (const m of set.meshes) addWind(m.material as THREE.Material, 0.1, 0.06);
+    const bushCount = () => bushSets.reduce((s2, b2) => s2 + b2.count, 0);
     tries = 0;
-    while ((bushSet.count < 220 || fernSet.count < 260) && tries < 30000) {
+    while ((bushCount() < 240 || fernSet.count < 260) && tries < 30000) {
       tries++;
       const x = (rand() - 0.5) * 500;
       const z = (rand() - 0.5) * 500;
       if (terrain.surfaceAt(x, z) !== 'grass' || excluded(x, z)) continue;
       const h = terrain.height(x, z);
       const fern = nearTree(x, z, 5) ? rand() < 0.7 : rand() < 0.3;
-      const set = fern ? fernSet : bushSet;
-      if (set.count >= (fern ? 260 : 220)) continue;
+      const set = fern ? fernSet : bushSets[Math.floor(rand() * 3)];
+      if (set.count >= (fern ? 260 : 80)) continue;
       const s = 0.7 + rand() * 0.7;
       d.position.set(x, h - 0.05, z);
       d.rotation.set(0, rand() * 6, 0);
@@ -396,8 +409,33 @@ export class Props {
       color.setHSL(0.25 + (rand() - 0.5) * 0.06, 0.25, 0.55 + rand() * 0.1).multiplyScalar(1.75);
       set.push(d.matrix, color);
     }
-    bushSet.finish(this.group);
+    for (const b2 of bushSets) b2.finish(this.group);
     fernSet.finish(this.group);
+
+    // Palm trees along the southern beach (Ultimate Stylized Nature, loaded from FBX).
+    const palmSets = (['palm1', 'palm2', 'palm3'] as AssetName[]).map((n) => new InstancedSet(lib.parts(n, { by: 'height', value: 8 }), 30, true));
+    for (const set of palmSets) for (const m of set.meshes) if ((m.material as THREE.MeshStandardMaterial).alphaTest > 0) addWind(m.material as THREE.Material, 4, 0.02);
+    let palms = 0;
+    tries = 0;
+    while (palms < 45 && tries < 20000) {
+      tries++;
+      const a = Math.PI * (0.15 + rand() * 0.7);
+      const r0 = terrain.islandRadius(Math.cos(a), Math.sin(a)) * (0.8 + rand() * 0.12);
+      const x = Math.cos(a) * r0;
+      const z = Math.sin(a) * r0;
+      const h = terrain.height(x, z);
+      if (h < 0.7 || h > 4 || z < 40 || excluded(x, z, 2) || terrain.slope(x, z) > 0.2) continue;
+      if (colliders.isFree(x, z, 2.5) === false) continue;
+      const s = 0.8 + rand() * 0.45;
+      d.position.set(x, h - 0.1, z);
+      d.rotation.set(0, rand() * Math.PI * 2, 0);
+      d.scale.setScalar(s);
+      d.updateMatrix();
+      palmSets[Math.floor(rand() * 3)].push(d.matrix, color.setRGB(1, 1, 1));
+      colliders.add({ x, z, r: 0.35 * s, y0: h - 1, y1: h + 8 * s, kind: 'rock', ref: 0 });
+      palms++;
+    }
+    for (const p2 of palmSets) p2.finish(this.group);
 
     // Grass tufts: one draw call, no shadows cast.
     const grassGeo = this.buildGrassTuft();

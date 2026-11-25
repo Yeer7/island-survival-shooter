@@ -9,9 +9,9 @@ const EYE = 1.65;
 const RADIUS = 0.38;
 const GRAVITY = 24;
 const JUMP = 7.4;
-const WALK = 5;
-/** Unlimited sprint, fast enough to run down fleeing game. */
-const RUN = 15;
+const WALK = 6;
+/** Unlimited sprint. */
+const RUN = 10;
 const SWIM = 2.6;
 const SENS = 0.0021;
 const BASE_FOV = 80;
@@ -181,7 +181,7 @@ export class PlayerController {
     this.speed01 = clamp(hs / RUN, 0, 1);
     this.moving = hs > 0.4;
     if ((this.onGround || this.swimming) && hs > 0.3) {
-      const stride = this.swimming ? 2.2 : this.sprinting ? 2.7 : 1.5;
+      const stride = this.swimming ? 2.2 : this.sprinting ? 2.1 : 1.6;
       this.stepAccum += hs * dt;
       this.bobPhase += ((hs * dt) / stride) * Math.PI;
       if (this.stepAccum >= stride) {

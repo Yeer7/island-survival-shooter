@@ -8,6 +8,22 @@ const BUDGET = { tris: 12000, bytes: 1.5 * 1024 * 1024 };
 
 function readGlb(file) {
   const buf = fs.readFileSync(file);
+  if (file.endsWith('.gltf')) {
+    // Separate-file glTF: JSON plus .bin buffers (and images) next to it.
+    const json = JSON.parse(buf.toString('utf8'));
+    let bytes = buf.length;
+    for (const b of json.buffers ?? []) if (b.uri && !b.uri.startsWith('data:')) {
+      const p = path.join(path.dirname(file), b.uri);
+      if (!fs.existsSync(p)) throw new Error(`missing buffer ${b.uri}`);
+      bytes += fs.statSync(p).size;
+    }
+    for (const im of json.images ?? []) if (im.uri && !im.uri.startsWith('data:')) {
+      const p = path.join(path.dirname(file), im.uri);
+      if (!fs.existsSync(p)) throw new Error(`missing image ${im.uri}`);
+      bytes += fs.statSync(p).size;
+    }
+    return { json, bytes };
+  }
   if (buf.readUInt32LE(0) !== 0x46546c67) throw new Error('not a glb');
   const jsonLen = buf.readUInt32LE(12);
   const json = JSON.parse(buf.subarray(20, 20 + jsonLen).toString('utf8'));
@@ -76,7 +92,10 @@ const isMain = process.argv[1] && path.resolve(process.argv[1]) === path.resolve
 if (isMain) {
   const args = process.argv.slice(2);
   const target = args.length ? args : ['public/assets'];
-  const files = target.flatMap((t) => (fs.statSync(t).isDirectory() ? fs.readdirSync(t, { recursive: true }).map((f) => path.join(t, f)) : [t])).filter((f) => f.endsWith('.glb'));
+  const all = target.flatMap((t) => (fs.statSync(t).isDirectory() ? fs.readdirSync(t, { recursive: true }).map((f) => path.join(t, f)) : [t]));
+  const files = all.filter((f) => f.endsWith('.glb') || f.endsWith('.gltf'));
+  // FBX is loaded at runtime with FBXLoader: check size, the binary FBX header and the licence entry.
+  const fbx = all.filter((f) => f.endsWith('.fbx'));
   const licence = fs.existsSync('ASSETS_LICENSE.md') ? fs.readFileSync('ASSETS_LICENSE.md', 'utf8') : '';
   let failed = 0;
   for (const f of files) {
@@ -99,6 +118,42 @@ if (isMain) {
       console.log(`FAIL ${line} — ${problems.join('; ')}`);
     } else console.log(`ok   ${line}`);
   }
-  console.log(`${files.length} assets, ${failed} failing`);
+  for (const f of fbx) {
+    const buf = fs.readFileSync(f);
+    const problems = [];
+    if (!buf.subarray(0, 20).toString('latin1').startsWith('Kaydara FBX Binary')) problems.push('not a binary FBX');
+    if (buf.length > BUDGET.bytes) problems.push('over size budget');
+    if (!licence.includes(path.basename(f))) problems.push('missing from ASSETS_LICENSE.md');
+    if (problems.length) failed++;
+    console.log(`${problems.length ? 'FAIL' : 'ok  '} ${path.basename(f)}: ${(buf.length / 1024).toFixed(0)} KB (fbx)${problems.length ? ' — ' + problems.join('; ') : ''}`);
+  }
+  // Every image shipped next to the models must be at most 512 px and licensed.
+  for (const f of all.filter((x) => /\.(png|jpe?g)$/i.test(x))) {
+    const buf = fs.readFileSync(f);
+    let w = 0;
+    let h = 0;
+    if (buf[0] === 0x89) {
+      w = buf.readUInt32BE(16);
+      h = buf.readUInt32BE(20);
+    } else {
+      for (let i = 2; i < buf.length - 9; ) {
+        if (buf[i] !== 0xff) break;
+        const marker = buf[i + 1];
+        const len = buf.readUInt16BE(i + 2);
+        if (marker >= 0xc0 && marker <= 0xc2) {
+          h = buf.readUInt16BE(i + 5);
+          w = buf.readUInt16BE(i + 7);
+          break;
+        }
+        i += 2 + len;
+      }
+    }
+    const problems = [];
+    if (Math.max(w, h) > 512 && !f.includes('colormap')) problems.push(`${w}x${h} > 512`);
+    if (!licence.includes(path.basename(f))) problems.push('missing from ASSETS_LICENSE.md');
+    if (problems.length) failed++;
+    console.log(`${problems.length ? 'FAIL' : 'ok  '} ${path.basename(f)}: ${w}x${h}${problems.length ? ' — ' + problems.join('; ') : ''}`);
+  }
+  console.log(`${files.length + fbx.length} models, ${failed} failing`);
   process.exit(failed ? 1 : 0);
 }

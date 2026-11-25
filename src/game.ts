@@ -193,6 +193,7 @@ export class Game implements CombatWorld {
     }
     this.cave = new Cave(this.terrain, this.colliders, lib);
     this.scene.add(this.cave.outside, this.cave.inside);
+    for (const e of this.cave.fx) this.scene.add(e.points);
     this.altar = new Altar(this.terrain, this.colliders, lib);
     this.scene.add(this.altar.group);
     this.boat = new Sailboat(this.terrain, this.colliders);
@@ -394,6 +395,7 @@ export class Game implements CombatWorld {
     for (const e of [...this.crash.smoke, ...this.crash.fire]) e.setViewportHeight(h * ratio);
     this.sparks.setViewportHeight(h * ratio);
     this.village.setViewportHeight(h * ratio);
+    this.cave.setViewportHeight(h * ratio);
     this.burnFx.setViewportHeight(h * ratio);
     for (const p of this.base.placed) {
       p.fire?.setViewportHeight(h * ratio);
@@ -475,6 +477,7 @@ export class Game implements CombatWorld {
     this.crash.update(dt, this.sky.ambient);
     this.base.update(dt, this.time, this.sky.ambient);
     this.village.update(dt, this.sky.ambient, this.player.pos);
+    this.cave.update(dt, this.player.pos);
     this.effigies.update(dt, this.time, this.player.pos);
     this.updateZones();
     this.tribe.update(dt, { player: this.player.pos, alive: !this.vitals.dead, night: this.sky.night > 0.5, day: this.sky.day, zones: this.zones, indoors: this.indoors });
@@ -1522,9 +1525,32 @@ export class Game implements CombatWorld {
     } else {
       this.flashlight.intensity = 0;
     }
+    const p = this.player.pos;
+    // In the cave the three pooled lights (two campfire slots and the cabin lantern) light
+    // the nearest of its lanterns, glowsticks, glowing water and floodlight.
+    const pool = [this.campLights[0], this.campLights[1], this.cabinLight];
+    if (this.indoors) {
+      const near = this.cave.lights.slice().sort((a, b) => a.pos.distanceToSquared(p) - b.pos.distanceToSquared(p));
+      pool.forEach((l, i) => {
+        const a = near[i];
+        if (!a) {
+          l.intensity = 0;
+          return;
+        }
+        l.position.copy(a.pos);
+        l.color.setHex(a.color);
+        l.distance = a.distance;
+        l.intensity = a.intensity * (a.flicker ? 0.9 + Math.sin(t * 11 + i) * 0.06 + Math.sin(t * 23 + i * 2) * 0.04 : 1);
+      });
+      return;
+    }
+    this.campLights[0].color.setHex(0xff8a3a);
+    this.campLights[1].color.setHex(0xff8a3a);
+    this.campLights[0].distance = this.campLights[1].distance = 18;
+    this.cabinLight.color.setHex(0xffb468);
+    this.cabinLight.distance = 13;
     // Two pooled campfire lights go to the nearest fires (hysteresis keeps them from swapping).
     const fires = this.base.placed.filter((p) => p.kind === 'campfire');
-    const p = this.player.pos;
     fires.sort((a, b) => a.pos.distanceToSquared(p) - b.pos.distanceToSquared(p));
     for (let i = 0; i < 2; i++) {
       const cur = this.campAssign[i];

@@ -471,6 +471,13 @@ export class SoundEngine {
     this.burst({ type: 'lowpass', freq: 700, gain: 0.25, decay: 0.1, when: knock });
   }
 
+  /** A water drop landing in a cave puddle: a short, bright plink with a little echo. */
+  drip(vol = 1): void {
+    if (!this.ctx) return;
+    const f = 1400 + Math.random() * 900;
+    this.tone({ type: 'sine', f0: f, f1: f * 1.6, gain: 0.06 * vol, attack: 0.002, decay: 0.09, toEcho: 0.5 });
+  }
+
   denied(): void {
     if (!this.ctx) return;
     this.tone({ type: 'triangle', f0: 300, f1: 220, gain: 0.1, decay: 0.12 });

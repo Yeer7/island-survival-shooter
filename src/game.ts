@@ -194,6 +194,12 @@ export class Game implements CombatWorld {
     this.cave = new Cave(this.terrain, this.colliders, lib);
     this.scene.add(this.cave.outside, this.cave.inside);
     for (const e of this.cave.fx) this.scene.add(e.points);
+    // Supply crates and barrels inside the cave break like the luggage.
+    for (const b of this.cave.breakables) {
+      this.crash.suitcases.push(b);
+      this.scene.add(b.mesh);
+    }
+    this.cave.onDrip = (p) => this.sound.drip(Math.max(0.15, 1 - p.distanceTo(this.player.pos) / 14));
     this.altar = new Altar(this.terrain, this.colliders, lib);
     this.scene.add(this.altar.group);
     this.boat = new Sailboat(this.terrain, this.colliders);
@@ -1408,9 +1414,9 @@ export class Game implements CombatWorld {
       const a = (k / s.contents.length) * Math.PI * 2 + Math.random();
       const x = s.pos.x + Math.cos(a) * 0.45;
       const z = s.pos.z + Math.sin(a) * 0.45;
-      this.pickups.add(type, this.v1.set(x, this.terrain.height(x, z), z), 1);
+      this.pickups.add(type, this.v1.set(x, this.cave.isInside(s.pos) ? 0 : this.terrain.height(x, z), z), 1);
     });
-    this.hud.toast('🧳 Mala aberta');
+    this.hud.toast(this.cave.isInside(s.pos) ? '📦 Suprimentos encontrados' : '🧳 Mala aberta');
   }
 
   /** A blow on an effigy: wobble and chips, and on the last blow it topples and drops cloth and sticks. */

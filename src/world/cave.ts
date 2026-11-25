@@ -5,6 +5,8 @@ import { mulberry32 } from '../core/math';
 import { PuffEmitter } from '../fx/particles';
 import { buildLog, logMaterials } from '../weapons/models';
 import { ColliderGrid } from './colliders';
+import { Suitcase } from './landmarks';
+import { ItemType } from './pickups';
 import { Terrain } from './terrain';
 import { detailTextures } from './textures';
 
@@ -239,6 +241,26 @@ export class Cave {
   private lostCampCrate = new THREE.Vector3();
   private chestGlow: CaveLight | null = null;
   private chestGlowMat: THREE.MeshStandardMaterial | null = null;
+  /** Crates and barrels inside that break like the luggage (the game adds them to its list). */
+  readonly breakables: Suitcase[] = [];
+  private puddles: THREE.Vector3[] = [];
+  private floodHead = new THREE.Vector3();
+  private floodTarget = new THREE.Vector3();
+  private pillarSpots: [number, number][] = [
+    [66, -6.5],
+    [70, 7],
+    [79, -8],
+    [82, 5.5],
+  ];
+  // Ambient life: drips into the puddles, dust in the floodlight.
+  private drops!: THREE.Points;
+  private dropState: { y: number; v: number; p: THREE.Vector3 | null }[] = [];
+  private rings: { m: THREE.Mesh; t: number }[] = [];
+  private dripT = 0.5;
+  private dust!: THREE.Points;
+  private dustVel: Float32Array = new Float32Array(0);
+  /** Called with the splash point when a drop lands (the game plays the sound). */
+  onDrip: ((p: THREE.Vector3) => void) | null = null;
 
   constructor(
     private terrain: Terrain,
@@ -608,6 +630,7 @@ export class Cave {
     this.buildTunnel(root, rand);
     this.buildChasm(root, rand);
     this.buildHall(root, rand);
+    this.dress(root, rand);
 
     for (const m of bakeStatic(root)) m.receiveShadow = true;
     this.inside.add(root);
@@ -669,6 +692,7 @@ export class Cave {
       m.rotation.x = -Math.PI / 2;
       m.position.copy(p);
       root.add(m);
+      this.puddles.push(p.clone());
     }
     // Rocks along the walls (solid).
     for (let k = 0; k < 14; k++) {
@@ -942,12 +966,7 @@ export class Cave {
     const C = 74;
     const pillarMat = new THREE.MeshStandardMaterial({ color: 0x6a6b70, roughness: 0.65, map: detailTextures().rock, bumpMap: detailTextures().rockBump, bumpScale: 3, flatShading: true });
     // Natural pillars, floor to ceiling.
-    for (const [dd, lat] of [
-      [66, -6.5],
-      [70, 7],
-      [79, -8],
-      [82, 5.5],
-    ] as [number, number][]) {
+    for (const [dd, lat] of this.pillarSpots) {
       const p = this.at(dd, lat, -0.5);
       const top = ceiling(dd) * Math.sqrt(Math.max(0.05, 1 - (lat / (halfWidth(dd) + 1)) ** 2)) + 1.5;
       for (const [name, frac] of [
@@ -1092,6 +1111,8 @@ export class Cave {
     const fp = this.at(C + 3.6, 5.2, 0);
     const metal = new THREE.MeshStandardMaterial({ color: 0x3a3d42, roughness: 0.5, metalness: 0.4 });
     const head = new THREE.Vector3(fp.x, 2.1, fp.z);
+    this.floodHead.copy(head);
+    this.floodTarget.copy(tp).setY(0.8);
     for (let k = 0; k < 3; k++) {
       const a = (k / 3) * Math.PI * 2;
       const foot = new THREE.Vector3(fp.x + Math.cos(a) * 0.45, 0, fp.z + Math.sin(a) * 0.45);
@@ -1113,6 +1134,325 @@ export class Cave {
     this.lights.push({ pos: head.clone().lerp(new THREE.Vector3(tp.x, 0.9, tp.z), 0.3), color: 0xe6eeff, intensity: 26, distance: 18, flicker: false });
     // A cold fill high in the vault so the hall reads as big.
     this.lights.push({ pos: this.at(C - 2, 0, 8), color: 0x6f8fb8, intensity: 18, distance: 30, flicker: false });
+  }
+
+  /** Recolour a model's meshes with one material (for glowing crystals and bioluminescent caps). */
+  private paint(o: THREE.Object3D, mat: THREE.Material): void {
+    o.traverse((c) => {
+      if ((c as THREE.Mesh).isMesh) (c as THREE.Mesh).material = mat;
+    });
+  }
+
+  /**
+   * Fills the cave: mine props holding up the tunnel, a plank walkway over the mud,
+   * glowing crystals and cave mushrooms, rubble along every wall, the remains of lost
+   * explorers, breakable supply crates, drips and dust.
+   */
+  private dress(root: THREE.Group, rand: () => number): void {
+    const wetPlank = new THREE.MeshStandardMaterial({ color: 0x5e4630, roughness: 0.45, map: detailTextures().plank });
+    // ---- mine props: two posts, a cap beam and braces, holding up the tunnel roof
+    for (const d of [5.5, 10.5, 26.5, 30.5, 54]) {
+      const w = halfWidth(d) - 0.25;
+      const top = Math.min(ceiling(d) - 0.2, 3.8);
+      const a = this.at(d, -w, -0.2);
+      const b = this.at(d, w, -0.2);
+      const at = a.clone().setY(top);
+      const bt = b.clone().setY(top);
+      root.add(this.logBetween(a, at, 0.13), this.logBetween(b, bt, 0.13));
+      root.add(this.logBetween(this.at(d, -w - 0.3, top + 0.05), this.at(d, w + 0.3, top + 0.05), 0.15));
+      root.add(this.logBetween(this.at(d, -w, top - 0.9), this.at(d, -w + 0.9, top), 0.07));
+      root.add(this.logBetween(this.at(d, w, top - 0.9), this.at(d, w - 0.9, top), 0.07));
+      // A lantern hook and planks wedged above the beam.
+      for (let k = -1; k <= 1; k++) {
+        const plank = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.05, 1.4), wetPlank);
+        plank.position.copy(this.at(d, k * 0.7, top + 0.22));
+        plank.rotation.y = this.headingAt(d);
+        root.add(plank);
+      }
+      this.obstacles.push({ x: a.x, z: a.z, r: 0.22 }, { x: b.x, z: b.z, r: 0.22 });
+    }
+    // ---- a crooked plank walkway over the mud and puddles
+    for (let d = 1.5; d < 33.5; d += 0.34 + rand() * 0.12) {
+      if (rand() < 0.12) continue;
+      const lat = Math.sin(d * 0.35) * 0.4 + (rand() - 0.5) * 0.12;
+      const b = new THREE.Mesh(new THREE.BoxGeometry(1.1 + rand() * 0.3, 0.05, 0.24), wetPlank);
+      b.position.copy(this.at(d, lat, 0.035));
+      b.rotation.set((rand() - 0.5) * 0.06, this.headingAt(d) + (rand() - 0.5) * 0.25, (rand() - 0.5) * 0.06);
+      b.receiveShadow = true;
+      root.add(b);
+    }
+    for (let d = 47.5; d < 60; d += 0.36 + rand() * 0.12) {
+      if (rand() < 0.15) continue;
+      const b = new THREE.Mesh(new THREE.BoxGeometry(1.0 + rand() * 0.3, 0.05, 0.24), wetPlank);
+      b.position.copy(this.at(d, (rand() - 0.5) * 0.2, 0.035));
+      b.rotation.set(0, this.headingAt(d) + (rand() - 0.5) * 0.25, 0);
+      root.add(b);
+    }
+
+    // ---- glowing crystals
+    const cyan = new THREE.MeshStandardMaterial({ color: 0x7fe8ff, emissive: 0x2ab8d8, emissiveIntensity: 1.4, roughness: 0.15, metalness: 0.1, flatShading: true });
+    const amber = new THREE.MeshStandardMaterial({ color: 0xffc070, emissive: 0xd87a1a, emissiveIntensity: 1.3, roughness: 0.2, metalness: 0.1, flatShading: true });
+    const crystal = (p: THREE.Vector3, size: number, glow: THREE.Material, light: boolean) => {
+      const name = rand() < 0.5 ? 'crystalCluster' : rand() < 0.5 ? 'crystalSpire' : 'mineral';
+      const c = this.model(name as AssetName, { by: 'max', value: size });
+      if (!c) return;
+      this.paint(c, glow);
+      c.position.copy(p);
+      c.rotation.set((rand() - 0.5) * 0.4, rand() * 6, (rand() - 0.5) * 0.4);
+      root.add(c);
+      if (light) this.lights.push({ pos: p.clone().setY(p.y + 0.6), color: glow === cyan ? 0x58dcff : 0xffa850, intensity: 3.5, distance: 7, flicker: false });
+    };
+    // In the corners of the tunnel.
+    for (const [d, side, mat] of [
+      [7, 1, cyan],
+      [13, -1, cyan],
+      [22, -1, amber],
+      [28.5, 1, cyan],
+      [32.5, -1, amber],
+    ] as [number, number, THREE.Material][]) {
+      const w = halfWidth(d);
+      for (let k = 0; k < 3; k++) crystal(this.at(d + (rand() - 0.5) * 1.2, side * (w - 0.1 - rand() * 0.3), -0.05), 0.4 + rand() * 0.5, mat, k === 0);
+    }
+    // Round the cathedral pillars.
+    this.pillarSpots.forEach(([d, lat], i) => {
+      for (let k = 0; k < 4; k++) {
+        const a = (k / 4) * Math.PI * 2 + rand();
+        const p = this.at(d + Math.cos(a) * 1.7, lat + Math.sin(a) * 1.7, -0.05);
+        crystal(p, 0.5 + rand() * 0.8, i % 2 ? amber : cyan, k === 0);
+      }
+    });
+    // On the chasm cliffs.
+    for (const [d, face] of [
+      [CHASM_Z0, 1],
+      [CHASM_Z1, -1],
+    ] as [number, number][]) {
+      for (let k = 0; k < 5; k++) crystal(this.at(d + face * 0.4, (rand() - 0.5) * 9, -1.5 - rand() * 9), 0.6 + rand() * 0.8, cyan, k === 2);
+    }
+
+    // ---- cave mushrooms, faintly glowing caps
+    const shroomGlow = new THREE.Color(0x203a2a);
+    const shroom = (p: THREE.Vector3, size: number) => {
+      const m = this.model(rand() < 0.55 ? 'mushroomCluster' : 'mushroom', { by: 'height', value: size });
+      if (!m) return;
+      m.traverse((c) => {
+        const mesh = c as THREE.Mesh;
+        if (mesh.isMesh && !Array.isArray(mesh.material)) {
+          const mm = (mesh.material as THREE.MeshStandardMaterial).clone();
+          mm.emissive = shroomGlow;
+          mm.emissiveIntensity = 1;
+          mesh.material = mm;
+        }
+      });
+      m.position.copy(p);
+      m.rotation.y = rand() * 6;
+      root.add(m);
+    };
+    for (let k = 0; k < 16; k++) {
+      const d = 2 + rand() * 31;
+      if (d > 14 && d < 24) continue;
+      const side = rand() < 0.5 ? -1 : 1;
+      const base = this.at(d, side * (halfWidth(d) - 0.2), 0);
+      for (let q = 0; q < 3; q++) shroom(base.clone().add(new THREE.Vector3((rand() - 0.5) * 0.6, 0, (rand() - 0.5) * 0.6)), 0.15 + rand() * 0.3);
+    }
+    this.pillarSpots.forEach(([d, lat]) => {
+      for (let q = 0; q < 4; q++) {
+        const a = rand() * 6.28;
+        shroom(this.at(d + Math.cos(a) * 1.5, lat + Math.sin(a) * 1.5, 0), 0.2 + rand() * 0.35);
+      }
+    });
+
+    // ---- rubble along every wall
+    for (let i = 0; i < 150; i++) {
+      const d = 1 + rand() * (END_Z - 4);
+      if (d > CHASM_Z0 - 0.5 && d < CHASM_Z1 + 0.5) continue;
+      const w = halfWidth(d);
+      const side = rand() < 0.5 ? -1 : 1;
+      const big = rand() < 0.2;
+      const name: AssetName = big ? 'rockMedium' : rand() < 0.5 ? 'rockSmall' : 'pebble';
+      const size = big ? 0.6 + rand() * 0.6 : 0.15 + rand() * 0.35;
+      const r = this.model(name, { by: 'footprint', value: size });
+      if (!r) continue;
+      const p = this.at(d, side * (w + 0.15 - rand() * 0.6), -size * 0.25);
+      r.position.copy(p);
+      r.rotation.set(rand() * 3, rand() * 6, rand() * 3);
+      root.add(r);
+      if (big) this.obstacles.push({ x: p.x, z: p.z, r: size * 0.4 });
+    }
+
+    // ---- remains of lost explorers
+    const bone = (p: THREE.Vector3, len: number, yaw: number, tilt = 0) => {
+      const b = this.model('bone', { by: 'max', value: len });
+      if (!b) return;
+      b.position.copy(p);
+      b.rotation.set(0, yaw, tilt);
+      root.add(b);
+    };
+    const remains = (d: number, side: number, kit: AssetName[]) => {
+      const w = halfWidth(d);
+      const lat = side * (w - 0.55);
+      const base = this.at(d, lat, 0);
+      const toWall = this.headingAt(d) + (side > 0 ? -Math.PI / 2 : Math.PI / 2);
+      // Slumped against a rock: skull, ribs, arms and legs.
+      const rock = this.model('rockMedium', { by: 'footprint', value: 1.1 });
+      if (rock) {
+        rock.position.copy(this.at(d, side * (w + 0.1), -0.2));
+        root.add(rock);
+      }
+      const sk = this.model('skull', { by: 'height', value: 0.23 });
+      if (sk) {
+        sk.position.copy(base).y += 0.5;
+        sk.rotation.set(0.5, toWall + Math.PI, 0.3);
+        root.add(sk);
+      }
+      for (let k = 0; k < 5; k++) bone(base.clone().add(new THREE.Vector3(0, 0.12 + k * 0.07, 0)), 0.32, toWall + Math.PI / 2, 0.15 * (k - 2));
+      for (const s of [-1, 1]) {
+        bone(this.at(d + s * 0.35, side * (w - 1.1), 0.02), 0.55, this.headingAt(d) + Math.PI / 2 + s * 0.2);
+        bone(this.at(d + s * 0.4, side * (w - 0.5), 0.3), 0.4, toWall, 0.8);
+      }
+      kit.forEach((name, i) => {
+        const m = this.model(name, name === 'shovel' ? { by: 'height', value: 1.1 } : name === 'backpack' ? { by: 'height', value: 0.45 } : { by: 'max', value: 0.3 });
+        if (!m) return;
+        const off = this.at(d + (i - (kit.length - 1) / 2) * 0.7, side * (w - 1.2 - (i % 2) * 0.3), 0);
+        m.position.copy(off);
+        if (name === 'shovel') {
+          m.position.copy(this.at(d + 0.9, side * (w - 0.25), 0));
+          m.rotation.set(0, toWall, side * 0.35);
+        } else m.rotation.set(name === 'canOpen' || name === 'waterBottle' ? Math.PI / 2 : 0, rand() * 6, 0);
+        root.add(m);
+      });
+      this.obstacles.push({ x: base.x, z: base.z, r: 0.5 });
+    };
+    remains(8.5, 1, ['shovel', 'waterBottle', 'canOpen']);
+    remains(29.5, -1, ['backpack', 'battery', 'pan', 'canOpen']);
+    remains(57.5, 1, ['shovel', 'propane', 'waterBottle']);
+
+    // ---- breakable supply crates and barrels (food, bandage, cloth for the boss fight)
+    const loot: [number, number, 'crate' | 'barrel', ItemType[]][] = [
+      [9.8, -1, 'crate', ['food', 'bandage']],
+      [25.5, 1, 'barrel', ['cloth', 'food']],
+      [59.5, -1, 'crate', ['bandage', 'bandage']],
+      [61, 1, 'barrel', ['food', 'cloth']],
+    ];
+    for (const [d, side, kind, contents] of loot) {
+      const p = this.at(d, side * (halfWidth(d) - 0.9), 0);
+      const g = new THREE.Group();
+      const m = this.model(kind, { by: 'height', value: kind === 'crate' ? 0.62 : 0.9 });
+      if (m) g.add(m);
+      g.position.copy(p);
+      g.rotation.y = rand() * 6;
+      this.breakables.push({ mesh: g, pos: p.clone().setY(kind === 'crate' ? 0.31 : 0.45), hp: 50, color: 0x6b4a2e, contents, broken: false });
+    }
+
+    // ---- drips into the puddles
+    const n = 10;
+    const pos = new Float32Array(n * 3);
+    const dg = new THREE.BufferGeometry();
+    dg.setAttribute('position', new THREE.BufferAttribute(pos, 3).setUsage(THREE.DynamicDrawUsage));
+    this.drops = new THREE.Points(dg, new THREE.PointsMaterial({ color: 0xbfe6ff, size: 0.05, transparent: true, opacity: 0.8, depthWrite: false }));
+    this.drops.frustumCulled = false;
+    for (let i = 0; i < n; i++) {
+      pos[i * 3 + 1] = -100;
+      this.dropState.push({ y: -100, v: 0, p: null });
+    }
+    this.inside.add(this.drops);
+    const ringMat = new THREE.MeshBasicMaterial({ color: 0xd6f0ff, transparent: true, opacity: 0, depthWrite: false });
+    for (let i = 0; i < 5; i++) {
+      const ring = new THREE.Mesh(new THREE.RingGeometry(0.06, 0.08, 20), ringMat.clone());
+      ring.rotation.x = -Math.PI / 2;
+      ring.visible = false;
+      this.inside.add(ring);
+      this.rings.push({ m: ring, t: 1 });
+    }
+
+    // ---- dust motes drifting in the floodlight, and the faint beam itself
+    const dn = 70;
+    const dp = new Float32Array(dn * 3);
+    this.dustVel = new Float32Array(dn * 3);
+    for (let i = 0; i < dn; i++) {
+      const t = rand();
+      const q = this.floodHead.clone().lerp(this.floodTarget, t);
+      dp[i * 3] = q.x + (rand() - 0.5) * (0.4 + t * 1.6);
+      dp[i * 3 + 1] = q.y + (rand() - 0.5) * (0.4 + t * 1.2);
+      dp[i * 3 + 2] = q.z + (rand() - 0.5) * (0.4 + t * 1.6);
+      this.dustVel[i * 3] = (rand() - 0.5) * 0.05;
+      this.dustVel[i * 3 + 1] = (rand() - 0.5) * 0.03;
+      this.dustVel[i * 3 + 2] = (rand() - 0.5) * 0.05;
+    }
+    const dgeo = new THREE.BufferGeometry();
+    dgeo.setAttribute('position', new THREE.BufferAttribute(dp, 3).setUsage(THREE.DynamicDrawUsage));
+    this.dust = new THREE.Points(dgeo, new THREE.PointsMaterial({ color: 0xfff4dc, size: 0.025, transparent: true, opacity: 0.7, depthWrite: false, blending: THREE.AdditiveBlending }));
+    this.dust.frustumCulled = false;
+    this.inside.add(this.dust);
+    const len = this.floodHead.distanceTo(this.floodTarget) + 0.6;
+    const beam = new THREE.Mesh(new THREE.ConeGeometry(1.3, len, 20, 1, true), new THREE.MeshBasicMaterial({ color: 0xe8f0ff, transparent: true, opacity: 0.045, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide }));
+    const dir = new THREE.Vector3().subVectors(this.floodTarget, this.floodHead).normalize();
+    beam.position.copy(this.floodHead).addScaledVector(dir, len / 2);
+    beam.quaternion.setFromUnitVectors(new THREE.Vector3(0, -1, 0), dir);
+    this.inside.add(beam);
+  }
+
+  private updateAmbience(dt: number, player: THREE.Vector3): void {
+    // Drips: now and then a drop falls from the roof into a puddle and rings spread.
+    this.dripT -= dt;
+    const pos = this.drops.geometry.attributes.position as THREE.BufferAttribute;
+    if (this.dripT <= 0 && this.puddles.length) {
+      this.dripT = 0.5 + Math.random() * 1.2;
+      const free = this.dropState.find((d) => !d.p);
+      if (free) {
+        const p = this.puddles[Math.floor(Math.random() * this.puddles.length)];
+        const { d } = this.locate(p.x, p.z);
+        free.p = p.clone().add(new THREE.Vector3((Math.random() - 0.5) * 0.6, 0, (Math.random() - 0.5) * 0.6));
+        free.y = ceiling(d) - 0.2;
+        free.v = 0;
+      }
+    }
+    this.dropState.forEach((d, i) => {
+      if (!d.p) return;
+      d.v -= 9.8 * dt;
+      d.y += d.v * dt;
+      if (d.y <= 0.03) {
+        const ring = this.rings.find((r) => r.t >= 1);
+        if (ring) {
+          ring.t = 0;
+          ring.m.position.set(d.p.x, 0.04, d.p.z);
+          ring.m.visible = true;
+        }
+        if (Math.hypot(d.p.x - player.x, d.p.z - player.z) < 14) this.onDrip?.(d.p);
+        d.p = null;
+        pos.setXYZ(i, 0, -100, 0);
+        return;
+      }
+      pos.setXYZ(i, d.p.x, d.y, d.p.z);
+    });
+    pos.needsUpdate = true;
+    for (const r of this.rings) {
+      if (r.t >= 1) continue;
+      r.t = Math.min(1, r.t + dt * 1.4);
+      const k = 1 + r.t * 5;
+      r.m.scale.set(k, k, k);
+      (r.m.material as THREE.MeshBasicMaterial).opacity = 0.6 * (1 - r.t);
+      if (r.t >= 1) r.m.visible = false;
+    }
+    // Dust: slow drift inside the floodlight, wrapping back into the beam.
+    if (player.distanceTo(this.floodHead) < 30) {
+      const dp = this.dust.geometry.attributes.position as THREE.BufferAttribute;
+      const a = dp.array as Float32Array;
+      for (let i = 0; i < dp.count; i++) {
+        a[i * 3] += this.dustVel[i * 3] * dt + Math.sin(this.t * 0.7 + i) * 0.002;
+        a[i * 3 + 1] += this.dustVel[i * 3 + 1] * dt;
+        a[i * 3 + 2] += this.dustVel[i * 3 + 2] * dt;
+        const dx = a[i * 3] - this.floodTarget.x;
+        const dz = a[i * 3 + 2] - this.floodTarget.z;
+        if (Math.hypot(dx, dz) > 4 || a[i * 3 + 1] < 0.1 || a[i * 3 + 1] > 3) {
+          const t = Math.random();
+          const q = this.floodHead.clone().lerp(this.floodTarget, t);
+          a[i * 3] = q.x + (Math.random() - 0.5) * (0.4 + t * 1.6);
+          a[i * 3 + 1] = q.y + (Math.random() - 0.5) * 0.8;
+          a[i * 3 + 2] = q.z + (Math.random() - 0.5) * (0.4 + t * 1.6);
+        }
+      }
+      dp.needsUpdate = true;
+    }
   }
 
   /** A camp table: plank top on four legs with cross braces. Origin on the floor, long side across. */
@@ -1288,6 +1628,7 @@ export class Cave {
     const near = Math.hypot(player.x - this.mouth.x, player.z - this.mouth.z) < 120;
     if (near) for (const e of this.fx) e.update(dt);
     if (this.isInside(player)) {
+      this.updateAmbience(dt, player);
       if (this.chestOpen && this.chestLid.rotation.x > -1.9) this.chestLid.rotation.x = Math.max(-1.9, this.chestLid.rotation.x - dt * 2.5);
       for (const m of this.water) {
         if (m.map) {

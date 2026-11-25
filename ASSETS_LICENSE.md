@@ -39,6 +39,17 @@ Run `npm run lint:assets` to check every `.glb`/`.gltf`/`.fbx` and texture (pars
 | `survivalpack/WoodLog.fbx` | WoodLog (log benches round the village fire) | Quaternius — Survival Pack (Sept 2020) | https://quaternius.com/packs/survival.html | CC0 1.0 | None (recoloured in code) |
 | `survivalpack/Radio.fbx` | Radio (expedition camp table in the cave) | Quaternius — Survival Pack (Sept 2020) | https://quaternius.com/packs/survival.html | CC0 1.0 | None (flat colours converted to PBR in code) |
 | `survivalpack/GasCan.fbx` | GasCan (expedition camp in the cave) | Quaternius — Survival Pack (Sept 2020) | https://quaternius.com/packs/survival.html | CC0 1.0 | None (flat colours converted to PBR in code) |
+| `survivalpack/Shovel.fbx` | Shovel (explorer remains in the cave) | Quaternius — Survival Pack (Sept 2020) | https://quaternius.com/packs/survival.html | CC0 1.0 | None (flat colours converted to PBR in code) |
+| `survivalpack/WaterBottle_1.fbx` | WaterBottle_1 (explorer remains) | Quaternius — Survival Pack (Sept 2020) | https://quaternius.com/packs/survival.html | CC0 1.0 | None (flat colours converted to PBR in code) |
+| `survivalpack/Battery_Big.fbx` | Battery_Big (explorer remains) | Quaternius — Survival Pack (Sept 2020) | https://quaternius.com/packs/survival.html | CC0 1.0 | None (flat colours converted to PBR in code) |
+| `survivalpack/PropaneTank.fbx` | PropaneTank (explorer remains) | Quaternius — Survival Pack (Sept 2020) | https://quaternius.com/packs/survival.html | CC0 1.0 | None (flat colours converted to PBR in code) |
+| `survivalpack/Can_Open.fbx` | Can_Open (explorer remains) | Quaternius — Survival Pack (Sept 2020) | https://quaternius.com/packs/survival.html | CC0 1.0 | None (flat colours converted to PBR in code) |
+| `survivalpack/Pan.fbx` | Pan (explorer remains) | Quaternius — Survival Pack (Sept 2020) | https://quaternius.com/packs/survival.html | CC0 1.0 | None (flat colours converted to PBR in code) |
+| `cave/crystal_cluster.glb` | Crystal (glowing crystals, recoloured emissive in code) | iPoly3D | https://poly.pizza/m/WzWPKHFMkL | CC0 1.0 | Repacked with `scripts/repack_glb.py` |
+| `cave/crystal_spire.glb` | Crystal (glowing crystals) | iPoly3D | https://poly.pizza/m/3saqXqoOti | CC0 1.0 | Repacked with `scripts/repack_glb.py` |
+| `cave/mineral.glb` | Mineral (glowing crystals) | Quaternius | https://poly.pizza/m/STixpWYaTd | CC0 1.0 | Repacked with `scripts/repack_glb.py` |
+| `cave/mushroom.glb` | Mushroom (cave mushrooms, faint glow added in code) | Quaternius | https://poly.pizza/m/db1tjMhmiA | CC0 1.0 | Repacked with `scripts/repack_glb.py` |
+| `cave/mushroom_cluster.glb` | Mushroom (cluster) | Quaternius | https://poly.pizza/m/aOW08oSrd4 | CC0 1.0 | Embedded texture resized to 256 px (`scripts/repack_glb.py`) |
 | `village/skull.glb` | Skull (effigies, door posts, gates, skull pile) | Quaternius | https://poly.pizza/m/YgmRBtFlcF | CC0 1.0 | None (tinted bone-white in code) |
 | `village/bone.glb` | Bone (effigies, hanging bones, scattered bones) | Quaternius | https://poly.pizza/m/uMs0lDp1u3 | CC0 1.0 | None (tinted bone-white in code) |
 | `village/crate.glb` | Crate (lootable village crates) | Quaternius | https://poly.pizza/m/3VGWnZPXmG | CC0 1.0 | None |

@@ -1,0 +1,9 @@
+{
+  "$schema": "https://opengame.io/schema/opengame.json",
+  "title": "Island Survival Shooter",
+  "description": "auto",
+  "genre": "shooter-survival",
+  "kind": "game",
+  "build": { "command": "npm run build", "output": "dist" },
+  "controls": ["keyboard", "mouse"]
+}

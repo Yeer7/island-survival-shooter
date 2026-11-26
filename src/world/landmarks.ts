@@ -918,14 +918,13 @@ export class CrashSite {
   }
 
   /**
-   * Low ridges of earth pushed up along the drag furrow and a scatter of pebbles, wood
-   * chips and small metal fragments where the churned earth meets the grass.
+   * A scatter of pebbles, wood chips and small metal fragments where the churned earth
+   * meets the grass.
    */
   private buildDirtEdge(segs: number[][]): void {
     const r = mulberry32(57);
     const toLocal = (lx: number, lz: number, lift: number) =>
       this.localToGround(lx, lz, lift).sub(this.center).applyAxisAngle(new THREE.Vector3(0, 1, 0), -this.yaw);
-    const earth: THREE.BufferGeometry[] = [];
     const stones: THREE.BufferGeometry[] = [];
     const chips: THREE.BufferGeometry[] = [];
     const metal: THREE.BufferGeometry[] = [];
@@ -935,17 +934,6 @@ export class CrashSite {
       g.translate(p.x, p.y, p.z);
       return g;
     };
-    // Ridges along both sides of the main furrow (the fuselage's slide).
-    const [fx0, , fx1, , fw] = segs[0];
-    for (let x = fx0 + 1; x < fx1; x += 1.3 + r() * 0.6) {
-      for (const side of [-1, 1]) {
-        if (r() < 0.2) continue;
-        const z = side * (fw * 0.5 + 0.15 + r() * 0.35);
-        const m = new THREE.SphereGeometry(1, 9, 5, 0, Math.PI * 2, 0, Math.PI / 2);
-        m.scale(0.7 + r() * 0.8, 0.16 + r() * 0.16, 0.45 + r() * 0.35);
-        earth.push(place(m, toLocal(x, z, -0.05), (r() - 0.5) * 0.5));
-      }
-    }
     // Scatter along every segment's edge.
     for (const [x0, z0, x1, z1, w] of segs) {
       const len = Math.hypot(x1 - x0, z1 - z0);
@@ -980,7 +968,6 @@ export class CrashSite {
       mesh.castShadow = mesh.receiveShadow = true;
       this.group.add(mesh);
     };
-    add(earth, new THREE.MeshStandardMaterial({ color: 0x3b2c1f, roughness: 0.98, flatShading: true }));
     add(stones, new THREE.MeshStandardMaterial({ color: 0x77736b, roughness: 0.9, flatShading: true }));
     add(chips, new THREE.MeshStandardMaterial({ color: 0xb38d5f, roughness: 0.9 }));
     add(metal, new THREE.MeshStandardMaterial({ color: 0x9a9da0, roughness: 0.45, metalness: 0.6 }));

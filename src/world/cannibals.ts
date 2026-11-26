@@ -3,7 +3,7 @@ import { tr } from '../ui/i18n';
 import { AssetLibrary, AssetName } from '../assets/assets';
 import { clamp, wrapAngle } from '../core/math';
 import { buildBone, buildFeather, buildHorn } from '../weapons/models';
-import { ColliderGrid } from './colliders';
+import { ColliderGrid, SPIKE_REF } from './colliders';
 import { Terrain } from './terrain';
 
 /**
@@ -803,7 +803,10 @@ export class Tribe {
         if (this.caveSpace?.blockedAt(px, pz, rad)) return true;
         continue;
       }
+      // Spike barricades: walk into the stakes first, steer round only once stuck on them.
+      const spikes = c.stuckT > 0.35;
       this.colliders.query(px, pz, 2.5, (col) => {
+        if (col.ref === SPIKE_REF && !spikes) return;
         if (!hit && Math.hypot(col.x - px, col.z - pz) < col.r + rad) hit = true;
       });
       for (const b of this.blockers) if (Math.hypot(b.x - px, b.z - pz) < b.r + rad) hit = true;

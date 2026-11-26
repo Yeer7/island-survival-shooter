@@ -68,3 +68,6 @@ export class ColliderGrid {
     return free;
   }
 }
+
+/** `ref` of spike-barricade colliders: solid, but enemies only steer round them once stuck on the stakes. */
+export const SPIKE_REF = -77;

@@ -4,7 +4,7 @@ import { library } from '../assets/assets';
 import { mulberry32 } from '../core/math';
 import { PuffEmitter } from '../fx/particles';
 import { buildLog, logMaterials, woodMaterial } from '../weapons/models';
-import { Circle, ColliderGrid } from './colliders';
+import { Circle, ColliderGrid, SPIKE_REF } from './colliders';
 import { LAKE_CENTER, LAKE_LEVEL, Terrain } from './terrain';
 import { detailTextures } from './textures';
 
@@ -32,7 +32,7 @@ export const RECIPES: Recipe[] = [
   { id: 'cabin', label: 'Cabana de Madeira', icon: '🛖', level: 1, kind: 'build', cost: {}, desc: 'Cabana espaçosa (7,5 × 6,5 m) com porta, janelas, alpendre e lampião. Escolha o lugar e entregue 6 toras, 10 gravetos e 6 pedras com [E].' },
   { id: 'bed', label: 'Cama de Sobrevivência', icon: '🛏️', level: 1, kind: 'build', cost: { logs: 4, cloth: 4, hide: 2 }, desc: 'Coloque dentro da Cabana pronta. [E] Dormir e Salvar: vida cheia e pula para as 07:00.' },
   { id: 'campfire', label: 'Fogueira', icon: '🔥', level: 1, kind: 'build', cost: { logs: 1, sticks: 4, rocks: 4 }, desc: 'Assa carne e peixe, ilumina a noite.' },
-  { id: 'spikeTrap', label: 'Armadilha de Estacas', icon: '🪤', level: 1, kind: 'build', cost: { logs: 1, sticks: 4 }, desc: 'Base baixa com estacas afiadas: fere canibais e feras que pisarem nela. Não machuca você nem os animais.' },
+  { id: 'spikeTrap', label: 'Armadilha de Estacas', icon: '🪤', level: 1, kind: 'build', cost: { logs: 2, sticks: 6, cloth: 1 }, desc: 'Barricada de estacas afiadas cruzadas e amarradas (2,2 m): bloqueia a passagem e fere canibais e feras que avançarem contra ela. Não machuca você nem os animais. [R] gira.' },
   { id: 'logHolder', label: 'Suporte de Toras', icon: '🪵', level: 1, kind: 'build', cost: { logs: 2, sticks: 4 }, desc: 'Guarda até 12 toras perto da base.' },
   { id: 'torch', label: 'Tocha', icon: '🕯️', level: 1, kind: 'tool', cost: { sticks: 2, cloth: 1 }, desc: 'Luz quente para a noite.' },
   { id: 'rod', label: 'Vara de Pesca', icon: '🎣', level: 1, kind: 'tool', cost: { sticks: 3, cloth: 1 }, desc: 'Pesque no lago (mais rápido na doca).' },
@@ -125,39 +125,9 @@ export function buildModel(kind: BuildKind): THREE.Group {
       ash.position.y = 0.02;
       break;
     }
-    case 'spikeTrap': {
-      // Low frame of logs on a plank bed, six fire-hardened stakes leaning outward and one upright.
-      const w = woodMaterial();
-      const burnt = new THREE.MeshStandardMaterial({ color: 0x2a1d14, roughness: 0.9 });
-      for (const s of [-1, 1]) {
-        const a = add(buildLog(1.5, 0.08));
-        a.rotation.z = Math.PI / 2;
-        a.position.set(0, 0.08, s * 0.62);
-        const b = add(buildLog(1.5, 0.08));
-        b.rotation.x = Math.PI / 2;
-        b.position.set(s * 0.62, 0.08, 0);
-      }
-      const bed = add(new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.05, 1.2), w));
-      bed.position.y = 0.04;
-      const stake = (x: number, z: number, tx: number, tz: number, h: number) => {
-        const shaft = add(new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.06, h, 6), w));
-        const tip = add(new THREE.Mesh(new THREE.ConeGeometry(0.045, 0.24, 6), burnt));
-        for (const [m, y] of [
-          [shaft, h / 2],
-          [tip, h + 0.12],
-        ] as [THREE.Mesh, number][]) {
-          m.rotation.set(tx, 0, tz);
-          const up = new THREE.Vector3(0, y, 0).applyEuler(m.rotation);
-          m.position.set(x + up.x, 0.06 + up.y, z + up.z);
-        }
-      };
-      for (let i = 0; i < 6; i++) {
-        const a = (i / 6) * Math.PI * 2 + 0.3;
-        stake(Math.cos(a) * 0.32, Math.sin(a) * 0.32, Math.sin(a) * 0.55, -Math.cos(a) * 0.55, 0.62 + r() * 0.12);
-      }
-      stake(0, 0, 0, 0, 0.72);
+    case 'spikeTrap':
+      buildBarricade(g, add, r);
       break;
-    }
     case 'logHolder': {
       const w = woodMaterial();
       for (const x of [-0.8, 0.8]) {
@@ -224,8 +194,80 @@ export function setGhost(obj: THREE.Object3D, ok: boolean): void {
   });
 }
 
+let barricadeMats: { bark: THREE.MeshStandardMaterial; peeled: THREE.MeshStandardMaterial; rope: THREE.MeshStandardMaterial } | null = null;
+
+/**
+ * Spike barricade: a thick crossbar lashed with rope, 14 long stakes fanned out and
+ * crossed at irregular angles (tallest in the middle, leaning forward to +Z), dark bark
+ * below and long pale peeled points above, plus short spikes jutting forward low down.
+ * About 2.2 m wide and 1.5 m tall at the centre.
+ */
+function buildBarricade(g: THREE.Group, add: (m: THREE.Mesh) => THREE.Mesh, r: () => number): void {
+  if (!barricadeMats) {
+    const tex = detailTextures();
+    barricadeMats = {
+      bark: new THREE.MeshStandardMaterial({ color: new THREE.Color(0x3b2a1c).multiplyScalar(1.2), roughness: 0.95, map: tex.bark, bumpMap: tex.barkBump, bumpScale: 2 }),
+      peeled: new THREE.MeshStandardMaterial({ color: 0xe2cba3, roughness: 0.8, map: tex.bark }),
+      rope: new THREE.MeshStandardMaterial({ color: 0xc9b285, roughness: 1 }),
+    };
+  }
+  const m = barricadeMats;
+  const up = new THREE.Vector3(0, 1, 0);
+  /** A cylinder from `a` along `dir` for `len` metres (radii at its start and end). */
+  const segment = (a: THREE.Vector3, dir: THREE.Vector3, len: number, r0: number, r1: number, mat: THREE.Material, cone = false) => {
+    const geo = cone ? new THREE.ConeGeometry(r0, len, 6) : new THREE.CylinderGeometry(r1, r0, len, 6);
+    const mesh = add(new THREE.Mesh(geo, mat));
+    mesh.quaternion.setFromUnitVectors(up, dir);
+    mesh.position.copy(a).addScaledVector(dir, len / 2);
+    return mesh;
+  };
+  const lash = (at: THREE.Vector3, axis: THREE.Vector3, radius: number, turns = 3) => {
+    for (let k = 0; k < turns; k++) {
+      const ring = add(new THREE.Mesh(new THREE.TorusGeometry(radius + 0.025, 0.028, 5, 10), m.rope));
+      ring.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), axis);
+      ring.position.copy(at).addScaledVector(axis, (k - 1) * 0.06);
+    }
+  };
+  // Long stakes, fanned and crossed.
+  const N = 16;
+  for (let k = 0; k < N; k++) {
+    const x0 = -1.0 + (2.0 * k) / (N - 1) + (r() - 0.5) * 0.08;
+    const centre = 1 - Math.abs(x0) / 1.1;
+    const cross = (k % 2 ? 1 : -1) * (0.26 + r() * 0.24);
+    const side = (x0 / 1.1) * 0.5 + cross;
+    const fwd = 0.18 + r() * 0.34;
+    const dir = new THREE.Vector3(Math.sin(side), 1, Math.sin(fwd)).normalize();
+    const len = (1.15 + centre * 0.6 + r() * 0.25) / dir.y;
+    const base = new THREE.Vector3(x0, -0.1, (r() - 0.5) * 0.3);
+    const lb = len * 0.55;
+    const lp = len * 0.27;
+    const lt = len * 0.18;
+    segment(base, dir, lb, 0.11, 0.09, m.bark);
+    const p1 = base.clone().addScaledVector(dir, lb);
+    segment(p1, dir, lp, 0.09, 0.065, m.peeled);
+    const p2 = p1.clone().addScaledVector(dir, lp);
+    segment(p2, dir, lt, 0.065, 0, m.peeled, true);
+    // Lashed where it crosses the bar.
+    const t = (0.58 - base.y) / dir.y;
+    if (k % 2 === 0) lash(base.clone().addScaledVector(dir, t), dir, 0.1, 2);
+  }
+  // Thick crossbar through the middle, wrapped in rope.
+  const bar = add(new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.17, 2.5, 8), m.bark));
+  bar.rotation.z = Math.PI / 2;
+  bar.position.set(0, 0.58, 0.16);
+  for (const x of [-0.95, -0.35, 0.3, 0.9]) lash(new THREE.Vector3(x, 0.58, 0.16), new THREE.Vector3(1, 0, 0), 0.17);
+  // Short sharp spikes low down, pointing forward.
+  for (let k = 0; k < 7; k++) {
+    const x0 = -0.9 + k * 0.3 + (r() - 0.5) * 0.08;
+    const dir = new THREE.Vector3((r() - 0.5) * 0.4, 0.35 + r() * 0.25, 1).normalize();
+    const base = new THREE.Vector3(x0, 0.22 + r() * 0.2, 0.05);
+    segment(base, dir, 0.35, 0.06, 0.05, m.bark);
+    segment(base.clone().addScaledVector(dir, 0.35), dir, 0.32, 0.05, 0, m.peeled, true);
+  }
+}
+
 /** Footprint radius used for placement checks and colliders. */
-export const FOOTPRINT: Record<BuildKind, number> = { cabin: 5.2, bed: 1.1, campfire: 0.8, logHolder: 1.0, wall: 1.6, gate: 1.6, spikeTrap: 0.9 };
+export const FOOTPRINT: Record<BuildKind, number> = { cabin: 5.2, bed: 1.1, campfire: 0.8, logHolder: 1.0, wall: 1.6, gate: 1.6, spikeTrap: 1.2 };
 
 export interface Placed {
   kind: BuildKind;
@@ -866,6 +908,10 @@ export class BaseSite {
         break;
       case 'wall':
         for (let i = 0; i < 6; i++) addC(-1.25 + i * 0.5, 0, 0.27, 3);
+        break;
+      case 'spikeTrap':
+        for (const lx of [-0.8, -0.27, 0.27, 0.8]) addC(lx, 0.05, 0.36, 1.5);
+        for (const c of p.colliders) c.ref = SPIKE_REF;
         break;
       case 'bed':
         addC(0, -0.5, 0.5, 0.6);

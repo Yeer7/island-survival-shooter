@@ -58,7 +58,7 @@ export const RECIPE_EN: Record<string, { label: string; desc: string }> = {
   cabin: { label: 'Log Cabin', desc: 'A roomy cabin (7.5 × 6.5 m) with a door, windows, porch and lantern. Pick the spot, then deliver 6 logs, 10 sticks and 6 rocks with [E].' },
   bed: { label: 'Survival Bed', desc: 'Place inside a finished cabin. [E] Sleep and Save: full health and skip to 07:00.' },
   campfire: { label: 'Campfire', desc: 'Roasts meat and fish, lights the night and keeps cannibals away.' },
-  spikeTrap: { label: 'Spike Trap', desc: 'A low frame of sharpened stakes: hurts cannibals and beasts that step on it. Never hurts you or animals.' },
+  spikeTrap: { label: 'Spike Trap', desc: 'A 2.2 m barricade of crossed, lashed sharpened stakes: blocks the way and hurts cannibals and beasts that push against it. Never hurts you or animals. [R] rotates.' },
   logHolder: { label: 'Log Holder', desc: 'Stores up to 12 logs near your base.' },
   torch: { label: 'Torch', desc: 'Warm light for the night.' },
   rod: { label: 'Fishing Rod', desc: 'Fish in the lake (faster from the dock).' },

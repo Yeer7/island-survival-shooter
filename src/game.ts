@@ -2015,7 +2015,7 @@ export class Game implements CombatWorld {
   /** Cooldown per (trap, enemy) pair so a stake bites once in a while, not every frame. */
   private trapCooldown = new Map<string, number>();
 
-  /** Spike traps hurt any cannibal or hostile beast standing in them (never the player or passive animals). */
+  /** Spike barricades hurt any cannibal or hostile beast pushing against them (never the player or passive animals). */
   private updateTraps(dt: number): void {
     for (const [k, v] of this.trapCooldown) {
       if (v - dt <= 0) this.trapCooldown.delete(k);
@@ -2025,7 +2025,8 @@ export class Game implements CombatWorld {
       if (t.kind !== 'spikeTrap') continue;
       this.tribe.list.forEach((c, i) => {
         if (c.state === 'dead') return;
-        if (Math.hypot(c.pos.x - t.pos.x, c.pos.z - t.pos.z) > 0.75 + c.cfg.radius || Math.abs(c.pos.y - t.pos.y) > 1.6) return;
+        // The barricade is 2.2 m wide: a body reaching within 1.6 m of its centre is on the stakes.
+        if (Math.hypot(c.pos.x - t.pos.x, c.pos.z - t.pos.z) - c.cfg.radius > 1.6 || Math.abs(c.pos.y - t.pos.y) > 1.8) return;
         const key = `${t.group.uuid}:${i}`;
         if (this.trapCooldown.has(key)) return;
         this.trapCooldown.set(key, 0.9);

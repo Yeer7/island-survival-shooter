@@ -56,8 +56,6 @@ export const ASSET_FILES = {
   spear: 'assets/tools/spear.glb',
   torch: 'assets/tools/torch.glb',
   rod: 'assets/tools/fishing_rod.glb',
-  axe: 'assets/survival/tool-axe.glb',
-  axeUpgraded: 'assets/survival/tool-axe-upgraded.glb',
   campfire: 'assets/survival/campfire-pit.glb',
   fish: 'assets/survival/fish.glb',
 } as const;

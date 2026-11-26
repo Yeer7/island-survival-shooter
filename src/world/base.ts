@@ -43,7 +43,7 @@ export const RECIPES: Recipe[] = [
   { id: 'bow', label: 'Arco de Caça', icon: '🏹', level: 2, kind: 'tool', cost: { sticks: 4, cloth: 1, hide: 1 }, desc: 'Combate à distância com flechas.' },
   { id: 'arrows', label: 'Flechas ×5', icon: '➶', level: 2, kind: 'item', cost: { sticks: 2, rocks: 1 }, desc: 'Munição do arco (recuperável).' },
   { id: 'reinforcedArmor', label: 'Armadura Reforçada', icon: '🛡️', level: 2, kind: 'armor', cost: { hide: 4, logs: 1, rocks: 3 }, desc: 'Vida máxima 200.' },
-  { id: 'flameAxe', label: 'Machado Flamejante', icon: '🔥', level: 3, kind: 'tool', cost: { logs: 2, rocks: 4, cloth: 2 }, desc: 'Dobro de dano, cabeça em brasa.' },
+  { id: 'flameAxe', label: 'Machado Tático', icon: '🪓', level: 3, kind: 'tool', cost: { logs: 2, rocks: 4, cloth: 2 }, desc: 'Cabeça de aço forjado com martelo: dobro de dano em árvores e golpes pesados e limpos em combate.' },
 ];
 
 export const LEVEL_UP: Record<2 | 3, { cost: Cost; boss: 'totem' | 'relic'; bossLabel: string }> = {

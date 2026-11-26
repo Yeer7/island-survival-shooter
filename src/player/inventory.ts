@@ -7,7 +7,7 @@ export type MaterialId = 'sticks' | 'rocks' | 'cloth' | 'hide' | 'arrows' | 'tot
 
 export const HOTBAR_INFO: Record<HotbarId, { label: string; icon: string }> = {
   axe: bilabel('Machado de Emergência', 'Emergency Axe', '🪓'),
-  flameAxe: bilabel('Machado Flamejante', 'Flaming Axe', '🔥'),
+  flameAxe: bilabel('Machado Tático', 'Tactical Axe', '🪓'),
   spear: bilabel('Lança de Madeira', 'Wooden Spear', '🔱'),
   bow: bilabel('Arco de Caça', 'Hunting Bow', '🏹'),
   torch: bilabel('Tocha', 'Torch', '🕯️'),

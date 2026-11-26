@@ -36,72 +36,7 @@ const MAT = {
   cuff: std(0x3f4a34, 0.9),
 };
 
-/** Emergency fire axe: red head, polished edge, black/orange grip. Origin = grip point. */
-export function buildAxe(): THREE.Group {
-  const a = fromAsset('axe', { by: 'height', value: 0.56 }, (i) => {
-    i.position.y = -0.12;
-    i.rotation.y = -1.1;
-  });
-  if (a) {
-    a.name = 'axe';
-    return a;
-  }
-  const g = new THREE.Group();
-  g.name = 'axe';
-  const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.022, 0.62, 8), MAT.handle);
-  handle.position.y = 0.2;
-  const grip = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.2, 8), MAT.grip);
-  grip.position.y = -0.02;
-  const knob = new THREE.Mesh(new THREE.SphereGeometry(0.028, 8, 6), MAT.handle);
-  knob.position.y = -0.12;
-  const head = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.07, 0.15), MAT.head);
-  head.position.set(0, 0.47, -0.03);
-  const blade = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.12, 0.05), MAT.blade);
-  blade.position.set(0, 0.47, -0.125);
-  const pick = new THREE.Mesh(new THREE.ConeGeometry(0.02, 0.1, 6), MAT.head);
-  pick.rotation.x = Math.PI / 2;
-  pick.position.set(0, 0.47, 0.09);
-  g.add(handle, grip, knob, head, blade, pick);
-  return g;
-}
-
-/** The axe with a glowing, burning head (bench level 3). */
-export function buildFlameAxe(): THREE.Group {
-  const a = fromAsset('axeUpgraded', { by: 'height', value: 0.58 }, (i) => {
-    i.position.y = -0.12;
-    i.rotation.y = -1.1;
-  });
-  if (a) {
-    a.name = 'flameAxe';
-    a.traverse((o) => {
-      const m = o as THREE.Mesh;
-      if (m.isMesh) {
-        const mat = (m.material as THREE.MeshStandardMaterial).clone();
-        mat.emissive = new THREE.Color(0xff5a10);
-        mat.emissiveIntensity = 0.35;
-        m.material = mat;
-      }
-    });
-    const flame = new THREE.Object3D();
-    flame.name = 'flame';
-    flame.position.set(0, 0.42, 0);
-    a.add(flame);
-    return a;
-  }
-  const g = buildAxe();
-  g.name = 'flameAxe';
-  g.traverse((o) => {
-    const m = o as THREE.Mesh;
-    if (m.isMesh && m.material === MAT.head) {
-      m.material = new THREE.MeshStandardMaterial({ color: 0x3a1a0c, roughness: 0.5, emissive: 0xff5a10, emissiveIntensity: 1.4 });
-    }
-  });
-  const flame = new THREE.Object3D();
-  flame.name = 'flame';
-  flame.position.set(0, 0.5, -0.03);
-  g.add(flame);
-  return g;
-}
+export { buildAxe, buildTacticalAxe } from './axes';
 
 /** Sleeved forearm with a closed hand. Origin = palm centre. Forearm runs toward +Z/-Y. */
 export function buildArm(left = false): THREE.Group {

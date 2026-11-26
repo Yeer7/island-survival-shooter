@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { clamp, damp, easeOutCubic, lerp } from '../core/math';
 import { HotbarId } from '../player/inventory';
-import { buildArm, buildArrow, buildAxe, buildBow, buildFish, buildFlameAxe, buildLog, buildMeat, buildRod, buildSpear, buildTorch } from './models';
+import { buildArm, buildArrow, buildAxe, buildBow, buildFish, buildLog, buildTacticalAxe, buildMeat, buildRod, buildSpear, buildTorch } from './models';
 
 type Action = 'none' | 'swing' | 'stab' | 'cast' | 'release' | 'use' | 'draw';
 
@@ -114,9 +114,10 @@ export class ViewModel {
 
     const axe = buildAxe();
     axe.position.set(0, 0, -0.01);
-    axe.rotation.set(-0.35, 0, 0.12);
+    // Turned on the handle so the head shows its face while the edge still leads the swing.
+    axe.rotation.set(-0.35, -0.75, 0.12, 'XZY');
     axe.scale.setScalar(0.85);
-    const flameAxe = buildFlameAxe();
+    const flameAxe = buildTacticalAxe();
     flameAxe.position.copy(axe.position);
     flameAxe.rotation.copy(axe.rotation);
     flameAxe.scale.copy(axe.scale);
@@ -175,9 +176,9 @@ export class ViewModel {
     }
     axe.visible = true;
 
-    // Flames for the torch and the flaming axe.
+    // Flames for the torch (the only burning tool).
     const ftex = flameTexture();
-    for (const host of [torch, flameAxe]) {
+    for (const host of [torch]) {
       const anchor = host.getObjectByName('flame')!;
       for (let i = 0; i < 2; i++) {
         const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: ftex, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true }));
@@ -397,7 +398,7 @@ export class ViewModel {
 
     // Flame flicker and the warm light it throws on the hands.
     this.flameT += dt;
-    const burning = this.current === 'torch' || this.current === 'flameAxe';
+    const burning = this.current === 'torch';
     for (let i = 0; i < this.flames.length; i++) {
       const f = this.flames[i];
       const k = 0.1 + Math.sin(this.flameT * (13 + i * 5) + i) * 0.015 + Math.random() * 0.01;

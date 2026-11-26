@@ -733,7 +733,7 @@ export class Game implements CombatWorld {
       case 'relic':
         inv.mats.relic += 1;
         this.sound.levelUp();
-        this.hud.message(tr('RELÍQUIA DA CAVERNA', 'CAVE RELIC'), tr('Evolua o Livro [Tab] para o Nível 3 (Machado Flamejante). A caverna está aberta.', 'Upgrade the Book [Tab] to Level 3 (Flaming Axe). The cave is open.'), 6);
+        this.hud.message(tr('RELÍQUIA DA CAVERNA', 'CAVE RELIC'), tr('Evolua o Livro [Tab] para o Nível 3 (Machado Tático). A caverna está aberta.', 'Upgrade the Book [Tab] to Level 3 (Tactical Axe). The cave is open.'), 6);
         this.saveGame();
         break;
       case 'heart':
@@ -1293,13 +1293,14 @@ export class Game implements CombatWorld {
     const p = this.v1.copy(o).addScaledVector(d, hit.t);
     const n = this.v3.copy(d).negate().setY(0.3).normalize();
     const floor = this.terrain.height(p.x, p.z) + 0.02;
-    const flame = this.inv.selected === 'flameAxe';
-    const fiery = flame || this.inv.selected === 'torch';
+    // The tactical axe (id 'flameAxe' kept for old saves) hits heavy; only the torch burns.
+    const heavy = this.inv.selected === 'flameAxe';
+    const fiery = this.inv.selected === 'torch';
     const solid = hit.kind === 'tree' || hit.kind === 'case' || hit.kind === 'effigy' || hit.kind === 'animal' || hit.kind === 'enemy' || hit.kind === 'hard';
-    if (solid) this.impactFeel(hit.kind === 'enemy' || flame);
+    if (solid) this.impactFeel(hit.kind === 'enemy' || heavy);
     if (fiery && solid) {
-      // Burning weapons throw sparks off whatever they strike.
-      this.sparks.burst(p, n, flame ? 26 : 16, flame ? 6 : 4.5);
+      // The torch throws sparks off whatever it strikes.
+      this.sparks.burst(p, n, 16, 4.5);
       this.sound.fireHit();
     }
     switch (hit.kind) {
@@ -1307,7 +1308,7 @@ export class Game implements CombatWorld {
         const tree = this.forest.trees[hit.index];
         const felled = this.forest.damage(hit.index, spec.tree, this.player.pos);
         this.debris.burst(p, n, spec.kind === 'stab' ? 5 : 12, 0xdcb98a, { speed: 3.2, size: 0.07, floor });
-        if (spec.kind === 'swing') this.debris.burst(p, n, 4, flame ? 0xff9a3a : 0x5a3d26, { speed: 2.5, size: 0.09, floor, life: flame ? 0.5 : 1.2 });
+        if (spec.kind === 'swing') this.debris.burst(p, n, heavy ? 7 : 4, 0x5a3d26, { speed: heavy ? 3.2 : 2.5, size: 0.09, floor, life: 1.2 });
         if (spec.kind === 'swing') this.sound.chopWood();
         else this.sound.impact('wood');
         this.hud.showTargetHealth(tree.hp / tree.maxHp);
@@ -1331,8 +1332,8 @@ export class Game implements CombatWorld {
         break;
       case 'enemy':
         this.hitCannibal(hit.index, spec.animal, p, n);
-        // Fire sets them alight: the flaming axe for longer than the torch.
-        if (fiery) this.tribe.ignite(hit.index, flame ? 5 : 3.5);
+        // The torch sets them alight.
+        if (fiery) this.tribe.ignite(hit.index, 3.5);
         this.player.addTrauma(0.14);
         break;
       case 'hard':
@@ -1570,7 +1571,7 @@ export class Game implements CombatWorld {
   private updateLights(): void {
     const t = this.time;
     // Torch: real light carried a little right of and ahead of the eye.
-    const burning = this.inv.selected === 'torch' ? 1 : this.inv.selected === 'flameAxe' ? 0.45 : 0;
+    const burning = this.inv.selected === 'torch' ? 1 : 0;
     if (burning > 0) {
       const d = this.camera.getWorldDirection(this.v2);
       this.torchLight.position.copy(this.camera.position).addScaledVector(d, 0.6);

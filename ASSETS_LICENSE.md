@@ -74,8 +74,6 @@ Run `npm run lint:assets` to check every `.glb`/`.gltf`/`.fbx` and texture (pars
 | `tools/spear.glb` | Spear | Quaternius | https://poly.pizza/m/3zA9NtYBEi | CC0 1.0 | None |
 | `tools/torch.glb` | Wooden Torch | Quaternius | https://poly.pizza/m/pNsfJzhXiD | CC0 1.0 | None |
 | `tools/fishing_rod.glb` | Fishing Rod | Quaternius | https://poly.pizza/m/0YAR0Lg58p | CC0 1.0 | None |
-| `survival/tool-axe.glb` | tool-axe (Survival Kit 2.0) | Kenney | https://kenney.nl/assets/survival-kit | CC0 1.0 | None |
-| `survival/tool-axe-upgraded.glb` | tool-axe-upgraded (Survival Kit 2.0) | Kenney | https://kenney.nl/assets/survival-kit | CC0 1.0 | None (emissive tint added in code) |
 | `survival/campfire-pit.glb` | campfire-pit (Survival Kit 2.0) | Kenney | https://kenney.nl/assets/survival-kit | CC0 1.0 | None |
 | `survival/fish.glb` | fish (Survival Kit 2.0) | Kenney | https://kenney.nl/assets/survival-kit | CC0 1.0 | None |
 | `survival/Textures/colormap.png` | Survival Kit colour atlas | Kenney | https://kenney.nl/assets/survival-kit | CC0 1.0 | None |

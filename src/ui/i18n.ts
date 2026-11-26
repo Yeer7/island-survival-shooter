@@ -69,5 +69,5 @@ export const RECIPE_EN: Record<string, { label: string; desc: string }> = {
   bow: { label: 'Hunting Bow', desc: 'Ranged combat with arrows.' },
   arrows: { label: 'Arrows ×5', desc: 'Bow ammunition (recoverable).' },
   reinforcedArmor: { label: 'Reinforced Armor', desc: 'Max health 200.' },
-  flameAxe: { label: 'Flaming Axe', desc: 'Double damage, a glowing hot head.' },
+  flameAxe: { label: 'Tactical Axe', desc: 'Forged steel head with a hammer poll: double damage to trees and heavy, clean blows in combat.' },
 };

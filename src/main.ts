@@ -24,10 +24,10 @@ function menuText(): Record<string, string> {
       <p>${tr('Todos os modelos e texturas de terceiros são CC0 (domínio público). Obrigado!', 'Every third-party model and texture is CC0 (public domain). Thank you!')}</p>
       <ul>
         <li><b>Quaternius</b> — ${tr('árvores, palmeiras, arbustos, grama, pedras, animais, inimigos (humano, esqueleto, lobo, aranha, gigante), ferramentas, crânios, ossos, caixotes, barris, caldeirão, cogumelos e o Survival Pack', 'trees, palms, bushes, grass, rocks, animals, enemies (human, skeleton, wolf, spider, giant), tools, skulls, bones, crates, barrels, cauldron, mushrooms and the Survival Pack')} · quaternius.com · poly.pizza</li>
-        <li><b>Kenney</b> — Survival Kit 2.0 (${tr('machados, fogueira, peixe', 'axes, campfire pit, fish')}) · kenney.nl</li>
+        <li><b>Kenney</b> — Survival Kit 2.0 (${tr('fogueira, peixe', 'campfire pit, fish')}) · kenney.nl</li>
         <li><b>Poly Haven</b> — ${tr('texturas "Rock Face" (caverna) e "Pine Bark" (pinheiros, tocos e toras)', '"Rock Face" (cave) and "Pine Bark" (pines, stumps and logs) textures')} · polyhaven.com</li>
         <li><b>iPoly3D</b> — ${tr('cristais da caverna', 'cave crystals')} · poly.pizza</li>
-        <li>${tr('Avião, pinheiros, palmeiras, grama, cabanas, aldeia, efígies, caverna, sons e efeitos: feitos em código (Three.js).', 'Airliner, pines, palms, grass, cabins, village, effigies, cave, sounds and effects: made in code (Three.js).')}</li>
+        <li>${tr('Avião, machados, pinheiros, palmeiras, grama, arbustos, cabanas, aldeia, efígies, caverna, sons e efeitos: feitos em código (Three.js).', 'Airliner, axes, pines, palms, grass, shrubs, cabins, village, effigies, cave, sounds and effects: made in code (Three.js).')}</li>
       </ul>
       <button class="close" data-close>${tr('Fechar', 'Close')}</button>`,
   };

@@ -5,10 +5,13 @@ import { Terrain } from './terrain';
 import { addWind } from './vegetation';
 
 const CELL = 6;
-const RADIUS = 75;
-const CAPACITY = 36000;
-/** Candidate clumps per cell before the grass/slope tests and distance thinning. */
-const PER_CELL = 110;
+const RADIUS = 65;
+const CAPACITY = 30000;
+/** Stratified grid per 6 m cell: one patch per 0.43 m sub-cell, jittered inside it. */
+const GRID = 14;
+const PER_CELL = GRID * GRID;
+/** Full density out to this distance, thinning to nothing at RADIUS. */
+const FULL = 22;
 const REBUILD_STEP = 6;
 
 interface Cell {
@@ -21,37 +24,38 @@ interface Cell {
 }
 
 /**
- * One clump of tall, thin-tipped blades (~0.42-0.55 m) built in code: each blade is a
- * slightly curved, tapering strip ending in a sharp point. uv.y runs root (0) to tip (1)
- * so the ramp texture can darken the roots.
+ * One wide patch of grass built in code: ~12 blades spread evenly over a disc of
+ * radius 0.12-0.62 m (golden-angle spiral plus jitter, so they never bunch in the
+ * middle). Each blade is a 2-segment strip, fuller at the root and ending in a fine
+ * point. uv.y runs root (0) to tip (1) for the darker roots.
  */
 function clumpGeometry(): THREE.BufferGeometry {
   const r = mulberry32(77);
   const pos: number[] = [];
   const uv: number[] = [];
   const idx: number[] = [];
-  const BLADES = 7;
-  const SEG = 3;
+  const BLADES = 12;
+  const SEG = 2;
   for (let b = 0; b < BLADES; b++) {
-    const a = (b / BLADES) * Math.PI * 2 + r() * 0.6;
-    const off = 0.04 + r() * 0.09;
+    const a = b * 2.39996 + (r() - 0.5) * 0.5;
+    const off = 0.12 + 0.5 * Math.sqrt((b + 0.5) / BLADES) + (r() - 0.5) * 0.06;
     const bx = Math.cos(a) * off;
     const bz = Math.sin(a) * off;
-    const h = 0.42 + r() * 0.13;
-    const w = 0.028 + r() * 0.012;
-    const lean = 0.08 + r() * 0.16;
-    const face = a + Math.PI / 2 + (r() - 0.5) * 0.8;
+    const h = 0.34 + r() * 0.18;
+    const w = 0.018 + r() * 0.008;
+    const lean = 0.06 + r() * 0.14;
+    const la = r() * Math.PI * 2;
+    const face = r() * Math.PI;
     const fx = Math.cos(face);
     const fz = Math.sin(face);
     const base = pos.length / 3;
     for (let k = 0; k <= SEG; k++) {
       const t = k / SEG;
-      const y = h * t;
       const bend = lean * t * t;
-      const cx = bx + Math.cos(a) * bend;
-      const cz = bz + Math.sin(a) * bend;
-      const half = k === SEG ? 0 : w * (1 - t * 0.85);
-      pos.push(cx - fx * half, y, cz - fz * half, cx + fx * half, y, cz + fz * half);
+      const cx = bx + Math.cos(la) * bend;
+      const cz = bz + Math.sin(la) * bend;
+      const half = k === SEG ? 0.0015 : w * (1 - t * 0.7);
+      pos.push(cx - fx * half, h * t, cz - fz * half, cx + fx * half, h * t, cz + fz * half);
       uv.push(0, t, 1, t);
     }
     for (let k = 0; k < SEG; k++) {
@@ -95,7 +99,7 @@ export class GrassField {
     ramp.height = 64;
     const rg = ramp.getContext('2d')!;
     const grad = rg.createLinearGradient(0, 0, 0, 64);
-    grad.addColorStop(0, '#262626');
+    grad.addColorStop(0, '#3a3a3a');
     grad.addColorStop(0.3, '#7a7a7a');
     grad.addColorStop(0.7, '#d8d8d8');
     grad.addColorStop(1, '#ffffff');
@@ -143,13 +147,14 @@ export class GrassField {
     const zs = new Float32Array(PER_CELL);
     let n = 0;
     const d = this.dummy;
+    // Stratified: one patch per sub-cell, jittered inside it, so there are no bare gaps.
     for (let i = 0; i < PER_CELL; i++) {
-      const x = (cx + rand()) * CELL;
-      const z = (cz + rand()) * CELL;
+      const x = (cx + ((i % GRID) + rand()) / GRID) * CELL;
+      const z = (cz + (Math.floor(i / GRID) + rand()) / GRID) * CELL;
       const s = 0.9 + rand() * 0.3;
       const yaw = rand() * Math.PI * 2;
       const tint = 0.9 + rand() * 0.2;
-      if (this.terrain.surfaceAt(x, z) !== 'grass' || this.terrain.slope(x, z) >= 0.18) continue;
+      if (this.terrain.surfaceAt(x, z) !== 'grass' || this.terrain.slope(x, z) >= 0.34) continue;
       if (this.bare.some((b) => Math.hypot(x - b.x, z - b.z) < b.r)) continue;
       d.position.set(x, this.terrain.height(x, z) - 0.02, z);
       d.rotation.set(0, yaw, 0);
@@ -191,8 +196,8 @@ export class GrassField {
           const dist = Math.hypot(c.x[i] - x, c.z[i] - z);
           if (dist > RADIUS) continue;
           // Full density close by, thinning toward the edge of the disc.
-          // Full density to 28 m, then thinning steeply toward the edge of the disc.
-          if (dist > 28 && ((i * 7919) % 100) / 100 > 1 - Math.pow((dist - 28) / (RADIUS - 28), 0.6) * 0.85) continue;
+          // Full density close by, then thinning more and more toward the edge.
+          if (dist > FULL && ((i * 7919) % 997) / 997 > Math.pow(1 - (dist - FULL) / (RADIUS - FULL), 1.7)) continue;
           im.set(c.m.subarray(i * 16, i * 16 + 16), count * 16);
           ic.set(c.c.subarray(i * 3, i * 3 + 3), count * 3);
           count++;

@@ -203,12 +203,12 @@ export class DayNight {
     this.fog.density = lerp(0.0034, 0.0022, this.daylight);
     if (this.indoor) {
       // Inside the cave: dense blue-black fog, no sun or moon, a faint cold fill.
-      this.fog.color.setHex(0x0a121c);
-      this.fog.density = 0.034;
+      this.fog.color.setHex(0x10161e);
+      this.fog.density = 0.022;
       this.key.intensity = 0;
-      this.hemi.color.setHex(0x34465e);
-      this.hemi.groundColor.setHex(0x0a0d12);
-      this.hemi.intensity = 0.5;
+      this.hemi.color.setHex(0x8fa3bf);
+      this.hemi.groundColor.setHex(0x5a4a3a);
+      this.hemi.intensity = 2.6;
       this.ambient.setRGB(0.12, 0.14, 0.18);
     }
 

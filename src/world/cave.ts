@@ -313,13 +313,11 @@ export class Cave {
   private t = 0;
   /** Where the cave's skeletons and the Lord of the Depths stand guard. */
   readonly enemySpots = { skeletons: [] as THREE.Vector3[], guards: [] as THREE.Vector3[], lord: new THREE.Vector3() };
-  /** The expedition chest in the hall (locked until the Lord of the Depths falls). */
+  /** Where the Lord of the Depths holds the hall (the compass points here). */
   readonly chestPos = new THREE.Vector3();
-  chestOpen = false;
-  private chestLid = new THREE.Group();
+  /** Wall torches and braziers inside (the game adds their flames to the scene). */
+  readonly innerFx: PuffEmitter[] = [];
   private lostCampCrate = new THREE.Vector3();
-  private chestGlow: CaveLight | null = null;
-  private chestGlowMat: THREE.MeshStandardMaterial | null = null;
   /** Crates and barrels inside that break like the luggage (the game adds them to its list). */
   readonly breakables: Suitcase[] = [];
   private puddles: THREE.Vector3[] = [];
@@ -336,7 +334,7 @@ export class Cave {
   private dropState: { y: number; v: number; p: THREE.Vector3 | null }[] = [];
   private rings: { m: THREE.Mesh; t: number }[] = [];
   private dripT = 0.5;
-  private dust!: THREE.Points;
+  private dust: THREE.Points | null = null;
   private dustVel: Float32Array = new Float32Array(0);
   /** Called with the splash point when a drop lands (the game plays the sound). */
   onDrip: ((p: THREE.Vector3) => void) | null = null;
@@ -655,7 +653,7 @@ export class Cave {
         // Wet slate: darker and bluer deep in the chasm, a teal sheen near the water.
         const deep = Math.min(1, Math.max(0, -y / 14));
         const wet = 0.85 + fine * 0.3;
-        const lift = 1.9;
+        const lift = 2.2;
         col.push((0.42 - deep * 0.25) * wet * lift, ((0.44 - deep * 0.2) * wet + deep * 0.06 * (y < -10 ? 1 : 0)) * lift, ((0.48 - deep * 0.14) * wet + (y < -10 ? 0.08 : 0)) * lift);
         uv.push(arc / 2.4, s.d / 2.4);
       }
@@ -729,6 +727,20 @@ export class Cave {
     this.buildHall(root, rand);
     this.dress(root, rand);
     this.sealEnds(root, rand);
+    // Wall torches all the way through: the tunnel, the approach and the hall.
+    for (const [d, side] of [
+      [3.5, 1],
+      [8.5, -1],
+      [13.5, 1],
+      [24, -1],
+      [29, 1],
+      [50.5, -1],
+      [56, 1],
+      [64, -1],
+      [64, 1],
+    ] as [number, number][]) {
+      this.wallTorch(root, d, side);
+    }
 
     for (const m of bakeStatic(root)) m.receiveShadow = true;
     this.inside.add(root);
@@ -864,6 +876,50 @@ export class Cave {
     coal.rotation.x = -Math.PI / 2;
     coal.position.copy(ash);
     root.add(coal);
+  }
+
+  /** A torch bracketed to the wall at distance d on one side, with a real flame and a pooled-light anchor. */
+  private wallTorch(root: THREE.Group, d: number, side: number): void {
+    const w = halfWidth(d);
+    const base = this.at(d, side * (w + 0.05), 1.55);
+    const t = this.model('woodTorch', { by: 'height', value: 1.0 });
+    if (t) {
+      t.position.copy(base).y -= 0.55;
+      // Lean the torch out from the wall.
+      const hd = this.headingAt(d);
+      t.rotation.set(0, hd, side * 0.35, 'YXZ');
+      root.add(t);
+    }
+    const iron = new THREE.MeshStandardMaterial({ color: 0x2c2a27, roughness: 0.6, metalness: 0.4 });
+    const bracket = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 0.45), iron);
+    bracket.position.copy(base).y -= 0.25;
+    bracket.rotation.y = this.headingAt(d) + Math.PI / 2;
+    root.add(bracket);
+    const tip = this.at(d, side * (w - 0.18), 1.62);
+    const flame = new PuffEmitter(10, { life: 0.5, rise: 1.0, spread: 0.1, size0: 0.45, size1: 0.1, alpha: 0.9, color: 0xff6a1a, color2: 0xffd27a, additive: true });
+    flame.origin.copy(tip);
+    flame.wind.set(0, 0, 0);
+    this.innerFx.push(flame);
+    this.lights.push({ pos: tip.clone().setY(1.9), color: 0xff9a4a, intensity: 8, distance: 12, flicker: true });
+  }
+
+  /** A stone fire bowl on legs: big flame, glowing coals and a strong warm light anchor. */
+  private brazier(root: THREE.Group, p: THREE.Vector3): void {
+    const stone = caveRock(0x8a857e);
+    const bowl = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.32, 0.4, 10, 1, true), stone);
+    bowl.position.copy(p).y = 0.95;
+    const base = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.32, 0.75, 8), stone);
+    base.position.copy(p).y = 0.38;
+    const coals = new THREE.Mesh(new THREE.SphereGeometry(0.48, 10, 4, 0, Math.PI * 2, 0, Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0x2a0a04, emissive: 0xff5a14, emissiveIntensity: 1.8 }));
+    coals.position.copy(p).y = 0.95;
+    coals.scale.y = 0.4;
+    root.add(bowl, base, coals);
+    const fire = new PuffEmitter(22, { life: 0.8, rise: 1.6, spread: 0.45, size0: 1.0, size1: 0.2, alpha: 0.9, color: 0xff5a12, color2: 0xffd27a, additive: true });
+    fire.origin.set(p.x, 1.1, p.z);
+    fire.wind.set(0, 0, 0);
+    this.innerFx.push(fire);
+    this.lights.push({ pos: new THREE.Vector3(p.x, 2.0, p.z), color: 0xff8a3a, intensity: 16, distance: 18, flicker: true });
+    this.obstacles.push({ x: p.x, z: p.z, r: 0.6 });
   }
 
   /** A small hurricane lantern with a glowing glass. */
@@ -1162,88 +1218,20 @@ export class Cave {
       b.rotation.set(k % 4 === 0 ? (rand() - 0.5) * 0.6 : 0, rand() * 6, (rand() - 0.5) * 0.3);
       root.add(b);
     }
-    // The expedition camp: a proper table with a radio, a tent, a fuel can and the locked chest.
-    const tp = this.at(C + 6, 3.4, 0);
-    const hd = this.headingAt(C + 6);
-    const across = new THREE.Vector3(Math.cos(hd), 0, -Math.sin(hd));
-    const along = new THREE.Vector3(Math.sin(hd), 0, Math.cos(hd));
-    const table = this.buildTable();
-    table.position.copy(tp);
-    table.rotation.y = hd;
-    root.add(table);
-    this.obstacles.push({ x: tp.x, z: tp.z, r: 0.9 });
-    const radio = this.model('radio', { by: 'max', value: 0.42 });
-    if (radio) {
-      radio.position.copy(tp).addScaledVector(across, -0.35).setY(0.79);
-      radio.rotation.y = hd + Math.PI + 0.3;
-      root.add(radio);
-    }
-    const lamp = this.lantern(0xffc070);
-    lamp.position.copy(tp).addScaledVector(across, 0.45).addScaledVector(along, 0.1).setY(0.79);
-    root.add(lamp);
-    // A map weighed down on the table.
-    const map = new THREE.Mesh(new THREE.PlaneGeometry(0.5, 0.36), new THREE.MeshStandardMaterial({ color: 0xd8c9a2, roughness: 0.95 }));
-    map.rotation.set(-Math.PI / 2, 0, hd + 0.2);
-    map.position.copy(tp).addScaledVector(across, 0.05).setY(0.795);
-    root.add(map);
-    const gas = this.model('gasCan', { by: 'height', value: 0.45 });
-    if (gas) {
-      gas.position.copy(tp).addScaledVector(across, 1.3).addScaledVector(along, -0.4);
-      gas.rotation.y = hd + 0.6;
-      root.add(gas);
-    }
-    const tentP = this.at(C + 9.5, -3.5, 0);
-    const tent = this.model('tent', { by: 'max', value: 3.6 });
-    if (tent) {
-      tent.position.copy(tentP);
-      tent.rotation.y = this.headingAt(C + 9.5) + Math.PI / 2;
-      root.add(tent);
-      this.obstacles.push({ x: tentP.x, z: tentP.z, r: 1.4 });
-    }
-    // The locked expedition chest (kept apart: its lid opens).
-    const chestP = this.at(C + 3, 6.0, 0);
-    const chest = this.buildChest();
-    chest.position.copy(chestP);
-    chest.rotation.y = Math.atan2(tp.x - chestP.x, tp.z - chestP.z);
-    this.inside.add(chest);
-    this.chestPos.copy(chestP);
-    this.obstacles.push({ x: chestP.x, z: chestP.z, r: 0.6 });
-    const front = new THREE.Vector3(Math.sin(chest.rotation.y), 0, Math.cos(chest.rotation.y));
-    this.backpackPos.copy(chestP).addScaledVector(front, 0.85).setY(0);
-    this.chestGlow = { pos: chestP.clone().setY(0.9), color: 0xffc76a, intensity: 0, distance: 8, flicker: false };
-    this.lights.push(this.chestGlow);
     // The flashlight waits at the lost camp in the first chamber.
     this.lootPos.copy(this.lostCampCrate).setY(0.56);
-    // Where the guards stand.
+    // Where the guards and the Lord of the Depths stand; the Lord drops the backpack.
     this.enemySpots.guards.push(this.at(C - 6, -3, 0), this.at(C - 3, 4.5, 0));
     this.enemySpots.lord.copy(this.at(C + 2, -1, 0));
-    // Floodlight on a tripod aimed at the table.
-    const fp = this.at(C + 3.6, 5.2, 0);
-    const metal = new THREE.MeshStandardMaterial({ color: 0x3a3d42, roughness: 0.5, metalness: 0.4 });
-    const head = new THREE.Vector3(fp.x, 2.1, fp.z);
-    this.floodHead.copy(head);
-    this.floodTarget.copy(tp).setY(0.8);
-    for (let k = 0; k < 3; k++) {
-      const a = (k / 3) * Math.PI * 2;
-      const foot = new THREE.Vector3(fp.x + Math.cos(a) * 0.45, 0, fp.z + Math.sin(a) * 0.45);
-      const d = new THREE.Vector3().subVectors(head, foot);
-      const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, d.length(), 5), metal);
-      leg.position.copy(foot).addScaledVector(d, 0.5);
-      leg.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), d.normalize());
-      root.add(leg);
+    this.chestPos.copy(this.enemySpots.lord);
+    this.backpackPos.copy(this.enemySpots.lord);
+    // Fire braziers ring the hall's centre: the Lord's throne room.
+    for (let k = 0; k < 4; k++) {
+      const a = (k / 4) * Math.PI * 2 + Math.PI / 4;
+      this.brazier(root, this.at(C + 2 + Math.cos(a) * 6.5, -1 + Math.sin(a) * 6.5, 0));
     }
-    const box = new THREE.Group();
-    const shell = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.3, 0.2), metal);
-    const lens = new THREE.Mesh(new THREE.PlaneGeometry(0.36, 0.24), new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xeaf2ff, emissiveIntensity: 3 }));
-    lens.position.z = 0.101;
-    box.add(shell, lens);
-    box.position.copy(head);
-    box.lookAt(tp.x, 0.75, tp.z);
-    root.add(box);
-    this.obstacles.push({ x: fp.x, z: fp.z, r: 0.5 });
-    this.lights.push({ pos: head.clone().lerp(new THREE.Vector3(tp.x, 0.9, tp.z), 0.3), color: 0xe6eeff, intensity: 26, distance: 18, flicker: false });
     // A cold fill high in the vault so the hall reads as big.
-    this.lights.push({ pos: this.at(C - 2, 0, 8), color: 0x6f8fb8, intensity: 18, distance: 30, flicker: false });
+    this.lights.push({ pos: this.at(C - 2, 0, 8), color: 0x7f9cc8, intensity: 22, distance: 34, flicker: false });
   }
 
   /**
@@ -1347,7 +1335,10 @@ export class Cave {
   /** Camp furniture and the pool (from the hall's fixed layout) that clutter must keep clear of. */
   private campSpots(): { camp: THREE.Vector3[]; pool: THREE.Vector3 } {
     return {
-      camp: [this.at(74 + 9.5, -3.5, 0), this.at(74 + 6, 3.4, 0), this.at(74 + 3, 6.0, 0), this.at(74 + 3.6, 5.2, 0)],
+      camp: [0, 1, 2, 3].map((k) => {
+        const a = (k / 4) * Math.PI * 2 + Math.PI / 4;
+        return this.at(74 + 2 + Math.cos(a) * 6.5, -1 + Math.sin(a) * 6.5, 0);
+      }),
       pool: this.at(80, -6.2, 0),
     };
   }
@@ -1594,31 +1585,6 @@ export class Cave {
       this.rings.push({ m: ring, t: 1 });
     }
 
-    // ---- dust motes drifting in the floodlight, and the faint beam itself
-    const dn = 70;
-    const dp = new Float32Array(dn * 3);
-    this.dustVel = new Float32Array(dn * 3);
-    for (let i = 0; i < dn; i++) {
-      const t = rand();
-      const q = this.floodHead.clone().lerp(this.floodTarget, t);
-      dp[i * 3] = q.x + (rand() - 0.5) * (0.4 + t * 1.6);
-      dp[i * 3 + 1] = q.y + (rand() - 0.5) * (0.4 + t * 1.2);
-      dp[i * 3 + 2] = q.z + (rand() - 0.5) * (0.4 + t * 1.6);
-      this.dustVel[i * 3] = (rand() - 0.5) * 0.05;
-      this.dustVel[i * 3 + 1] = (rand() - 0.5) * 0.03;
-      this.dustVel[i * 3 + 2] = (rand() - 0.5) * 0.05;
-    }
-    const dgeo = new THREE.BufferGeometry();
-    dgeo.setAttribute('position', new THREE.BufferAttribute(dp, 3).setUsage(THREE.DynamicDrawUsage));
-    this.dust = new THREE.Points(dgeo, new THREE.PointsMaterial({ color: 0xfff4dc, size: 0.025, transparent: true, opacity: 0.7, depthWrite: false, blending: THREE.AdditiveBlending }));
-    this.dust.frustumCulled = false;
-    this.inside.add(this.dust);
-    const len = this.floodHead.distanceTo(this.floodTarget) + 0.6;
-    const beam = new THREE.Mesh(new THREE.ConeGeometry(1.3, len, 20, 1, true), new THREE.MeshBasicMaterial({ color: 0xe8f0ff, transparent: true, opacity: 0.045, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide }));
-    const dir = new THREE.Vector3().subVectors(this.floodTarget, this.floodHead).normalize();
-    beam.position.copy(this.floodHead).addScaledVector(dir, len / 2);
-    beam.quaternion.setFromUnitVectors(new THREE.Vector3(0, -1, 0), dir);
-    this.inside.add(beam);
   }
 
   private updateAmbience(dt: number, player: THREE.Vector3): void {
@@ -1664,7 +1630,7 @@ export class Cave {
       if (r.t >= 1) r.m.visible = false;
     }
     // Dust: slow drift inside the floodlight, wrapping back into the beam.
-    if (player.distanceTo(this.floodHead) < 30) {
+    if (this.dust && player.distanceTo(this.floodHead) < 30) {
       const dp = this.dust.geometry.attributes.position as THREE.BufferAttribute;
       const a = dp.array as Float32Array;
       for (let i = 0; i < dp.count; i++) {
@@ -1682,151 +1648,6 @@ export class Cave {
         }
       }
       dp.needsUpdate = true;
-    }
-  }
-
-  /** A camp table: plank top on four legs with cross braces. Origin on the floor, long side across. */
-  private buildTable(): THREE.Group {
-    const g = new THREE.Group();
-    const wood = new THREE.MeshStandardMaterial({ color: 0x8a6440, roughness: 0.85, map: detailTextures().plank });
-    const dark = new THREE.MeshStandardMaterial({ color: 0x4e3826, roughness: 0.9, map: detailTextures().plank });
-    for (let k = -1; k <= 1; k++) {
-      const board = new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.05, 0.27), wood);
-      board.position.set(0, 0.76, k * 0.28);
-      board.rotation.y = (k * 0.01);
-      g.add(board);
-    }
-    for (const x of [-0.88, 0.88]) {
-      for (const z of [-0.33, 0.33]) {
-        const leg = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.74, 0.07), dark);
-        leg.position.set(x, 0.37, z);
-        g.add(leg);
-      }
-      const brace = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, 0.7), dark);
-      brace.position.set(x, 0.2, 0);
-      g.add(brace);
-      const apron = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.1, 0.76), dark);
-      apron.position.set(x, 0.68, 0);
-      g.add(apron);
-    }
-    const stretcher = new THREE.Mesh(new THREE.BoxGeometry(1.76, 0.05, 0.05), dark);
-    stretcher.position.set(0, 0.2, 0);
-    g.add(stretcher);
-    g.traverse((o) => {
-      if ((o as THREE.Mesh).isMesh) o.castShadow = o.receiveShadow = true;
-    });
-    return g;
-  }
-
-  /** The expedition chest: banded planks, iron corners, a heavy padlock. Front faces +Z. */
-  private buildChest(): THREE.Group {
-    const g = new THREE.Group();
-    const wood = new THREE.MeshStandardMaterial({ color: 0x6e4a2c, roughness: 0.85, map: detailTextures().plank });
-    const iron = new THREE.MeshStandardMaterial({ color: 0x3b3a38, roughness: 0.5, metalness: 0.5 });
-    const brass = new THREE.MeshStandardMaterial({ color: 0xb08a3e, roughness: 0.4, metalness: 0.6 });
-    // Hollow box: floor and four walls, lined dark inside, open at the top.
-    const t = 0.045;
-    const W = 1.1;
-    const D = 0.62;
-    const H = 0.5;
-    const bottom = new THREE.Mesh(new THREE.BoxGeometry(W, t, D), wood);
-    bottom.position.y = t / 2;
-    g.add(bottom);
-    for (const z of [-D / 2 + t / 2, D / 2 - t / 2]) {
-      const wall = new THREE.Mesh(new THREE.BoxGeometry(W, H, t), wood);
-      wall.position.set(0, H / 2, z);
-      g.add(wall);
-    }
-    for (const x of [-W / 2 + t / 2, W / 2 - t / 2]) {
-      const wall = new THREE.Mesh(new THREE.BoxGeometry(t, H, D - 2 * t), wood);
-      wall.position.set(x, H / 2, 0);
-      g.add(wall);
-    }
-    const lining = new THREE.MeshStandardMaterial({ color: 0x3a1210, roughness: 1 });
-    const floor = new THREE.Mesh(new THREE.PlaneGeometry(W - 2 * t, D - 2 * t), lining);
-    floor.rotation.x = -Math.PI / 2;
-    floor.position.y = t + 0.002;
-    g.add(floor);
-    for (const [x, z, ry, w] of [
-      [0, -D / 2 + t + 0.002, 0, W - 2 * t],
-      [0, D / 2 - t - 0.002, Math.PI, W - 2 * t],
-      [-W / 2 + t + 0.002, 0, Math.PI / 2, D - 2 * t],
-      [W / 2 - t - 0.002, 0, -Math.PI / 2, D - 2 * t],
-    ] as [number, number, number, number][]) {
-      const side = new THREE.Mesh(new THREE.PlaneGeometry(w, H - t - 0.01), lining);
-      side.position.set(x, t + (H - t) / 2, z);
-      side.rotation.y = ry;
-      g.add(side);
-    }
-    // Gold coins and a gem inside.
-    const gold = new THREE.MeshStandardMaterial({ color: 0xe8b84a, roughness: 0.35, metalness: 0.7 });
-    for (let k = 0; k < 9; k++) {
-      const coin = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.008, 10), gold);
-      coin.position.set(-0.35 + (k % 5) * 0.12 + Math.sin(k) * 0.03, t + 0.01 + (k > 4 ? 0.012 : 0), -0.12 + Math.floor(k / 5) * 0.16);
-      coin.rotation.set((k % 3) * 0.3, k, 0);
-      g.add(coin);
-    }
-    const gem = new THREE.Mesh(new THREE.OctahedronGeometry(0.06, 0), new THREE.MeshStandardMaterial({ color: 0x7fe8ff, emissive: 0x2ab8d8, emissiveIntensity: 1.4, roughness: 0.15 }));
-    gem.position.set(0.3, t + 0.06, 0.05);
-    g.add(gem);
-    // Iron straps on the front and back faces.
-    for (const x of [-0.42, 0.42]) {
-      for (const z of [-D / 2 - 0.006, D / 2 + 0.006]) {
-        const band = new THREE.Mesh(new THREE.BoxGeometry(0.06, H + 0.01, 0.012), iron);
-        band.position.set(x, H / 2, z);
-        g.add(band);
-      }
-    }
-    // Lid on a hinge at the back edge.
-    this.chestLid.position.set(0, 0.5, -0.31);
-    const lid = new THREE.Mesh(new THREE.CylinderGeometry(0.31, 0.31, 1.1, 12, 1, false, 0, Math.PI), wood);
-    lid.rotation.z = Math.PI / 2;
-    lid.position.set(0, 0, 0.31);
-    this.chestLid.add(lid);
-    for (const x of [-0.42, 0.42]) {
-      const lb = new THREE.Mesh(new THREE.CylinderGeometry(0.325, 0.325, 0.06, 12, 1, false, 0, Math.PI), iron);
-      lb.rotation.z = Math.PI / 2;
-      lb.position.set(x, 0, 0.31);
-      this.chestLid.add(lb);
-    }
-    g.add(this.chestLid);
-    // Padlock and hasp on the front.
-    const hasp = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.16, 0.03), iron);
-    hasp.position.set(0, 0.46, 0.32);
-    const lock = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.11, 0.05), brass);
-    lock.position.set(0, 0.36, 0.34);
-    const shackle = new THREE.Mesh(new THREE.TorusGeometry(0.035, 0.01, 5, 10, Math.PI), iron);
-    shackle.position.set(0, 0.42, 0.34);
-    lock.name = 'lock';
-    shackle.name = 'shackle';
-    g.add(hasp, lock, shackle);
-    // Treasure glow inside, shown when it opens.
-    this.chestGlowMat = new THREE.MeshStandardMaterial({ color: 0xffd27a, emissive: 0xffb040, emissiveIntensity: 0, transparent: true, opacity: 0 });
-    const glow = new THREE.Mesh(new THREE.PlaneGeometry(0.98, 0.5), this.chestGlowMat);
-    glow.rotation.x = -Math.PI / 2;
-    glow.position.y = 0.049;
-    g.add(glow);
-    g.traverse((o) => {
-      if ((o as THREE.Mesh).isMesh) o.castShadow = o.receiveShadow = true;
-    });
-    return g;
-  }
-
-  /** The Lord of the Depths has fallen: the padlock drops, the lid swings up, gold light spills out. */
-  unlockChest(): void {
-    if (this.chestOpen) return;
-    this.chestOpen = true;
-    const g = this.chestLid.parent;
-    if (g) {
-      for (const n of ['lock', 'shackle']) {
-        const o = g.getObjectByName(n);
-        if (o) o.visible = false;
-      }
-    }
-    if (this.chestGlow) this.chestGlow.intensity = 5;
-    if (this.chestGlowMat) {
-      this.chestGlowMat.opacity = 0.35;
-      this.chestGlowMat.emissiveIntensity = 1.2;
     }
   }
 
@@ -1896,6 +1717,7 @@ export class Cave {
 
   setViewportHeight(h: number): void {
     for (const e of this.fx) e.setViewportHeight(h);
+    for (const e of this.innerFx) e.setViewportHeight(h);
   }
 
   update(dt: number, player: THREE.Vector3): void {
@@ -1904,7 +1726,7 @@ export class Cave {
     if (near) for (const e of this.fx) e.update(dt);
     if (this.isInside(player)) {
       this.updateAmbience(dt, player);
-      if (this.chestOpen && this.chestLid.rotation.x > -1.9) this.chestLid.rotation.x = Math.max(-1.9, this.chestLid.rotation.x - dt * 2.5);
+      for (const e of this.innerFx) if (e.origin.distanceToSquared(player) < 45 * 45) e.update(dt);
       for (const m of this.water) {
         if (m.map) {
           m.map.offset.x = Math.sin(this.t * 0.11) * 0.2;

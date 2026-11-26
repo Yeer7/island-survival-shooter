@@ -193,7 +193,7 @@ export class Game implements CombatWorld {
     }
     this.cave = new Cave(this.terrain, this.colliders, lib);
     this.scene.add(this.cave.outside, this.cave.inside);
-    for (const e of this.cave.fx) this.scene.add(e.points);
+    for (const e of [...this.cave.fx, ...this.cave.innerFx]) this.scene.add(e.points);
     // Supply crates and barrels inside the cave break like the luggage.
     for (const b of this.cave.breakables) {
       this.crash.suitcases.push(b);
@@ -341,7 +341,7 @@ export class Game implements CombatWorld {
       { name: 'Altar', cls: 'plane', x: this.altar.center.x, z: this.altar.center.z },
       { name: 'Veleiro', cls: 'lake', x: this.boat.pos.x, z: this.boat.pos.z },
       { name: 'Saída', cls: 'lake', x: this.cave.entryInside.x, z: this.cave.entryInside.z, indoor: true },
-      { name: 'Tesouro', cls: 'plane', x: this.cave.chestPos.x, z: this.cave.chestPos.z, indoor: true },
+      { name: 'Chefe', cls: 'plane', x: this.cave.chestPos.x, z: this.cave.chestPos.z, indoor: true },
     ]);
     this.hud.onCraftButton = () => (this.menuOpen ? this.closeMenu() : this.openMenu());
     this.hud.setFade(1);
@@ -749,16 +749,6 @@ export class Game implements CombatWorld {
     }
     if (this.indoors) {
       if (p.distanceTo(this.cave.entryInside) < 3.2) return { key: 'E', text: 'Voltar à Superfície', run: () => this.leaveCave() };
-      if (!this.cave.chestOpen && Math.hypot(p.x - this.cave.chestPos.x, p.z - this.cave.chestPos.z) < 2.4) {
-        return {
-          key: 'E',
-          text: 'Baú da Expedição (trancado)',
-          run: () => {
-            this.sound.denied();
-            this.hud.toast('🔒 Derrote o Senhor das Profundezas para destrancar o Baú!');
-          },
-        };
-      }
       if (!this.cave.bridgeRepaired && Math.hypot(p.x - this.cave.bridgePos.x, p.z - this.cave.bridgePos.z) < 3.2) {
         return { key: 'E', text: `Consertar ponte (Gravetos ${this.inv.mats.sticks}/4 · Panos ${this.inv.mats.cloth}/2)`, run: () => this.repairBridge() };
       }
@@ -1770,16 +1760,12 @@ export class Game implements CombatWorld {
   private cavePickupsPlaced = false;
   private backpackPlaced = false;
 
-  /** The chest opens (sound and gold glow) and the backpack waits in front of it. */
-  private openCaveChest(quiet = false): void {
-    this.cave.unlockChest();
-    if (!quiet) {
-      this.sound.levelUp();
-      this.sound.repair();
-    }
+  /** The Lord of the Depths drops the backpack where he falls (or at his post, after a reload). */
+  private dropCaveBackpack(at: THREE.Vector3, quiet = false): void {
+    if (!quiet) this.sound.levelUp();
     if (!this.caveLoot.backpack && !this.backpackPlaced) {
       this.backpackPlaced = true;
-      this.pickups.add('backpack', this.cave.backpackPos, 1, -0.3);
+      this.pickups.add('backpack', this.v4.set(at.x, 0, at.z), 1, -0.3);
     }
   }
 
@@ -1787,7 +1773,7 @@ export class Game implements CombatWorld {
     if (!this.cavePickupsPlaced) {
       this.cavePickupsPlaced = true;
       if (!this.caveLoot.flashlight) this.pickups.add('flashlight', this.cave.lootPos, 1, 0.4);
-      if (this.tribe.defeated.has('deepLord')) this.openCaveChest(true);
+      if (this.tribe.defeated.has('deepLord')) this.dropCaveBackpack(this.cave.backpackPos, true);
     }
     if (!this.indoors) return;
     // Falling into the chasm hurts and puts you back at the near edge.
@@ -1857,7 +1843,7 @@ export class Game implements CombatWorld {
     else if (!d.has('boss')) q = ['👑', 'Derrote o Chefe Tribal na [Aldeia] a Oeste'];
     else if (lvl < 2) q = ['📜', 'Evolua o Livro para o Nível 2 com o Totem Tribal [Tab]'];
     else if (!d.has('guardian')) q = ['💀', 'Derrote o Guardião da [Caverna] ao Norte'];
-    else if (!this.caveLoot.flashlight || !this.caveLoot.backpack) q = ['🔦', 'Caverna: lanterna no acampamento perdido, mochila no baú da catedral'];
+    else if (!this.caveLoot.flashlight || !this.caveLoot.backpack) q = ['🔦', 'Caverna: lanterna no acampamento perdido, mochila com o Senhor das Profundezas'];
     else if (lvl < 3) q = ['📜', 'Evolua o Livro para o Nível 3 com a Relíquia [Tab]'];
     else if (!d.has('alpha') && this.inv.mats.heart === 0 && this.boat.delivered.heart === 0) q = ['🐺', 'Cace a Fera Alfa no [Altar] a Leste'];
     else q = ['⛵', 'Repare o [Veleiro] na Praia Sul e fuja da ilha'];
@@ -1981,8 +1967,8 @@ export class Game implements CombatWorld {
       this.pickups.add(type, this.v4.set(x, c.cave ? 0 : this.terrain.height(x, z), z), 1);
     });
     if (c.role === 'deepLord') {
-      this.hud.message('O SENHOR DAS PROFUNDEZAS CAIU', 'O Baú da Expedição foi destrancado: pegue a Mochila Tática!', 6);
-      this.openCaveChest();
+      this.hud.message('O SENHOR DAS PROFUNDEZAS CAIU', 'Ele deixou cair a Mochila Tática: pegue com [E]!', 6);
+      this.dropCaveBackpack(c.pos);
     }
     if (c.role === 'boss') this.hud.message('O CHEFE CAIU', 'Pegue o Totem Tribal [E] para evoluir seu menu para o Nível 2.', 6);
     if (c.role === 'guardian') this.hud.message('O GUARDIÃO CAIU', 'Pegue a Relíquia [E]. A entrada da caverna está livre.', 6);

@@ -27,7 +27,7 @@ export function bakeStatic(root: THREE.Object3D): THREE.Mesh[] {
     for (const gr of groups) {
       const mat = mats[gr.materialIndex ?? 0];
       if (!mat) continue;
-      const part = slice(g, gr.start, Math.min(gr.count, g.attributes.position.count - gr.start));
+      const part = slice(g, gr.start, Math.min(gr.count, g.attributes.position.count - gr.start), (mat as THREE.MeshStandardMaterial).vertexColors === true);
       let b = buckets.get(mat);
       if (!b) {
         b = { geos: [], shadow: false };
@@ -59,12 +59,16 @@ function hasKeptAncestor(o: THREE.Object3D, root: THREE.Object3D): boolean {
   return false;
 }
 
-/** A copy of vertices [start, start+count) with only position, normal and uv (uv zero-filled if absent). */
-function slice(g: THREE.BufferGeometry, start: number, count: number): THREE.BufferGeometry {
+/**
+ * A copy of vertices [start, start+count) with only position, normal and uv (uv zero-filled
+ * if absent), plus colour (white if absent) for vertex-coloured materials.
+ */
+function slice(g: THREE.BufferGeometry, start: number, count: number, withColor = false): THREE.BufferGeometry {
   const out = new THREE.BufferGeometry();
   const copy = (name: string, size: number) => {
     const src = g.attributes[name] as THREE.BufferAttribute | THREE.InterleavedBufferAttribute | undefined;
     const arr = new Float32Array(count * size);
+    if (!src && name === 'color') arr.fill(1);
     if (src) {
       for (let i = 0; i < count; i++) {
         const j = start + i;
@@ -78,5 +82,6 @@ function slice(g: THREE.BufferGeometry, start: number, count: number): THREE.Buf
   copy('position', 3);
   copy('normal', 3);
   copy('uv', 2);
+  if (withColor) copy('color', 3);
   return out;
 }

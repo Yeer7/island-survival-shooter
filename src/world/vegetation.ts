@@ -5,6 +5,7 @@ import { mulberry32, smoothstep } from '../core/math';
 import { ColliderGrid, Circle } from './colliders';
 import { LAKE_CENTER, LAKE_LEVEL, LAKE_RADIUS, Terrain } from './terrain';
 import { detailTextures } from './textures';
+import { buildBushVariants, bushMaterials } from './bushes';
 import { PALM_CUT, buildPalmVariants, palmMaterials, palmStumpGeometry } from './palms';
 import { PINE_CUT, barkMaterial, buildPineVariants, needleMaterial, pineCutMaterial, pineStumpGeometry } from './pines';
 import { SEA_LEVEL } from './terrain';
@@ -584,12 +585,21 @@ export class Props {
     }
     for (const s of rockSets) s.finish(this.group);
 
-    // Bushes and ferns (CC0), swaying, no cast shadows to keep the shadow pass light.
-    // Ultimate Stylized Nature bushes (three sizes) plus ferns under the trees.
-    // Bush.gltf only, varied by scale and rotation.
-    const bushSets = [new InstancedSet(lib.parts('bush', { by: 'height', value: 1.1 }), 240, false)];
+    // Shrubs built in code (dark twigs, alpha-cut moss/olive leaf sprays, two shapes) and
+    // CC0 ferns under the trees; swaying, no cast shadows to keep the shadow pass light.
+    const bushSets = buildBushVariants().map((parts) => new InstancedSet(parts, 130, false));
     const fernSet = new InstancedSet(lib.parts('fern', { by: 'height', value: 0.8 }), 260, false);
     for (const set of [...bushSets, fernSet]) for (const m of set.meshes) addWind(m.material as THREE.Material, 0.1, 0.06);
+    {
+      // Leaf sprays are double-sided cards: keep their up-leaning normal on both faces.
+      const lm = bushMaterials().leaf;
+      const windCompile = lm.onBeforeCompile;
+      lm.onBeforeCompile = (shader, renderer) => {
+        windCompile.call(lm, shader, renderer);
+        shader.fragmentShader = shader.fragmentShader.replace('#include <normal_fragment_begin>', THREE.ShaderChunk.normal_fragment_begin.replace('normal *= faceDirection;', ''));
+      };
+      lm.customProgramCacheKey = () => 'bush-leaves-wind';
+    }
     const bushCount = () => bushSets.reduce((s2, b2) => s2 + b2.count, 0);
     tries = 0;
     while ((bushCount() < 240 || fernSet.count < 260) && tries < 30000) {
@@ -599,14 +609,16 @@ export class Props {
       if (terrain.surfaceAt(x, z) !== 'grass' || excluded(x, z)) continue;
       const h = terrain.height(x, z);
       const fern = nearTree(x, z, 5) ? rand() < 0.7 : rand() < 0.3;
-      const set = fern ? fernSet : bushSets[0];
-      if (set.count >= (fern ? 260 : 240)) continue;
-      const s = fern ? 0.7 + rand() * 0.7 : 0.55 + rand() * 0.9;
+      const set = fern ? fernSet : bushSets[rand() < 0.55 ? 0 : 1];
+      if (set.count >= (fern ? 260 : 120)) continue;
+      const s = fern ? 0.7 + rand() * 0.7 : 0.95 + rand() * 0.6;
       d.position.set(x, h - 0.05, z);
       d.rotation.set(0, rand() * 6, 0);
       d.scale.setScalar(s);
       d.updateMatrix();
-      color.setHSL(0.25 + (rand() - 0.5) * 0.06, 0.25, 0.55 + rand() * 0.1).multiplyScalar(1.75);
+      // Ferns keep their green tint; shrubs only vary in brightness (their leaves carry the colour).
+      if (fern) color.setHSL(0.25 + (rand() - 0.5) * 0.06, 0.25, 0.55 + rand() * 0.1).multiplyScalar(1.75);
+      else color.setScalar(0.85 + rand() * 0.3);
       set.push(d.matrix, color);
     }
     for (const b2 of bushSets) b2.finish(this.group);

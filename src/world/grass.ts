@@ -89,7 +89,7 @@ export class GrassField {
   private dummy = new THREE.Object3D();
   private col = new THREE.Color();
 
-  constructor(private terrain: Terrain, lib: AssetLibrary, private bare: { x: number; z: number; r: number }[] = []) {
+  constructor(private terrain: Terrain, lib: AssetLibrary, private bare: { x: number; z: number; r: number }[] = [], private blocked: ((x: number, z: number) => boolean) | null = null) {
     void lib;
     const geo = clumpGeometry();
     // A grey ramp along the blade (uv.y: root 0 → tip 1): deep shade at the roots for
@@ -156,6 +156,7 @@ export class GrassField {
       const tint = 0.9 + rand() * 0.2;
       if (this.terrain.surfaceAt(x, z) !== 'grass' || this.terrain.slope(x, z) >= 0.34) continue;
       if (this.bare.some((b) => Math.hypot(x - b.x, z - b.z) < b.r)) continue;
+      if (this.blocked?.(x, z)) continue;
       d.position.set(x, this.terrain.height(x, z) - 0.02, z);
       d.rotation.set(0, yaw, 0);
       d.scale.set(s, s * (0.9 + rand() * 0.25), s);

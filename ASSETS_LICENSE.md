@@ -22,7 +22,7 @@ Run `npm run lint:assets` to check every `.glb`/`.gltf`/`.fbx` and texture (pars
 | `nature/rock_round.glb` | Rock Medium | Quaternius | https://poly.pizza/m/s1OJ3bBzqc | CC0 1.0 | Texture resized to 512 px |
 | `nature/rock_small.glb` | Rock | Quaternius | https://poly.pizza/m/RtLRqYjfMs | CC0 1.0 | None |
 | `nature/pebble.glb` | Rock | Quaternius | https://poly.pizza/m/4MUaQTcDdc | CC0 1.0 | None |
-| `ultimate/Bush.gltf` + `Bush.bin` | Bush | Quaternius — Ultimate Stylized Nature Pack (May 2022) | https://quaternius.com/packs/ultimatenature.html | CC0 1.0 | None |
+| `ultimate/Bush.gltf` + `Bush.bin` | Bush | Quaternius — Ultimate Stylized Nature Pack (May 2022) | https://quaternius.com/packs/ultimatenature.html | CC0 1.0 | None — no longer loaded: shrubs are built in code since 2026-11-26 |
 | `ultimate/Grass_Small.gltf` + `Grass_Small.bin` | Grass_Small | Quaternius — Ultimate Stylized Nature Pack (May 2022) | https://quaternius.com/packs/ultimatenature.html | CC0 1.0 | None (normals set straight up in code) |
 | `ultimate/Grass.png` | Grass texture | Quaternius — Ultimate Stylized Nature Pack (May 2022) | https://quaternius.com/packs/ultimatenature.html | CC0 1.0 | Resized 1024 → 512 px |
 | `ultimate/Bush_Leaves.png` | Bush_Leaves texture | Quaternius — Ultimate Stylized Nature Pack (May 2022) | https://quaternius.com/packs/ultimatenature.html | CC0 1.0 | Resized 1024 → 512 px |

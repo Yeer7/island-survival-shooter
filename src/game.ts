@@ -260,10 +260,8 @@ export class Game implements CombatWorld {
     // New spots go at the end so saved effigy ids keep pointing at the same ones.
     this.effigies = new Effigies(this.terrain, this.colliders, lib, [...this.village.effigySpots, ...trail, ...this.crash.effigySpots]);
     this.scene.add(this.effigies.group);
-    this.grass = new GrassField(this.terrain, lib, [
-      { x: this.crash.center.x, z: this.crash.center.z, r: 20 },
-      { x: this.village.center.x, z: this.village.center.z, r: 21 },
-    ]);
+    // Around the wreck the grass stops only at the blocks and the ploughed earth (ragged edge).
+    this.grass = new GrassField(this.terrain, lib, [{ x: this.village.center.x, z: this.village.center.z, r: 21 }], (x, z) => this.crash.grassBlocked(x, z));
     this.scene.add(this.grass.mesh);
     this.props.smallRocks.forEach((r, i) => this.pickups.addInstanced('rock', i, r.x, r.y, r.z));
     this.props.smallSticks.forEach((r, i) => this.pickups.addInstanced('stick', i, r.x, r.y, r.z));

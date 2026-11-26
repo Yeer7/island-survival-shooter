@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { bakeStatic } from '../core/bake';
 import { mulberry32 } from '../core/math';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { logMaterials } from '../weapons/models';
 import {
   FuselageLayout,
@@ -828,7 +829,7 @@ export class CrashSite {
     noseG.updateMatrix();
     const noseTip = new THREE.Vector3(NOSE_LEN, 0, 0).applyMatrix4(noseG.matrix);
     const noseRear = new THREE.Vector3(0.4, 0, 0).applyMatrix4(noseG.matrix);
-    this.dirt = this.buildDirtPatch([
+    this.dirtSegs = [
       [TIP - 3, 0, TEAR + 1, 0, 4.6],
       [TEAR, 0, noseRear.x, noseRear.z, 3.4],
       [noseRear.x, noseRear.z, noseTip.x, noseTip.z, 3.6],
@@ -836,7 +837,9 @@ export class CrashSite {
       [-1, 3, rootFire.x, rootFire.z, 3.4],
       [rootFire.x, rootFire.z, detTip.x, detTip.z, 3.4],
       [-6, -4, -10, 6, 4],
-    ]);
+    ];
+    this.dirt = this.buildDirtPatch(this.dirtSegs);
+    this.buildDirtEdge(this.dirtSegs);
 
     // Luggage thrown round the wreck on the dark patch.
     const casePositions = [
@@ -881,6 +884,107 @@ export class CrashSite {
   }
 
   dirt!: THREE.Mesh;
+  /** Burned/ploughed earth as segments [x0, z0, x1, z1, width] in the wreck's frame. */
+  private dirtSegs: number[][] = [];
+
+  /** Distance (m) from a local point to the nearest dirt segment, minus that segment's half-width. */
+  private dirtDistance(lx: number, lz: number): number {
+    let best = Infinity;
+    for (const [x0, z0, x1, z1, w] of this.dirtSegs) {
+      const dx = x1 - x0;
+      const dz = z1 - z0;
+      const l2 = dx * dx + dz * dz || 1;
+      const t = THREE.MathUtils.clamp(((lx - x0) * dx + (lz - z0) * dz) / l2, 0, 1);
+      best = Math.min(best, Math.hypot(lx - (x0 + dx * t), lz - (z0 + dz * t)) - w * 0.5);
+    }
+    return best;
+  }
+
+  /**
+   * No grass under the wreck blocks and the core of the ploughed earth; the edge is
+   * ragged (noise plus a sparse fringe) so tall grass meets the dirt naturally.
+   */
+  grassBlocked(x: number, z: number): boolean {
+    const l = new THREE.Vector3(x - this.center.x, 0, z - this.center.z).applyAxisAngle(new THREE.Vector3(0, 1, 0), -this.yaw);
+    for (const sc of this.suitcases) if (Math.hypot(x - sc.pos.x, z - sc.pos.z) < 0.9) return true;
+    const d = this.dirtDistance(l.x, l.z);
+    if (d > 2) return false;
+    const n = Math.sin(l.x * 1.7 + l.z * 0.6) * Math.sin(l.z * 2.3 - l.x * 0.4) * 0.6 + Math.sin(l.x * 5.1 + 1.3) * Math.sin(l.z * 4.7) * 0.3;
+    const edge = 0.35 + n * 0.55;
+    if (d < edge) return true;
+    // A sparse fringe just outside the edge.
+    const h = Math.abs(Math.sin(l.x * 127.1 + l.z * 311.7) * 43758.5) % 1;
+    return d < edge + 0.9 && h < 0.45;
+  }
+
+  /**
+   * Low ridges of earth pushed up along the drag furrow and a scatter of pebbles, wood
+   * chips and small metal fragments where the churned earth meets the grass.
+   */
+  private buildDirtEdge(segs: number[][]): void {
+    const r = mulberry32(57);
+    const toLocal = (lx: number, lz: number, lift: number) =>
+      this.localToGround(lx, lz, lift).sub(this.center).applyAxisAngle(new THREE.Vector3(0, 1, 0), -this.yaw);
+    const earth: THREE.BufferGeometry[] = [];
+    const stones: THREE.BufferGeometry[] = [];
+    const chips: THREE.BufferGeometry[] = [];
+    const metal: THREE.BufferGeometry[] = [];
+    const place = (g: THREE.BufferGeometry, p: THREE.Vector3, yaw: number, tilt = 0) => {
+      g.rotateX(tilt);
+      g.rotateY(yaw);
+      g.translate(p.x, p.y, p.z);
+      return g;
+    };
+    // Ridges along both sides of the main furrow (the fuselage's slide).
+    const [fx0, , fx1, , fw] = segs[0];
+    for (let x = fx0 + 1; x < fx1; x += 1.3 + r() * 0.6) {
+      for (const side of [-1, 1]) {
+        if (r() < 0.2) continue;
+        const z = side * (fw * 0.5 + 0.15 + r() * 0.35);
+        const m = new THREE.SphereGeometry(1, 9, 5, 0, Math.PI * 2, 0, Math.PI / 2);
+        m.scale(0.7 + r() * 0.8, 0.16 + r() * 0.16, 0.45 + r() * 0.35);
+        earth.push(place(m, toLocal(x, z, -0.05), (r() - 0.5) * 0.5));
+      }
+    }
+    // Scatter along every segment's edge.
+    for (const [x0, z0, x1, z1, w] of segs) {
+      const len = Math.hypot(x1 - x0, z1 - z0);
+      const ux = (x1 - x0) / (len || 1);
+      const uz = (z1 - z0) / (len || 1);
+      for (let k = 0; k < len * 2.2; k++) {
+        const t = r();
+        const side = r() < 0.5 ? -1 : 1;
+        const off = w * 0.5 + (r() - 0.3) * 1.2;
+        const lx = x0 + (x1 - x0) * t - uz * side * off;
+        const lz = z0 + (z1 - z0) * t + ux * side * off;
+        const kind = r();
+        if (kind < 0.5) {
+          const g = new THREE.DodecahedronGeometry(0.05 + r() * 0.09, 0);
+          g.scale(1, 0.6, 1);
+          stones.push(place(g, toLocal(lx, lz, 0.02), r() * 6));
+        } else if (kind < 0.8) {
+          chips.push(place(new THREE.BoxGeometry(0.08 + r() * 0.22, 0.025, 0.03 + r() * 0.05), toLocal(lx, lz, 0.02), r() * 6, (r() - 0.5) * 0.4));
+        } else {
+          metal.push(place(new THREE.BoxGeometry(0.1 + r() * 0.3, 0.012, 0.06 + r() * 0.15), toLocal(lx, lz, 0.02), r() * 6, (r() - 0.5) * 0.5));
+        }
+      }
+    }
+    const add = (geos: THREE.BufferGeometry[], mat: THREE.Material) => {
+      if (!geos.length) return;
+      const flat = geos.map((g) => (g.index ? g.toNonIndexed() : g));
+      for (const g of flat) g.deleteAttribute('uv');
+      const merged = mergeGeometries(flat, false);
+      if (!merged) return;
+      merged.computeVertexNormals();
+      const mesh = new THREE.Mesh(merged, mat);
+      mesh.castShadow = mesh.receiveShadow = true;
+      this.group.add(mesh);
+    };
+    add(earth, new THREE.MeshStandardMaterial({ color: 0x3b2c1f, roughness: 0.98, flatShading: true }));
+    add(stones, new THREE.MeshStandardMaterial({ color: 0x77736b, roughness: 0.9, flatShading: true }));
+    add(chips, new THREE.MeshStandardMaterial({ color: 0xb38d5f, roughness: 0.9 }));
+    add(metal, new THREE.MeshStandardMaterial({ color: 0x9a9da0, roughness: 0.45, metalness: 0.6 }));
+  }
 
   /**
    * Burned earth: one irregular dark patch draped on the ground, made of soft blobs laid
@@ -898,11 +1002,14 @@ export class CrashSite {
     const r = mulberry32(9);
     const px = (x: number) => ((x - X0) / W) * S;
     const pz = (z: number) => ((z - Z0) / D) * S;
-    const blob = (x: number, z: number, rad: number, rgb: string, a: number) => {
+    // The outline is a greyscale mask (alphaMap): an opaque core with a soft ragged rim.
+    g.fillStyle = '#000';
+    g.fillRect(0, 0, S, S);
+    const blob = (x: number, z: number, rad: number) => {
       const grd = g.createRadialGradient(px(x), pz(z), 0, px(x), pz(z), (rad / W) * S);
-      grd.addColorStop(0, `rgba(${rgb},${a})`);
-      grd.addColorStop(0.6, `rgba(${rgb},${a * 0.85})`);
-      grd.addColorStop(1, `rgba(${rgb},0)`);
+      grd.addColorStop(0, 'rgba(255,255,255,1)');
+      grd.addColorStop(0.55, 'rgba(255,255,255,1)');
+      grd.addColorStop(1, 'rgba(255,255,255,0)');
       g.fillStyle = grd;
       g.fillRect(0, 0, S, S);
     };
@@ -910,45 +1017,69 @@ export class CrashSite {
       const n = Math.ceil(Math.hypot(x1 - x0, z1 - z0) / 1.6) + 1;
       for (let k = 0; k <= n; k++) {
         const t = k / n;
-        blob(x0 + (x1 - x0) * t + (r() - 0.5) * w, z0 + (z1 - z0) * t + (r() - 0.5) * w, w * (0.8 + r() * 0.6), '54,41,28', 0.72);
+        blob(x0 + (x1 - x0) * t + (r() - 0.5) * w * 0.6, z0 + (z1 - z0) * t + (r() - 0.5) * w * 0.6, w * (0.8 + r() * 0.5));
       }
     }
-    // Inside the patch only: char, ash and furrows ploughed by the fuselage.
-    g.globalCompositeOperation = 'source-atop';
-    for (const [x0, z0, x1, z1, w] of segments) {
-      for (let k = 0; k < 3; k++) {
-        const t = r();
-        blob(x0 + (x1 - x0) * t, z0 + (z1 - z0) * t, w * (0.4 + r() * 0.5), '22,18,14', 0.35);
-      }
+    const mask = new THREE.CanvasTexture(c);
+    mask.flipY = false;
+    // The surface: a fine tiling texture of churned earth (2 m tiles) with clods lit on
+    // top and shadowed below, fine gravel and charcoal crumbs. It doubles as the bump map.
+    const T = 256;
+    const tc = document.createElement('canvas');
+    tc.width = tc.height = T;
+    const tg = tc.getContext('2d')!;
+    tg.fillStyle = 'rgb(58,44,31)';
+    tg.fillRect(0, 0, T, T);
+    const wrap = (f: (x: number, y: number) => void, x: number, y: number) => {
+      for (const ox of [-T, 0, T]) for (const oy of [-T, 0, T]) f(x + ox, y + oy);
+    };
+    for (let i = 0; i < 900; i++) {
+      const x = r() * T;
+      const y = r() * T;
+      const rad = 2 + r() * 6;
+      const rot = r() * 3;
+      const lit = `rgba(${92 + r() * 34},${70 + r() * 24},${46 + r() * 18},${0.7 + r() * 0.3})`;
+      wrap((xx, yy) => {
+        tg.fillStyle = 'rgba(18,12,8,0.75)';
+        tg.beginPath();
+        tg.ellipse(xx + 1.2, yy + 1.6, rad, rad * 0.7, rot, 0, Math.PI * 2);
+        tg.fill();
+        tg.fillStyle = lit;
+        tg.beginPath();
+        tg.ellipse(xx, yy, rad * 0.85, rad * 0.6, rot, 0, Math.PI * 2);
+        tg.fill();
+      }, x, y);
     }
-    for (let i = 0; i < 2600; i++) {
-      g.fillStyle = r() > 0.5 ? `rgba(10,9,8,${0.4 * r()})` : `rgba(110,98,84,${0.25 * r()})`;
-      g.fillRect(r() * S, r() * S, 1 + r() * 4, 1 + r() * 2);
+    for (let i = 0; i < 4200; i++) {
+      const k = r();
+      tg.fillStyle = k < 0.3 ? `rgba(8,7,6,${0.55 + r() * 0.4})` : k < 0.62 ? `rgba(140,132,120,${0.4 + r() * 0.3})` : `rgba(76,57,37,${0.5 + r() * 0.4})`;
+      tg.fillRect(r() * T, r() * T, 1 + r() * 2, 1 + r() * 2);
     }
-    g.strokeStyle = 'rgba(16,12,8,0.5)';
-    g.lineWidth = 5;
-    for (let k = -2; k <= 2; k++) {
-      g.beginPath();
-      g.moveTo(px(-28), pz(k * 0.9));
-      g.bezierCurveTo(px(-10), pz(k * 1.1 + 0.4), px(4), pz(k * 0.8 - 0.3), px(18), pz(k * 0.7 - 2.5));
-      g.stroke();
-    }
-    g.globalCompositeOperation = 'source-over';
-    const tex = new THREE.CanvasTexture(c);
+    const tex = new THREE.CanvasTexture(tc);
     tex.colorSpace = THREE.SRGBColorSpace;
-    tex.flipY = false;
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    tex.repeat.set(W / 2, D / 2);
+    tex.anisotropy = 4;
     const geo = new THREE.PlaneGeometry(W, D, 72, 64);
     geo.rotateX(Math.PI / 2);
     geo.translate(X0 + W / 2, 0, Z0 + D / 2);
     const pos = geo.attributes.position;
     const uv = geo.attributes.uv;
+    // Large-scale variation in vertex colours: charred, darker zones and drier brown ones.
+    const col = new Float32Array(pos.count * 3);
     for (let i = 0; i < pos.count; i++) {
       const lx = pos.getX(i);
       const lz = pos.getZ(i);
       uv.setXY(i, (lx - X0) / W, (lz - Z0) / D);
       const wp = this.toWorld(lx, 0, lz);
       pos.setY(i, this.terrain.height(wp.x, wp.z) - this.center.y + 0.04);
+      const n = 0.5 + 0.5 * Math.sin(lx * 0.31 + Math.sin(lz * 0.23) * 2) * Math.sin(lz * 0.27 - lx * 0.11);
+      const k = 0.55 + 0.5 * n;
+      col[i * 3] = k;
+      col[i * 3 + 1] = k * 0.97;
+      col[i * 3 + 2] = k * 0.94;
     }
+    geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
     geo.computeVertexNormals();
     // rotateX(+π/2) leaves the faces looking down; flip them up.
     const idx = geo.index!;
@@ -958,7 +1089,10 @@ export class CrashSite {
       idx.setX(i + 2, a);
     }
     geo.computeVertexNormals();
-    const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ map: tex, transparent: true, depthWrite: false, roughness: 1, polygonOffset: true, polygonOffsetFactor: -2 }));
+    const mesh = new THREE.Mesh(
+      geo,
+      new THREE.MeshStandardMaterial({ map: tex, alphaMap: mask, bumpMap: tex, bumpScale: 3, vertexColors: true, transparent: true, depthWrite: false, roughness: 0.95, metalness: 0, polygonOffset: true, polygonOffsetFactor: -2 }),
+    );
     mesh.position.copy(this.center);
     mesh.rotation.y = this.yaw;
     mesh.receiveShadow = true;

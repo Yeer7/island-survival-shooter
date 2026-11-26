@@ -154,6 +154,7 @@ export class Game implements CombatWorld {
   private v2 = new THREE.Vector3();
   private v3 = new THREE.Vector3();
   private v4 = new THREE.Vector3();
+  private v5 = new THREE.Vector3();
   private moonGlint = new THREE.Color(0x9fb8e8);
   frameMs = 0;
 
@@ -203,6 +204,7 @@ export class Game implements CombatWorld {
     this.cave.onDrip = (p) => this.sound.drip(Math.max(0.15, 1 - p.distanceTo(this.player.pos) / 14));
     this.altar = new Altar(this.terrain, this.colliders, lib);
     this.scene.add(this.altar.group);
+    for (const e of this.altar.fx) this.scene.add(e.points);
     this.boat = new Sailboat(this.terrain, this.colliders);
     this.scene.add(this.boat.group);
     this.beach = new Beach(this.terrain, [{ x: this.boat.pos.x, z: this.boat.pos.z, r: 10 }]);
@@ -382,7 +384,7 @@ export class Game implements CombatWorld {
   private warmUp(): void {
     const warm = new THREE.Group();
     warm.add(this.forest.makeWarmupObject());
-    for (const k of ['campfire', 'logHolder', 'wall', 'gate', 'bed', 'cabin'] as BuildKind[]) {
+    for (const k of ['campfire', 'logHolder', 'wall', 'gate', 'bed', 'cabin', 'spikeTrap'] as BuildKind[]) {
       warm.add(buildModel(k));
       const g = buildModel(k);
       setGhost(g, true);
@@ -411,7 +413,7 @@ export class Game implements CombatWorld {
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
     this.vm.setAspect(w / h);
-    for (const e of [...this.crash.smoke, ...this.crash.fire]) e.setViewportHeight(h * ratio);
+    for (const e of [...this.crash.smoke, ...this.crash.fire, ...this.altar.fx]) e.setViewportHeight(h * ratio);
     this.sparks.setViewportHeight(h * ratio);
     this.village.setViewportHeight(h * ratio);
     this.cave.setViewportHeight(h * ratio);
@@ -541,7 +543,9 @@ export class Game implements CombatWorld {
     this.arrows.update(dt);
     this.sparks.update(dt);
     this.updateBurning(dt);
+    this.updateTraps(dt);
     this.crash.update(dt, this.sky.ambient);
+    this.altar.update(dt);
     this.base.update(dt, this.time, this.sky.ambient);
     this.village.update(dt, this.sky.ambient, this.player.pos);
     this.cave.update(dt, this.player.pos);
@@ -1641,6 +1645,13 @@ export class Game implements CombatWorld {
         l.intensity = 0;
       }
     }
+    // A free campfire slot lights the altar braziers when the player is near the arena.
+    const freeSlot = this.campLights.find((l) => l.intensity === 0);
+    if (freeSlot && this.altar.lightPos.distanceTo(p) < 75) {
+      freeSlot.position.copy(this.altar.lightPos);
+      freeSlot.distance = 24;
+      freeSlot.intensity = 26 + Math.sin(t * 13) * 3 + Math.sin(t * 5.3) * 3;
+    }
     // The lantern inside the nearest finished cabin: a soft warm light with a slow flicker.
     let lamp: Cabin | null = null;
     let ld = 60;
@@ -2007,6 +2018,35 @@ export class Game implements CombatWorld {
     this.zones.length = 0;
     for (const pl of this.base.placed) if (pl.kind === 'campfire') this.zones.push({ x: pl.pos.x, z: pl.pos.z, r: 16 });
     for (const c of this.base.cabins) if (c.complete) this.zones.push({ x: c.pos.x, z: c.pos.z, r: 10 });
+  }
+
+  /** Cooldown per (trap, enemy) pair so a stake bites once in a while, not every frame. */
+  private trapCooldown = new Map<string, number>();
+
+  /** Spike traps hurt any cannibal or hostile beast standing in them (never the player or passive animals). */
+  private updateTraps(dt: number): void {
+    for (const [k, v] of this.trapCooldown) {
+      if (v - dt <= 0) this.trapCooldown.delete(k);
+      else this.trapCooldown.set(k, v - dt);
+    }
+    for (const t of this.base.placed) {
+      if (t.kind !== 'spikeTrap') continue;
+      this.tribe.list.forEach((c, i) => {
+        if (c.state === 'dead') return;
+        if (Math.hypot(c.pos.x - t.pos.x, c.pos.z - t.pos.z) > 0.75 + c.cfg.radius || Math.abs(c.pos.y - t.pos.y) > 1.6) return;
+        const key = `${t.group.uuid}:${i}`;
+        if (this.trapCooldown.has(key)) return;
+        this.trapCooldown.set(key, 0.9);
+        const killed = this.tribe.damage(i, 18);
+        this.v4.set(c.pos.x, c.pos.y + 0.6, c.pos.z);
+        this.debris.burst(this.v4, this.v5.set(0, 1, 0), killed ? 14 : 8, 0x7a1414, { speed: 2.2, size: 0.04, floor: c.pos.y + 0.02, life: 0.8 });
+        if (this.player.pos.distanceTo(c.pos) < 30) {
+          this.sound.fireHit();
+          this.sound.animalHurt(true);
+        }
+        if (killed && this.player.pos.distanceTo(c.pos) < 60) this.hud.toast(tr(`🪤 ${c.cfg.name} caiu na armadilha`, `🪤 ${c.cfg.name} died on the spikes`));
+      });
+    }
   }
 
   private hitCannibal(i: number, dmg: number, p: THREE.Vector3, n: THREE.Vector3): void {

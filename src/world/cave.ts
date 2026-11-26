@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { AssetLibrary, AssetName } from '../assets/assets';
 import { bakeStatic } from '../core/bake';
+import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { mulberry32 } from '../core/math';
 import { PuffEmitter } from '../fx/particles';
 import { buildLog, logMaterials } from '../weapons/models';
@@ -1782,29 +1783,140 @@ export class Altar {
       this.group.add(r);
       colliders.add({ x, z, r: 0.9, y0: g - 1, y1: g + 4, kind: 'rock', ref: 0 });
     }
-    // Slab altar with offerings.
-    const slab = new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.9, 1.8), stone);
-    slab.position.set(this.center.x, this.center.y + 0.3, this.center.z);
-    slab.castShadow = slab.receiveShadow = true;
-    this.group.add(slab);
-    colliders.add({ x: this.center.x, z: this.center.z, r: 1.5, y0: this.center.y - 1, y1: this.center.y + 0.8, kind: 'rock', ref: 0 });
-    const bone = new THREE.MeshStandardMaterial({ color: 0xe6dcc6, roughness: 0.6 });
+    // Sacrificial table: two carved stone pedestals under a thick slab, a stained top, a
+    // lashed wooden rack behind it hung with bones, skulls and bones laid on the slab.
+    const c = this.center;
+    const table = new THREE.Group();
+    table.position.copy(c);
+    this.group.add(table);
+    const add = (m: THREE.Object3D) => {
+      m.traverse((o) => {
+        if ((o as THREE.Mesh).isMesh) o.castShadow = o.receiveShadow = true;
+      });
+      table.add(m);
+      return m;
+    };
+    for (const s of [-1, 1]) {
+      const ped = add(new THREE.Mesh(new RoundedBoxGeometry(0.75, 0.8, 1.55, 2, 0.08), stone));
+      ped.position.set(s * 1.05, 0.38, 0);
+      const cap = add(new THREE.Mesh(new RoundedBoxGeometry(0.95, 0.12, 1.75, 2, 0.04), stone));
+      cap.position.set(s * 1.05, 0.8, 0);
+    }
+    const top = add(new THREE.Mesh(new RoundedBoxGeometry(3.6, 0.32, 2.0, 3, 0.1), stone));
+    top.position.y = 1.0;
+    const stain = new THREE.Mesh(new THREE.CircleGeometry(0.75, 20), new THREE.MeshStandardMaterial({ color: 0x3a0c08, roughness: 0.4, transparent: true, opacity: 0.85, depthWrite: false }));
+    stain.rotation.x = -Math.PI / 2;
+    stain.scale.set(1.5, 1, 1);
+    stain.position.set(0.2, 1.165, 0.05);
+    table.add(stain);
+    colliders.add({ x: c.x, z: c.z, r: 1.7, y0: c.y - 1, y1: c.y + 1.2, kind: 'rock', ref: 0 });
+    const wood = logMaterials();
+    const rope = new THREE.MeshStandardMaterial({ color: 0x8a7350, roughness: 0.95 });
+    for (const s of [-1, 1]) {
+      const post = add(new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.14, 3.1, 8), wood));
+      post.position.set(s * 1.9, 1.5, -1.45);
+      post.rotation.z = s * 0.06;
+      const tie = add(new THREE.Mesh(new THREE.TorusGeometry(0.14, 0.035, 5, 10), rope));
+      tie.position.set(s * 1.85, 2.75, -1.45);
+      tie.rotation.x = Math.PI / 2;
+    }
+    const bar = add(new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.1, 4.2, 8), wood));
+    bar.rotation.z = Math.PI / 2;
+    bar.position.set(0, 2.8, -1.45);
+    const has = (n: AssetName) => lib.has(n);
     for (let k = 0; k < 4; k++) {
-      const s = new THREE.Mesh(new THREE.SphereGeometry(0.15, 10, 8), bone);
-      s.position.set(this.center.x - 1.1 + k * 0.7, this.center.y + 0.88, this.center.z + (rand() - 0.5) * 0.6);
-      this.group.add(s);
+      const x = -1.3 + k * 0.87;
+      const cord = add(new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.6, 4), rope));
+      cord.position.set(x, 2.45, -1.45);
+      if (has('bone')) {
+        const b = lib.instance('bone', { by: 'max', value: 0.45 });
+        b.position.set(x, 2.05, -1.45);
+        b.rotation.set(0, rand() * 3, Math.PI / 2 + (rand() - 0.5) * 0.4);
+        add(b);
+      }
     }
-    const ember = new THREE.MeshStandardMaterial({ color: 0x2a0a04, emissive: 0xff4a10, emissiveIntensity: 1.6 });
+    if (has('skull')) {
+      const skulls: [number, number, number, number][] = [
+        [-1.1, 0.25, 0.3, 0.4],
+        [-0.25, -0.35, 0.34, -0.2],
+        [0.9, 0.3, 0.28, 0.9],
+      ];
+      for (const [x, z, size, yaw] of skulls) {
+        const s = lib.instance('skull', { by: 'height', value: size });
+        s.position.set(x, 1.16, z);
+        s.rotation.y = yaw;
+        add(s);
+      }
+      const onPost = lib.instance('skull', { by: 'height', value: 0.3 });
+      onPost.position.set(-1.9, 3.06, -1.45);
+      add(onPost);
+      const onPost2 = lib.instance('skull', { by: 'height', value: 0.26 });
+      onPost2.position.set(1.9, 3.06, -1.45);
+      onPost2.rotation.y = 0.5;
+      add(onPost2);
+    }
+    if (has('bone')) {
+      for (let k = 0; k < 4; k++) {
+        const b = lib.instance('bone', { by: 'max', value: 0.5 + rand() * 0.2 });
+        b.position.set(-0.6 + k * 0.45, 1.19, 0.55 - (k % 2) * 0.9);
+        b.rotation.set(Math.PI / 2, 0, rand() * Math.PI);
+        add(b);
+      }
+      for (let k = 0; k < 6; k++) {
+        const a = rand() * Math.PI * 2;
+        const b = lib.instance('bone', { by: 'max', value: 0.4 + rand() * 0.2 });
+        const bx = Math.cos(a) * (2.0 + rand() * 1.2);
+        const bz = Math.sin(a) * (2.0 + rand() * 1.2);
+        b.position.set(bx, terrain.height(c.x + bx, c.z + bz) - c.y + 0.04, bz);
+        b.rotation.set(Math.PI / 2, 0, rand() * Math.PI);
+        add(b);
+      }
+    }
+    // Two iron braziers on wooden tripods, burning: flames, a thin smoke and one warm
+    // light borrowed from the campfire pool by the game (no extra light).
+    const iron = new THREE.MeshStandardMaterial({ color: 0x2e2b28, roughness: 0.55, metalness: 0.6 });
+    const ember = new THREE.MeshStandardMaterial({ color: 0x2a0a04, emissive: 0xff4a10, emissiveIntensity: 2.2 });
     for (const side of [-1, 1]) {
-      const bowl = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.25, 0.35, 10), stone);
-      const x = this.center.x + side * 3;
-      const y = terrain.height(x, this.center.z);
-      bowl.position.set(x, y + 0.9, this.center.z);
-      const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.16, 0.8, 6), stone);
-      leg.position.set(x, y + 0.4, this.center.z);
-      const coals = new THREE.Mesh(new THREE.SphereGeometry(0.35, 8, 4, 0, Math.PI * 2, 0, Math.PI / 2), ember);
-      coals.position.set(x, y + 1.0, this.center.z);
-      this.group.add(bowl, leg, coals);
+      const x = c.x + side * 3.2;
+      const z = c.z + 0.6;
+      const y = terrain.height(x, z);
+      const br = new THREE.Group();
+      br.position.set(x, y, z);
+      this.group.add(br);
+      for (let k = 0; k < 3; k++) {
+        const a = (k / 3) * Math.PI * 2;
+        const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.07, 1.25, 6), wood);
+        leg.position.set(Math.cos(a) * 0.32, 0.58, Math.sin(a) * 0.32);
+        leg.rotation.set(Math.sin(a) * 0.32, 0, -Math.cos(a) * 0.32);
+        leg.castShadow = true;
+        br.add(leg);
+      }
+      const bowl = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.28, 0.34, 14, 1, true), iron);
+      bowl.material.side = THREE.DoubleSide;
+      bowl.position.y = 1.18;
+      const rim = new THREE.Mesh(new THREE.TorusGeometry(0.5, 0.04, 6, 18), iron);
+      rim.rotation.x = Math.PI / 2;
+      rim.position.y = 1.35;
+      const coals = new THREE.Mesh(new THREE.SphereGeometry(0.42, 10, 4, 0, Math.PI * 2, 0, Math.PI / 2), ember);
+      coals.scale.y = 0.45;
+      coals.position.y = 1.2;
+      br.add(bowl, rim, coals);
+      colliders.add({ x, z, r: 0.45, y0: y - 1, y1: y + 1.4, kind: 'rock', ref: 0 });
+      const flame = new PuffEmitter(18, { life: 0.7, rise: 1.6, spread: 0.22, size0: 0.9, size1: 0.18, alpha: 0.9, color: 0xff5a12, color2: 0xffd27a, additive: true });
+      flame.origin.set(x, y + 1.38, z);
+      const smoke = new PuffEmitter(14, { life: 4.5, rise: 1.4, spread: 0.4, size0: 0.6, size1: 2.6, alpha: 0.16, color: 0x3a3836, color2: 0x24221f, additive: false });
+      smoke.origin.set(x, y + 2.1, z);
+      this.fx.push(flame, smoke);
     }
+    this.lightPos.set(c.x, c.y + 2.4, c.z + 0.6);
+  }
+
+  /** Brazier flames and smoke (added to the scene by the game). */
+  readonly fx: PuffEmitter[] = [];
+  /** Where the borrowed warm light sits, between the braziers. */
+  readonly lightPos = new THREE.Vector3();
+
+  update(dt: number): void {
+    for (const e of this.fx) e.update(dt);
   }
 }

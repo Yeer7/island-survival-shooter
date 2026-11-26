@@ -8,7 +8,7 @@ import { Circle, ColliderGrid } from './colliders';
 import { LAKE_CENTER, LAKE_LEVEL, Terrain } from './terrain';
 import { detailTextures } from './textures';
 
-export type BuildKind = 'cabin' | 'bed' | 'campfire' | 'logHolder' | 'wall' | 'gate';
+export type BuildKind = 'cabin' | 'bed' | 'campfire' | 'logHolder' | 'wall' | 'gate' | 'spikeTrap';
 
 export interface Cost {
   logs?: number;
@@ -32,6 +32,7 @@ export const RECIPES: Recipe[] = [
   { id: 'cabin', label: 'Cabana de Madeira', icon: '🛖', level: 1, kind: 'build', cost: {}, desc: 'Cabana espaçosa (7,5 × 6,5 m) com porta, janelas, alpendre e lampião. Escolha o lugar e entregue 6 toras, 10 gravetos e 6 pedras com [E].' },
   { id: 'bed', label: 'Cama de Sobrevivência', icon: '🛏️', level: 1, kind: 'build', cost: { logs: 4, cloth: 4, hide: 2 }, desc: 'Coloque dentro da Cabana pronta. [E] Dormir e Salvar: vida cheia e pula para as 07:00.' },
   { id: 'campfire', label: 'Fogueira', icon: '🔥', level: 1, kind: 'build', cost: { logs: 1, sticks: 4, rocks: 4 }, desc: 'Assa carne e peixe, ilumina a noite.' },
+  { id: 'spikeTrap', label: 'Armadilha de Estacas', icon: '🪤', level: 1, kind: 'build', cost: { logs: 1, sticks: 4 }, desc: 'Base baixa com estacas afiadas: fere canibais e feras que pisarem nela. Não machuca você nem os animais.' },
   { id: 'logHolder', label: 'Suporte de Toras', icon: '🪵', level: 1, kind: 'build', cost: { logs: 2, sticks: 4 }, desc: 'Guarda até 12 toras perto da base.' },
   { id: 'torch', label: 'Tocha', icon: '🕯️', level: 1, kind: 'tool', cost: { sticks: 2, cloth: 1 }, desc: 'Luz quente para a noite.' },
   { id: 'rod', label: 'Vara de Pesca', icon: '🎣', level: 1, kind: 'tool', cost: { sticks: 3, cloth: 1 }, desc: 'Pesque no lago (mais rápido na doca).' },
@@ -124,6 +125,39 @@ export function buildModel(kind: BuildKind): THREE.Group {
       ash.position.y = 0.02;
       break;
     }
+    case 'spikeTrap': {
+      // Low frame of logs on a plank bed, six fire-hardened stakes leaning outward and one upright.
+      const w = woodMaterial();
+      const burnt = new THREE.MeshStandardMaterial({ color: 0x2a1d14, roughness: 0.9 });
+      for (const s of [-1, 1]) {
+        const a = add(buildLog(1.5, 0.08));
+        a.rotation.z = Math.PI / 2;
+        a.position.set(0, 0.08, s * 0.62);
+        const b = add(buildLog(1.5, 0.08));
+        b.rotation.x = Math.PI / 2;
+        b.position.set(s * 0.62, 0.08, 0);
+      }
+      const bed = add(new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.05, 1.2), w));
+      bed.position.y = 0.04;
+      const stake = (x: number, z: number, tx: number, tz: number, h: number) => {
+        const shaft = add(new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.06, h, 6), w));
+        const tip = add(new THREE.Mesh(new THREE.ConeGeometry(0.045, 0.24, 6), burnt));
+        for (const [m, y] of [
+          [shaft, h / 2],
+          [tip, h + 0.12],
+        ] as [THREE.Mesh, number][]) {
+          m.rotation.set(tx, 0, tz);
+          const up = new THREE.Vector3(0, y, 0).applyEuler(m.rotation);
+          m.position.set(x + up.x, 0.06 + up.y, z + up.z);
+        }
+      };
+      for (let i = 0; i < 6; i++) {
+        const a = (i / 6) * Math.PI * 2 + 0.3;
+        stake(Math.cos(a) * 0.32, Math.sin(a) * 0.32, Math.sin(a) * 0.55, -Math.cos(a) * 0.55, 0.62 + r() * 0.12);
+      }
+      stake(0, 0, 0, 0, 0.72);
+      break;
+    }
     case 'logHolder': {
       const w = woodMaterial();
       for (const x of [-0.8, 0.8]) {
@@ -191,7 +225,7 @@ export function setGhost(obj: THREE.Object3D, ok: boolean): void {
 }
 
 /** Footprint radius used for placement checks and colliders. */
-export const FOOTPRINT: Record<BuildKind, number> = { cabin: 5.2, bed: 1.1, campfire: 0.8, logHolder: 1.0, wall: 1.6, gate: 1.6 };
+export const FOOTPRINT: Record<BuildKind, number> = { cabin: 5.2, bed: 1.1, campfire: 0.8, logHolder: 1.0, wall: 1.6, gate: 1.6, spikeTrap: 0.9 };
 
 export interface Placed {
   kind: BuildKind;

@@ -17,6 +17,7 @@ export interface SaveData {
   };
   benchLevel: number;
   cabins: { x: number; z: number; yaw: number; delivered: { logs: number; sticks: number; rocks: number } }[];
+  /** Every placed building (campfire, log holder, wall, gate, bed, spike trap…) by its BuildKind. */
   placed: { kind: string; x: number; z: number; yaw: number; logs: number }[];
   defeated: string[];
   bridgeRepaired: boolean;

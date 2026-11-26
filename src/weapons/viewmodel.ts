@@ -16,6 +16,8 @@ interface Pose {
 
 const P = (px: number, py: number, pz: number, rx: number, ry: number, rz: number): Pose => ({ px, py, pz, rx, ry, rz });
 const HELD = P(0.24, -0.26, -0.45, 0.3, -0.3, 0);
+/** Axe yaw on the handle relative to the arm: with REST.axe's ry this leaves the edge ~15° inward of straight ahead. */
+const AXE_TURN = 0.3;
 
 const REST: Record<HotbarId, Pose> = {
   axe: P(0.3, -0.4, -0.6, -0.12, -0.3, -0.08),
@@ -89,6 +91,8 @@ export class ViewModel {
   private leftShow = 0;
   private logCount = 0;
   private flameT = 0;
+  /** Clock for the idle breathing. */
+  private breathT = 0;
   /** 0..1 bow draw, set by the bow logic. */
   bowDraw = 0;
   arrowNocked = true;
@@ -114,9 +118,9 @@ export class ViewModel {
 
     const axe = buildAxe();
     axe.position.set(0, 0, -0.01);
-    // 3/4 view: turned on the handle so the polished edge, the handle's curve and the
-    // spike / hammer behind all read, with the edge still leading the swing.
-    axe.rotation.set(-0.15, -1.1, 0.28, 'XZY');
+    // Edge forward (-Z), turned only ~15° inward so the cheek of the head shows a little
+    // while the blade is clearly ready to cut ahead.
+    axe.rotation.set(-0.3, AXE_TURN, 0.1, 'XZY');
     axe.scale.setScalar(1.0);
     const flameAxe = buildTacticalAxe();
     flameAxe.position.copy(axe.position);
@@ -304,14 +308,23 @@ export class ViewModel {
         return out;
       }
       case 'swing': {
-        const windup = P(rest.px + 0.06, rest.py + 0.1, rest.pz + 0.02, rest.rx + 0.5, rest.ry - 0.15, rest.rz - 0.35);
-        const strike = P(rest.px - 0.16, rest.py - 0.04, rest.pz - 0.12, rest.rx - 1.25, rest.ry + 0.15, rest.rz + 0.45);
-        if (t < 0.3) return mix(out, rest, windup, easeOutCubic(t / 0.3));
-        if (t < 0.42) {
-          const k = (t - 0.3) / 0.12;
-          return mix(out, windup, strike, k * k);
+        // 1) Wind-up: up and out to the right, wrist cocked back, shoulder open.
+        const windup = P(rest.px - 0.02, rest.py + 0.19, rest.pz + 0.06, rest.rx + 0.42, rest.ry - 0.15, rest.rz - 0.12);
+        // 2) Strike: a fast diagonal from high right to low left across the crosshair,
+        //    pitching forward so the edge leads, wrist rolling through, a small lunge.
+        const strike = P(rest.px - 0.15, rest.py - 0.13, rest.pz - 0.17, rest.rx - 0.78, rest.ry + 0.28, rest.rz + 0.55);
+        // 3) Follow-through: carries on a little lower and slows down.
+        const follow = P(strike.px - 0.04, strike.py - 0.05, strike.pz, strike.rx - 0.1, strike.ry + 0.05, strike.rz + 0.1);
+        if (t < 0.28) return mix(out, rest, windup, easeOutCubic(t / 0.28));
+        if (t < 0.44) {
+          const k = (t - 0.28) / 0.16;
+          return mix(out, windup, strike, k * k * k);
         }
-        return mix(out, strike, rest, easeOutCubic((t - 0.42) / 0.58));
+        if (t < 0.58) return mix(out, strike, follow, easeOutCubic((t - 0.44) / 0.14));
+        // Return with a soft, damped settle (a hint of overshoot).
+        const k = (t - 0.58) / 0.42;
+        const e = 1 - Math.pow(1 - k, 3) + Math.sin(k * Math.PI) * 0.06;
+        return mix(out, follow, rest, e);
       }
       case 'stab': {
         const back = P(rest.px + 0.02, rest.py - 0.02, rest.pz + 0.1, rest.rx + 0.05, rest.ry, rest.rz);
@@ -362,9 +375,20 @@ export class ViewModel {
       p.px -= this.bowDraw * 0.02;
     }
     const sp = this.sprint * (this.action === 'none' ? 1 : 0.3) * (this.current === 'bow' ? 0.3 : 1);
-    p.py -= 0.05 * sp;
-    p.rx -= 0.35 * sp;
-    p.ry += 0.35 * sp;
+    // Sprinting: the tool drops and crosses a little toward the centre.
+    p.py -= 0.06 * sp;
+    p.px -= 0.035 * sp;
+    p.rx -= 0.4 * sp;
+    p.ry += 0.38 * sp;
+    p.rz += 0.12 * sp;
+    // Breathing: never a statue, even standing still (damped during an action).
+    this.breathT += dt;
+    const calm = this.action === 'none' ? 1 : 0.25;
+    const bt = this.breathT;
+    p.py += Math.sin(bt * 1.8) * 0.0045 * calm;
+    p.px += Math.cos(bt * 0.9) * 0.0025 * calm;
+    p.rx += Math.sin(bt * 1.8 + 0.6) * 0.012 * calm;
+    p.rz += Math.cos(bt * 0.9) * 0.014 * calm;
     mix(this.pose, this.pose, p, 1 - Math.exp(-30 * dt));
     this.setPose(this.pose);
 
@@ -383,13 +407,15 @@ export class ViewModel {
     }
 
     // Bob follows the feet; a still player sees a still tool.
-    const amp = s.onGround ? s.speed01 * (s.sprint ? 1.5 : 1) : 0;
-    const bx = Math.sin(s.bobPhase) * 0.012 * amp;
-    const by = -Math.abs(Math.cos(s.bobPhase)) * 0.01 * amp;
+    // Walk bob: a soft figure of eight in step with the feet; sprinting swings harder.
+    const amp = s.onGround ? s.speed01 * (s.sprint ? 1.7 : 1) : 0;
+    const bx = Math.sin(s.bobPhase) * 0.016 * amp;
+    const by = Math.sin(s.bobPhase * 2) * 0.0075 * amp - 0.004 * amp;
+    const roll = Math.sin(s.bobPhase) * 0.035 * amp;
     this.swayX = damp(this.swayX, clamp(-s.lookDX * 0.0006, -0.03, 0.03), 10, dt);
     this.swayY = damp(this.swayY, clamp(s.lookDY * 0.0006, -0.03, 0.03), 10, dt);
     this.root.position.set(bx + this.swayX, by + this.swayY, 0);
-    this.root.rotation.set(this.swayY * 0.8, this.swayX * 1.2, 0);
+    this.root.rotation.set(this.swayY * 0.8 + Math.cos(s.bobPhase * 2) * 0.012 * amp, this.swayX * 1.2, roll);
 
     // Logs ride on the left arm (hidden while the bow needs that hand).
     const showLogs = this.logCount > 0 && this.current !== 'bow';

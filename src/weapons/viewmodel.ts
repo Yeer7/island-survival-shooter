@@ -114,9 +114,10 @@ export class ViewModel {
 
     const axe = buildAxe();
     axe.position.set(0, 0, -0.01);
-    // Turned on the handle so the head shows its face while the edge still leads the swing.
-    axe.rotation.set(-0.35, -0.75, 0.12, 'XZY');
-    axe.scale.setScalar(0.85);
+    // 3/4 view: turned on the handle so the polished edge, the handle's curve and the
+    // spike / hammer behind all read, with the edge still leading the swing.
+    axe.rotation.set(-0.15, -1.1, 0.28, 'XZY');
+    axe.scale.setScalar(1.0);
     const flameAxe = buildTacticalAxe();
     flameAxe.position.copy(axe.position);
     flameAxe.rotation.copy(axe.rotation);

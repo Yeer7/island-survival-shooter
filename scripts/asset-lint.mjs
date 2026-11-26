@@ -167,6 +167,7 @@ if (isMain) {
       const problems = [];
       const name = path.basename(f);
       if (f.endsWith('.ogg') && buf.subarray(0, 4).toString('latin1') !== 'OggS') problems.push('not an Ogg file');
+      if (f.endsWith('.mp3') && buf.subarray(0, 3).toString('latin1') !== 'ID3' && !(buf[0] === 0xff && (buf[1] & 0xe0) === 0xe0)) problems.push('not an MP3 file');
       if (buf.length > 150 * 1024) problems.push(`${(buf.length / 1024).toFixed(0)} KB > 150 KB`);
       if (!licence.includes(name)) problems.push('missing from ASSETS_LICENSE.md');
       const m = byName.get(name);

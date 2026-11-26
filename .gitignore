@@ -5,3 +5,5 @@ dist
 .env
 .env.*
 .opengame/
+# Raw sound recordings (picked by ear, mastered by scripts/master_audio.py)
+Soms/

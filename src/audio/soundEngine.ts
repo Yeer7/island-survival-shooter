@@ -2,34 +2,40 @@ import { clamp } from '../core/math';
 import type { Surface } from '../world/terrain';
 
 /**
- * Sound for the game. Impacts, chops, swings, creaks, crashes and footsteps play real
- * recorded CC0 samples (Kenney Impact Sounds / RPG Audio, mastered by
- * scripts/master_audio.py into public/assets/audio); they decode in the background after
- * the first press, and until a family has decoded (or if it fails) the old synthesised
- * version plays instead. Everything else is synthesised: noise bursts and oscillators
- * through filters and envelopes, and the ambience is looping filtered noise with slow LFOs.
+ * Sound for the game. The ambience (sea, forest by day, forest by night, campfire) and
+ * the axe, swing, tree and footsteps are real recordings picked by ear by the owner
+ * (Freesound, CC0 1.0); flesh, thuds, breaking wood and knocks are Kenney CC0 takes. All
+ * are mastered by scripts/master_audio.py into mono MP3 in public/assets/audio (MP3
+ * plays in every browser, Safari included). They decode in the background after the
+ * first press; until a one-shot family has decoded (or if it fails) a synthesised
+ * version plays instead. Everything else is synthesised with the Web Audio API.
  */
 
-/** Sample families and their take counts (files are `<family>_<n>.ogg`). */
+/** One-shot families and their take counts (files are `<family>_<n>.mp3`). */
 const BANK: Record<string, number> = {
-  chop: 4,
-  whoosh: 3,
-  creak: 2,
-  crash: 2,
+  chop: 1,
+  whoosh: 1,
+  creak: 1,
+  crash: 1,
   hit: 4,
   thud: 3,
   break: 3,
   knock: 3,
-  step_grass: 4,
-  step_wood: 4,
-  step_stone: 4,
-  step_sand: 4,
+  step_grass: 5,
+  step_wood: 5,
+  step_stone: 5,
+  step_sand: 5,
 };
+/** Looping ambience beds (`<name>.mp3`). */
+const LOOPS = ['sea', 'forest_day', 'forest_night', 'campfire'] as const;
+type Loop = (typeof LOOPS)[number];
 
 interface PlayOpts {
   gain: number;
-  /** Base playback rate before the ±7% variation. */
+  /** Base playback rate before the per-play variation. */
   rate?: number;
+  /** Per-play rate spread (default ±7%; the owner's picked recordings stay near their own pitch). */
+  vary?: number;
   when?: number;
   toEcho?: number;
   /** Low-pass cutoff (Hz) for distance. */
@@ -41,18 +47,15 @@ export class SoundEngine {
   private sfx!: GainNode;
   private noise!: AudioBuffer;
   private echo!: DelayNode;
-  private seaGain!: GainNode;
-  private windGain!: GainNode;
-  private fireGain!: GainNode;
-  private crickets!: GainNode;
-  private nextCrackle = 0;
+  /** One gain per ambience bed; the beds start when their recording has decoded. */
+  private loopGain = {} as Record<Loop, GainNode>;
   private fireLevel = 0;
   /** Decoded takes per family; a family is absent until all its takes decoded. */
   private bank = new Map<string, AudioBuffer[]>();
   /** Last take played per family, so the same take never plays twice in a row. */
   private lastTake = new Map<string, number>();
   /** Sample loading report (for checks): decoded families, failures, samples played. */
-  readonly sampleStats = { families: 0, failed: 0, played: 0, fallbacks: 0 };
+  readonly sampleStats = { families: 0, loops: 0, failed: 0, played: 0, fallbacks: 0 };
 
   get ready(): boolean {
     return this.ctx !== null;
@@ -126,7 +129,7 @@ export class SoundEngine {
     const ctx = this.ctx!;
     for (const [family, n] of Object.entries(BANK)) {
       const takes = Array.from({ length: n }, (_, i) =>
-        fetch(`assets/audio/${family}_${i}.ogg`)
+        fetch(`assets/audio/${family}_${i}.mp3`)
           .then((r) => {
             if (!r.ok) throw new Error(`${r.status}`);
             return r.arrayBuffer();
@@ -163,7 +166,8 @@ export class SoundEngine {
     const t = ctx.currentTime + (o.when ?? 0);
     const s = ctx.createBufferSource();
     s.buffer = takes[i];
-    s.playbackRate.value = (o.rate ?? 1) * (0.93 + Math.random() * 0.14);
+    const vary = o.vary ?? 0.07;
+    s.playbackRate.value = (o.rate ?? 1) * (1 - vary + Math.random() * vary * 2);
     const g = ctx.createGain();
     g.gain.value = o.gain * Math.pow(10, ((Math.random() * 2 - 1) * 1.5) / 20);
     let head: AudioNode = s;
@@ -185,97 +189,66 @@ export class SoundEngine {
     return true;
   }
 
-  private src(): AudioBufferSourceNode {
-    const s = this.ctx!.createBufferSource();
-    s.buffer = this.noise;
-    s.loop = true;
-    return s;
-  }
-
+  /**
+   * The ambience beds: four looping recordings, each on its own gain (all silent until
+   * the mix in updateAmbience raises them). The loop points skip any codec padding at
+   * either end so the loop has no gap or click.
+   */
   private startAmbience(): void {
     const ctx = this.ctx!;
-    // Sea: low noise swelling with each wave.
-    const sea = this.src();
-    const seaLp = ctx.createBiquadFilter();
-    seaLp.type = 'lowpass';
-    seaLp.frequency.value = 520;
-    const swell = ctx.createGain();
-    swell.gain.value = 0.5;
-    const lfo = ctx.createOscillator();
-    lfo.frequency.value = 0.11;
-    const lfoGain = ctx.createGain();
-    lfoGain.gain.value = 0.35;
-    lfo.connect(lfoGain).connect(swell.gain);
-    this.seaGain = ctx.createGain();
-    this.seaGain.gain.value = 0;
-    sea.connect(seaLp).connect(swell).connect(this.seaGain).connect(this.master);
-    sea.start();
-    lfo.start();
-
-    // Wind: band-passed noise with a wandering centre frequency.
-    const wind = this.src();
-    const bp = ctx.createBiquadFilter();
-    bp.type = 'bandpass';
-    bp.frequency.value = 420;
-    bp.Q.value = 0.7;
-    const wl = ctx.createOscillator();
-    wl.frequency.value = 0.07;
-    const wlg = ctx.createGain();
-    wlg.gain.value = 180;
-    wl.connect(wlg).connect(bp.frequency);
-    this.windGain = ctx.createGain();
-    this.windGain.gain.value = 0.05;
-    wind.connect(bp).connect(this.windGain).connect(this.master);
-    wind.start(0, 0.7);
-    wl.start();
-
-    // Fire bed: a soft roar, crackles are scheduled on top.
-    const fire = this.src();
-    const fl = ctx.createBiquadFilter();
-    fl.type = 'lowpass';
-    fl.frequency.value = 300;
-    this.fireGain = ctx.createGain();
-    this.fireGain.gain.value = 0;
-    fire.connect(fl).connect(this.fireGain).connect(this.master);
-    fire.start(0, 1.3);
-
-    // Night crickets: an amplitude-modulated high tone.
-    const osc = ctx.createOscillator();
-    osc.frequency.value = 4300;
-    const am = ctx.createGain();
-    am.gain.value = 0;
-    const chirp = ctx.createOscillator();
-    chirp.type = 'square';
-    chirp.frequency.value = 14;
-    const chirpGain = ctx.createGain();
-    chirpGain.gain.value = 0.5;
-    chirp.connect(chirpGain).connect(am.gain);
-    const slow = ctx.createOscillator();
-    slow.frequency.value = 0.6;
-    const slowGain = ctx.createGain();
-    slowGain.gain.value = 0.5;
-    slow.connect(slowGain).connect(am.gain);
-    this.crickets = ctx.createGain();
-    this.crickets.gain.value = 0;
-    osc.connect(am).connect(this.crickets).connect(this.master);
-    osc.start();
-    chirp.start();
-    slow.start();
+    for (const name of LOOPS) {
+      const g = ctx.createGain();
+      g.gain.value = 0;
+      g.connect(this.master);
+      this.loopGain[name] = g;
+      fetch(`assets/audio/${name}.mp3`)
+        .then((r) => {
+          if (!r.ok) throw new Error(`${r.status}`);
+          return r.arrayBuffer();
+        })
+        .then((b) => ctx.decodeAudioData(b))
+        .then((buf) => {
+          const d = buf.getChannelData(0);
+          let a = 0;
+          let z = d.length - 1;
+          while (a < d.length && Math.abs(d[a]) < 1e-4) a++;
+          while (z > a && Math.abs(d[z]) < 1e-4) z--;
+          const src = ctx.createBufferSource();
+          src.buffer = buf;
+          src.loop = true;
+          src.loopStart = a / buf.sampleRate;
+          src.loopEnd = (z + 1) / buf.sampleRate;
+          src.connect(g);
+          // Each bed starts at a different point so they never pulse together.
+          src.start(0, src.loopStart + Math.random() * (src.loopEnd - src.loopStart) * 0.8);
+          this.sampleStats.loops++;
+        })
+        .catch(() => {
+          this.sampleStats.failed++;
+        });
+    }
   }
 
-  /** Per-frame ambience mix. */
+  /**
+   * Per-frame ambience mix, kept soft and in the background. The sea is exactly silent
+   * inside the forest and only rises near the shore; day and night forest beds cross-fade
+   * with the light; the campfire bed follows the nearest fire.
+   */
   updateAmbience(seaProximity: number, fireProximity: number, night: number, altitude: number): void {
     if (!this.ctx) return;
     const t = this.ctx.currentTime;
-    this.seaGain.gain.setTargetAtTime(0.03 + seaProximity * 0.3, t, 0.4);
-    this.windGain.gain.setTargetAtTime(0.04 + clamp(altitude / 40, 0, 1) * 0.12, t, 0.6);
+    const g = this.loopGain;
+    // seaProximity is 1 at the waterline and fades over 130 m; below 0.55 (about 60 m
+    // inland) the sea bed is at zero.
+    const shore = seaProximity <= 0.55 ? 0 : (seaProximity - 0.55) / 0.45;
+    const sea = shore * shore * (3 - 2 * shore);
+    g.sea.gain.setTargetAtTime(sea * 0.55, t, 0.6);
+    const inland = 1 - sea * 0.6;
+    const breeze = 1 + clamp(altitude / 40, 0, 1) * 0.4;
+    g.forest_day.gain.setTargetAtTime((1 - night) * 0.34 * inland * breeze, t, 1.2);
+    g.forest_night.gain.setTargetAtTime(night * 0.36 * inland, t, 1.2);
     this.fireLevel = fireProximity;
-    this.fireGain.gain.setTargetAtTime(fireProximity * 0.18, t, 0.3);
-    this.crickets.gain.setTargetAtTime(night * 0.006 * (1 - seaProximity * 0.5), t, 1.5);
-    if (fireProximity > 0.05 && t > this.nextCrackle) {
-      this.crackle(fireProximity);
-      this.nextCrackle = t + 0.05 + Math.random() * 0.25;
-    }
+    g.campfire.gain.setTargetAtTime(fireProximity * 0.55, t, 0.3);
   }
 
   private burst(opts: {
@@ -338,14 +311,14 @@ export class SoundEngine {
 
   whoosh(): void {
     if (!this.ctx) return;
-    if (this.play('whoosh', { gain: 0.7 })) return;
+    if (this.play('whoosh', { gain: 0.65, vary: 0.03 })) return;
     this.burst({ type: 'bandpass', freq: 500, endFreq: 1600, q: 1.2, gain: 0.12, attack: 0.08, decay: 0.12 });
   }
 
   chopWood(): void {
     if (!this.ctx) return;
     // The player's own blow leads the mix: the loudest regular cue, a little forest slap-back.
-    if (this.play('chop', { gain: 1.0, toEcho: 0.12 })) return;
+    if (this.play('chop', { gain: 1.0, toEcho: 0.1, vary: 0.03 })) return;
     const p = 0.9 + Math.random() * 0.2;
     this.burst({ type: 'bandpass', freq: 1100 * p, q: 1.4, gain: 0.7, decay: 0.07, toEcho: 0.15 });
     this.tone({ f0: 190 * p, f1: 80, gain: 0.55, decay: 0.12 });
@@ -404,7 +377,7 @@ export class SoundEngine {
 
   treeCreak(): void {
     if (!this.ctx) return;
-    if (this.play('creak', { gain: 0.9, rate: 0.95 })) return;
+    if (this.play('creak', { gain: 0.85, vary: 0.02 })) return;
     const ctx = this.ctx;
     const t = ctx.currentTime;
     const o = ctx.createOscillator();
@@ -436,7 +409,7 @@ export class SoundEngine {
     if (!this.ctx) return;
     const v = clamp(1 - distance / 60, 0.15, 1);
     // Far away: quieter, duller (air takes the highs) and wetter in the forest echo.
-    if (this.play('crash', { gain: 0.95 * v, toEcho: 0.25 + 0.25 * (1 - v), lowpass: 18000 * Math.exp(-distance / 35) + 600 })) {
+    if (this.play('crash', { gain: 0.95 * v, vary: 0.02, toEcho: 0.2 + 0.25 * (1 - v), lowpass: 18000 * Math.exp(-distance / 35) + 600 })) {
       // A low thump under the recording so it carries weight on small speakers.
       this.tone({ f0: 70, f1: 32, gain: 0.35 * v, decay: 0.5 });
       return;
@@ -678,7 +651,7 @@ export class SoundEngine {
     const j = 0.9 + Math.random() * 0.2;
     // Recorded steps per surface (quiet: the player's body stays under the action).
     const fam = surface === 'grass' ? 'step_grass' : surface === 'wood' ? 'step_wood' : surface === 'rock' ? 'step_stone' : surface === 'sand' ? 'step_sand' : '';
-    if (fam && this.play(fam, { gain: (surface === 'wood' ? 0.42 : 0.5) * v, toEcho: indoor && surface === 'rock' ? 0.45 : 0 })) return;
+    if (fam && this.play(fam, { gain: 0.42 * v, vary: 0.04, toEcho: indoor && surface === 'rock' ? 0.45 : 0 })) return;
     switch (surface) {
       case 'sand':
         // Soft thud plus a short crunch of grains.
@@ -736,10 +709,5 @@ export class SoundEngine {
     if (!this.ctx) return;
     this.burst({ type: 'bandpass', freq: 900, endFreq: 2600, q: 0.8, gain: 0.16, attack: 0.02, decay: 0.3 });
     for (let i = 0; i < 4; i++) this.burst({ type: 'highpass', freq: 3000 + Math.random() * 2500, gain: 0.06, decay: 0.02, when: 0.04 + i * 0.05 });
-  }
-
-  private crackle(level: number): void {
-    this.burst({ type: 'highpass', freq: 2500 + Math.random() * 3000, gain: (0.05 + Math.random() * 0.1) * level, decay: 0.02 + Math.random() * 0.03 });
-    void this.fireLevel;
   }
 }

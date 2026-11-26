@@ -10,7 +10,9 @@ const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls = '', parent?: HT
   return e;
 };
 
-const CARDINALS: Record<number, string> = { 0: 'N', 45: 'NE', 90: 'L', 135: 'SE', 180: 'S', 225: 'SO', 270: 'O', 315: 'NO' };
+const CARDINALS_PT: Record<number, string> = { 0: 'N', 45: 'NE', 90: 'L', 135: 'SE', 180: 'S', 225: 'SO', 270: 'O', 315: 'NO' };
+const CARDINALS_EN: Record<number, string> = { 0: 'N', 45: 'NE', 90: 'E', 135: 'SE', 180: 'S', 225: 'SW', 270: 'W', 315: 'NW' };
+const cardinal = (d: number): string | undefined => (tr('pt', 'en') === 'pt' ? CARDINALS_PT : CARDINALS_EN)[d];
 
 export interface CompassTarget {
   name: string;
@@ -85,8 +87,9 @@ export class Hud {
     const compass = el('div', 'hud-compass', this.root);
     const strip = el('div', 'strip', compass);
     for (let d = 0; d < 360; d += 15) {
-      if (CARDINALS[d]) {
-        const l = el('div', `lbl ${d % 90 ? 'minor' : ''} ${d === 0 ? 'north' : ''}`, strip, CARDINALS[d]);
+      if (cardinal(d)) {
+        const l = el('div', `lbl ${d % 90 ? 'minor' : ''} ${d === 0 ? 'north' : ''}`, strip, cardinal(d));
+        onLangChange(() => (l.textContent = cardinal(d) ?? ''));
         this.compassItems.push({ el: l, deg: d });
       } else {
         const t = el('div', 'tick', strip);

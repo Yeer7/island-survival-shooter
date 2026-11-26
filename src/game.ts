@@ -1734,12 +1734,20 @@ export class Game implements CombatWorld {
   private updateAudio(): void {
     const p = this.player.pos;
     const coast = this.terrain.coastDistance(p.x, p.z);
-    const sea = 1 - smoothstep(0, 130, coast);
+    // Biomes: the sea is heard only on the beach (sand or the water's edge near the
+    // coast) and is exactly silent once the ground rises into the grass; inside the cave
+    // only the cave bed plays.
+    const cave = this.indoors || this.cave.isInside(p) ? 1 : 0;
+    const ground = this.terrain.height(p.x, p.z);
+    const top = this.terrain.beachTopAt(p.z);
+    const onSand = 1 - smoothstep(top - 0.35, top + 0.08, ground);
+    const nearSea = 1 - smoothstep(55, 80, coast);
+    const sea = cave ? 0 : onSand * nearSea;
     let fire = 1 - smoothstep(3, 32, p.distanceTo(this.crash.firePos));
     fire = Math.max(fire, (1 - smoothstep(2, 20, p.distanceTo(this.village.fire.origin))) * 0.7);
     for (const pl of this.base.placed) if (pl.kind === 'campfire') fire = Math.max(fire, (1 - smoothstep(1, 14, pl.pos.distanceTo(p))) * 0.6);
     if (this.inv.selected === 'torch') fire = Math.max(fire, 0.25);
-    this.sound.updateAmbience(sea, fire, this.sky.night, p.y);
+    this.sound.updateAmbience(sea, fire, this.sky.night, p.y, cave);
   }
 
   private updateHud(dt: number): void {

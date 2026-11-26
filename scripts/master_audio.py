@@ -149,6 +149,7 @@ amb = [
     ('forest_day', '530908', 'Nox_Sound', -29),
     ('forest_night', '587907', 'timothyd4y', -29),
     ('campfire', '620324', 'marb7e', -25),
+    ('cave', '553080', 'Nox_Sound', -28),
 ]
 for name, sid, author, target in amb:
     x = soms(sid)

@@ -58,6 +58,20 @@
    "bytes": 140539
   },
   {
+   "file": "cave.mp3",
+   "family": "ambience",
+   "source": "553080__nox_sound__ambiance_atmosphere_cave_loop_stereo.ogg",
+   "url": "https://freesound.org/s/553080/",
+   "author": "Nox_Sound",
+   "note": "14 s loop from 1.0 s, folded 1.5 s crossfade",
+   "seconds": 14.0,
+   "peakDb": -8.6,
+   "maxRms50msDb": -24.44,
+   "rmsDb": -28.44,
+   "channels": 1,
+   "bytes": 140539
+  },
+  {
    "file": "chop_0.mp3",
    "family": "chop",
    "source": "421928__micahlg__chopping-wood-01.wav",

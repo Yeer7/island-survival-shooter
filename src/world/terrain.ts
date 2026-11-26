@@ -160,12 +160,21 @@ export class Terrain {
     return Math.hypot(x - LAKE_CENTER.x, z - LAKE_CENTER.z) < LAKE_RADIUS * 1.6 ? LAKE_LEVEL : SEA_LEVEL;
   }
 
+  /**
+   * Height (m) up to which the shore is sand. The south beach is a little higher; the
+   * whole strip is 30% narrower than it used to be (was 2.3-2.5 m), so the grass and
+   * the forest edge come closer to the water.
+   */
+  beachTopAt(z: number): number {
+    return (2.3 + smoothstep(40, 190, z) * 0.2) * 0.7;
+  }
+
   surfaceAt(x: number, z: number): Surface {
     const h = this.height(x, z);
     const wl = this.waterLevelAt(x, z);
     if (h < wl - 0.25) return 'water';
     if (this.slope(x, z) > 0.32) return 'rock';
-    const beachTop = 2.3 + smoothstep(40, 190, z) * 0.2;
+    const beachTop = this.beachTopAt(z);
     if (h < beachTop || (wl === LAKE_LEVEL && h < LAKE_LEVEL + 0.7)) return 'sand';
     return 'grass';
   }
@@ -176,7 +185,8 @@ export class Terrain {
     const v = n.noise(x * 0.08, z * 0.08) * 0.5 + 0.5;
     const south = smoothstep(40, 190, z);
     const north = smoothstep(30, 170, -z);
-    const beachTop = 2.3 + south * 0.2;
+    const beachTop = this.beachTopAt(z);
+    void south;
     const nearLake = Math.hypot(x - LAKE_CENTER.x, z - LAKE_CENTER.z) < LAKE_RADIUS * 1.6;
 
     this.lastSand = 1;
@@ -188,7 +198,7 @@ export class Terrain {
     } else {
       const forest = smoothstep(-0.2, 0.4, n.noise(x * 0.012 + 70, z * 0.012 - 30));
       out.copy(c.grass).lerp(c.forest, forest * 0.8 + v * 0.2);
-      const sandMix = 1 - smoothstep(beachTop - 0.4, beachTop + 0.6, h);
+      const sandMix = 1 - smoothstep(beachTop - 0.3, beachTop + 0.4, h);
       out.lerp(c.sand, sandMix);
       this.lastSand = sandMix;
     }

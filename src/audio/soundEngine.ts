@@ -27,7 +27,7 @@ const BANK: Record<string, number> = {
   step_sand: 5,
 };
 /** Looping ambience beds (`<name>.mp3`). */
-const LOOPS = ['sea', 'forest_day', 'forest_night', 'campfire'] as const;
+const LOOPS = ['sea', 'forest_day', 'forest_night', 'campfire', 'cave'] as const;
 type Loop = (typeof LOOPS)[number];
 
 interface PlayOpts {
@@ -230,23 +230,22 @@ export class SoundEngine {
   }
 
   /**
-   * Per-frame ambience mix, kept soft and in the background. The sea is exactly silent
-   * inside the forest and only rises near the shore; day and night forest beds cross-fade
-   * with the light; the campfire bed follows the nearest fire.
+   * Per-frame ambience mix by biome, kept soft and in the background.
+   * `sea` (0..1) is how much the player stands on the beach: it is 0 anywhere off the
+   * sand, so the sea bed is silent in the forest. The forest beds (day/night with the
+   * light) dip on open sand and vanish in the cave; `cave` (0..1) brings in the cave bed.
    */
-  updateAmbience(seaProximity: number, fireProximity: number, night: number, altitude: number): void {
+  updateAmbience(sea: number, fireProximity: number, night: number, altitude: number, cave = 0): void {
     if (!this.ctx) return;
     const t = this.ctx.currentTime;
     const g = this.loopGain;
-    // seaProximity is 1 at the waterline and fades over 130 m; below 0.55 (about 60 m
-    // inland) the sea bed is at zero.
-    const shore = seaProximity <= 0.55 ? 0 : (seaProximity - 0.55) / 0.45;
-    const sea = shore * shore * (3 - 2 * shore);
-    g.sea.gain.setTargetAtTime(sea * 0.55, t, 0.6);
-    const inland = 1 - sea * 0.6;
+    const outside = 1 - cave;
+    g.sea.gain.setTargetAtTime(sea * 0.55 * outside, t, 0.7);
+    const forest = (1 - sea * 0.7) * outside;
     const breeze = 1 + clamp(altitude / 40, 0, 1) * 0.4;
-    g.forest_day.gain.setTargetAtTime((1 - night) * 0.34 * inland * breeze, t, 1.2);
-    g.forest_night.gain.setTargetAtTime(night * 0.36 * inland, t, 1.2);
+    g.forest_day.gain.setTargetAtTime((1 - night) * 0.34 * forest * breeze, t, 1.0);
+    g.forest_night.gain.setTargetAtTime(night * 0.36 * forest, t, 1.0);
+    g.cave.gain.setTargetAtTime(cave * 0.5, t, 0.8);
     this.fireLevel = fireProximity;
     g.campfire.gain.setTargetAtTime(fireProximity * 0.55, t, 0.3);
   }

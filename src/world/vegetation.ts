@@ -201,8 +201,8 @@ export class Forest {
       const x = (rand() - 0.5) * 520;
       const z = (rand() - 0.5) * 520;
       const h = terrain.height(x, z);
-      const beachTop = 2.3 + smoothstep(40, 190, z) * 0.2;
-      if (h < beachTop + 1.0 || h > 34) continue;
+      const beachTop = terrain.beachTopAt(z);
+      if (h < beachTop + 0.8 || h > 34) continue;
       if (terrain.slope(x, z) > 0.27) continue;
       if (Math.hypot(x - LAKE_CENTER.x, z - LAKE_CENTER.z) < LAKE_RADIUS * 1.2) continue;
       if (exclusions.some((e) => Math.hypot(x - e.x, z - e.z) < e.r)) continue;

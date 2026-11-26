@@ -1,5 +1,9 @@
 import * as THREE from 'three';
+import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
+import { bakeStatic } from '../core/bake';
 import { mulberry32 } from '../core/math';
+import { logMaterials } from '../weapons/models';
+import { cabinWallTexture, carpetTexture, fuselageTexture, seatFabricTexture, tailLogoTexture } from './airliner';
 import { PuffEmitter } from '../fx/particles';
 import { ColliderGrid } from './colliders';
 import { ItemType } from './pickups';
@@ -28,6 +32,14 @@ const CONTENTS: ItemType[][] = [
   ['cloth', 'food'],
   ['bandage', 'food'],
 ];
+/** Airliner section layout in the wreck's local frame (metres; +X toward the nose). */
+const TORN = -5.8;
+const NOSE_X = 5.6;
+const AXIS_Y = 2.0;
+const RADIUS = 2.0;
+const FLOOR = 0.75;
+const FLOOR_HALF = 1.5;
+
 const CASE_COLORS = [0x2f4f7f, 0x7a2e2e, 0x2d2d2d, 0x6b5b3e, 0x3e6b4f, 0x8a6a2a, 0x5a3f6b, 0x404a52];
 
 /** The broken airliner on the south beach: wake-up point, smoke, fire and luggage. */
@@ -43,6 +55,18 @@ export class CrashSite {
   readonly fireLight: THREE.PointLight;
   private yaw: number;
   private flicker = 0;
+  /** Red emergency light pulsing inside the cabin (added to the scene by the game). */
+  emergencyLight!: THREE.PointLight;
+  /** Called with a world point when a severed cable throws sparks. */
+  onSpark: ((p: THREE.Vector3) => void) | null = null;
+  /** Spots at the edge of the clearing for breakable effigies. */
+  readonly effigySpots: { x: number; z: number; yaw: number }[] = [];
+  private seatSpots: { x: number; z: number }[] = [];
+  private sparkLocal = new THREE.Vector3();
+  private sparkT = 2;
+  private screenMat: THREE.MeshStandardMaterial | null = null;
+  private fan = new THREE.Group();
+  private engineLocal = new THREE.Vector3();
 
   constructor(private terrain: Terrain, colliders: ColliderGrid) {
     // A clearing in the pine forest of the centre-south (like The Forest): the flattest
@@ -72,97 +96,344 @@ export class CrashSite {
     this.group.rotation.y = this.yaw;
     this.dirt = this.buildDirtPatch(19);
 
-    const hull = std(0xe8e8e4, 0.55, 0.15);
-    const stripe = std(0x1f5fa8, 0.5, 0.1);
-    const charred = std(0x1d1b19, 0.95);
-    const inner = std(0x2a2826, 0.95, 0, THREE.BackSide);
-    const glass = std(0x0e1a24, 0.15, 0.6);
-    const metal = std(0x9aa0a6, 0.45, 0.6);
-
-    const add = (mesh: THREE.Mesh, cast = true) => {
-      mesh.castShadow = cast;
-      mesh.receiveShadow = true;
-      this.group.add(mesh);
-      return mesh;
+    // ------------------------------------------------------------ the airliner
+    // Local frame: +X toward the nose, the torn end at X = TORN, the cabin floor at FLOOR.
+    const rand = mulberry32(31);
+    const L = NOSE_X - TORN;
+    const layout = { length: L, windows: [] as number[], windowAngle: 0.3 };
+    for (let m = 1.0; m < L - 1.6; m += 0.92) layout.windows.push(m);
+    const skin = new THREE.MeshStandardMaterial({ map: fuselageTexture(layout), roughness: 0.42, metalness: 0.55, alphaTest: 0.5, side: THREE.FrontSide });
+    const wall = new THREE.MeshStandardMaterial({ map: cabinWallTexture(layout), roughness: 0.85, metalness: 0, alphaTest: 0.5, side: THREE.BackSide });
+    const metal = new THREE.MeshStandardMaterial({ color: 0xa9adb2, roughness: 0.4, metalness: 0.75 });
+    const charred = new THREE.MeshStandardMaterial({ color: 0x1d1b19, roughness: 0.95 });
+    const sootMetal = new THREE.MeshStandardMaterial({ color: 0x4a4a48, roughness: 0.6, metalness: 0.5 });
+    const glass = new THREE.MeshStandardMaterial({ color: 0x0e1a24, roughness: 0.08, metalness: 0.6 });
+    const white = new THREE.MeshStandardMaterial({ color: 0xe4e6e8, roughness: 0.4, metalness: 0.5 });
+    const root = new THREE.Group();
+    this.group.add(root);
+    const put = <T extends THREE.Object3D>(o: T, parent: THREE.Object3D = root): T => {
+      o.traverse((m) => {
+        if ((m as THREE.Mesh).isMesh) m.castShadow = m.receiveShadow = true;
+      });
+      parent.add(o);
+      return o;
     };
 
-    // Front fuselage section, half buried and rolled.
-    const front = new THREE.Group();
-    front.position.set(0, 1.15, 0);
-    front.rotation.set(0.12, 0, -0.04);
-    this.group.add(front);
-    const bodyGeo = new THREE.CylinderGeometry(1.7, 1.7, 11, 24, 1, true);
-    bodyGeo.rotateZ(Math.PI / 2);
-    const body = new THREE.Mesh(bodyGeo, hull);
-    const bodyIn = new THREE.Mesh(bodyGeo, inner);
-    body.castShadow = body.receiveShadow = true;
-    front.add(body, bodyIn);
-    for (const th of [0.9, Math.PI + 0.9]) {
-      const sg = new THREE.CylinderGeometry(1.715, 1.715, 11, 24, 1, true, th, 0.28);
-      sg.rotateZ(Math.PI / 2);
-      front.add(new THREE.Mesh(sg, stripe));
-    }
-    const noseGeo = new THREE.SphereGeometry(1.7, 24, 12, 0, Math.PI * 2, 0, Math.PI / 2);
-    noseGeo.scale(1, 1.6, 1);
+    // Fuselage: outside livery and the cabin wall inside, windows and tear cut from the alpha.
+    const cyl = (r: number) => {
+      const g = new THREE.CylinderGeometry(r, r, L, 56, 20, true);
+      g.rotateZ(-Math.PI / 2);
+      g.rotateX(Math.PI);
+      g.translate((NOSE_X + TORN) / 2, AXIS_Y, 0);
+      return g;
+    };
+    put(new THREE.Mesh(cyl(RADIUS), skin));
+    put(new THREE.Mesh(cyl(RADIUS - 0.07), wall));
+    // Nose cone with the cockpit glazing.
+    const noseGeo = new THREE.SphereGeometry(RADIUS, 40, 16, 0, Math.PI * 2, 0, Math.PI / 2);
+    noseGeo.scale(1, 1.45, 1);
     noseGeo.rotateZ(-Math.PI / 2);
-    const nose = new THREE.Mesh(noseGeo, hull);
-    nose.position.x = 5.5;
-    nose.castShadow = true;
-    front.add(nose);
-    const cockpit = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.45, 2.2), glass);
-    cockpit.position.set(6.3, 0.75, 0);
-    cockpit.rotation.z = -0.5;
-    front.add(cockpit);
-    for (let i = 0; i < 9; i++) {
-      for (const side of [-1, 1]) {
-        const w = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.4, 0.05), glass);
-        w.position.set(-4 + i * 1.05, 0.55, side * 1.62);
-        w.rotation.x = side * 0.3;
-        front.add(w);
+    noseGeo.translate(NOSE_X, AXIS_Y, 0);
+    put(new THREE.Mesh(noseGeo, white));
+    const noseIn = new THREE.Mesh(noseGeo, new THREE.MeshStandardMaterial({ color: 0x3a3c40, roughness: 0.9, side: THREE.BackSide }));
+    put(noseIn);
+    for (const s of [-1, 1]) {
+      for (let k = 0; k < 2; k++) {
+        const w = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.38, 0.05), glass);
+        w.position.set(NOSE_X + 1.5 + k * 0.38, AXIS_Y + 1.28 - k * 0.24, s * (0.72 + k * 0.3));
+        w.rotation.set(s * 0.45, s * (0.35 + k * 0.4), -0.75, 'YXZ');
+        put(w);
       }
     }
-    const rim = new THREE.Mesh(new THREE.TorusGeometry(1.7, 0.16, 6, 18), charred);
-    rim.rotation.y = Math.PI / 2;
-    rim.position.x = -5.5;
-    front.add(rim);
+    // Cabin floor (carpet) with emergency strips down the aisle.
+    const carpet = carpetTexture();
+    carpet.repeat.set(L / 1.5, 2);
+    const floor = new THREE.Mesh(new THREE.PlaneGeometry(L + 0.2, FLOOR_HALF * 2), new THREE.MeshStandardMaterial({ map: carpet, roughness: 0.95 }));
+    floor.rotation.x = -Math.PI / 2;
+    floor.position.set((NOSE_X + TORN) / 2, FLOOR, 0);
+    put(floor);
+    const strip = new THREE.MeshStandardMaterial({ color: 0x9cffb4, emissive: 0x3cff78, emissiveIntensity: 1.4 });
+    for (let x = TORN + 0.4; x < NOSE_X - 0.6; x += 0.35) {
+      if (rand() < 0.18) continue;
+      for (const s of [-1, 1]) {
+        const e = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.015, 0.03), strip);
+        e.position.set(x, FLOOR + 0.008, s * 0.48);
+        root.add(e);
+      }
+    }
+    // Seats: double seats either side of the aisle, a few knocked crooked.
+    const fabric = new THREE.MeshStandardMaterial({ map: seatFabricTexture(), roughness: 0.9 });
+    const cover = new THREE.MeshStandardMaterial({ color: 0xe8e4da, roughness: 0.9 });
+    const frame = new THREE.MeshStandardMaterial({ color: 0x55585e, roughness: 0.5, metalness: 0.5 });
+    const seatRow = (x: number, side: number, tilt: number) => {
+      const row = new THREE.Group();
+      row.position.set(x, FLOOR, side * 1.06);
+      row.rotation.set(tilt * 0.4, 0, tilt);
+      for (const k of [-0.24, 0.24]) {
+        const base = new THREE.Mesh(new RoundedBoxGeometry(0.48, 0.13, 0.46, 2, 0.04), fabric);
+        base.position.set(0, 0.44, k);
+        const back = new THREE.Mesh(new RoundedBoxGeometry(0.1, 0.72, 0.46, 2, 0.04), fabric);
+        back.position.set(-0.24, 0.84, k);
+        back.rotation.z = -0.16;
+        const head = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.16, 0.38), cover);
+        head.position.set(-0.3, 1.13, k);
+        head.rotation.z = -0.16;
+        row.add(base, back, head);
+      }
+      for (const k of [-0.5, 0, 0.5]) {
+        const arm = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.05, 0.05), frame);
+        arm.position.set(0.02, 0.62, k * 0.96);
+        row.add(arm);
+      }
+      for (const k of [-0.35, 0.35]) {
+        const leg = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.38, 0.05), frame);
+        leg.position.set(0, 0.19, k);
+        row.add(leg);
+      }
+      put(row);
+    };
+    let ri = 0;
+    for (let x = TORN + 1.1; x < NOSE_X - 1.4; x += 0.84, ri++) {
+      for (const s of [-1, 1]) {
+        const broken = (ri === 2 && s > 0) || (ri === 5 && s < 0) || ri === 1;
+        seatRow(x, s, broken ? s * (0.12 + rand() * 0.18) : 0);
+        this.seatSpots.push({ x, z: s * 1.12 });
+      }
+    }
+    // Overhead bins, some hanging open.
+    for (const s of [-1, 1]) {
+      for (let x = TORN + 0.8; x < NOSE_X - 1.0; x += 1.25) {
+        const bin = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.36, 0.5), cover);
+        bin.position.set(x, AXIS_Y + 0.75, s * 1.28);
+        bin.rotation.x = s * 0.35;
+        put(bin);
+        const open = rand() < 0.45;
+        const door = new THREE.Mesh(new THREE.BoxGeometry(1.18, 0.34, 0.03), cover);
+        door.position.set(x, AXIS_Y + 0.75 + (open ? 0.22 : 0), s * (1.02 + (open ? 0.05 : 0)));
+        door.rotation.x = s * (open ? -0.9 : 0.35);
+        put(door);
+      }
+    }
+    // Ceiling light strip (dead) and dangling cables near the tear.
+    const ceil = new THREE.Mesh(new THREE.BoxGeometry(L - 1, 0.04, 0.5), cover);
+    ceil.position.set((NOSE_X + TORN) / 2, AXIS_Y + 1.92, 0);
+    put(ceil);
+    const cable = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.8 });
+    for (let k = 0; k < 6; k++) {
+      const x = TORN + 0.4 + rand() * 2.2;
+      const z = (rand() - 0.5) * 1.6;
+      const pts = [new THREE.Vector3(x, AXIS_Y + 1.85, z), new THREE.Vector3(x + (rand() - 0.5) * 0.3, AXIS_Y + 1.2, z + (rand() - 0.5) * 0.3), new THREE.Vector3(x + (rand() - 0.5) * 0.5, AXIS_Y + 0.6 + rand() * 0.5, z + (rand() - 0.5) * 0.4)];
+      put(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 8, 0.018, 4, false), cable));
+    }
+    this.sparkLocal.set(TORN + 1.2, AXIS_Y + 1.8, 0.5);
+    // Cockpit: instrument panel with dim screens, two control yokes.
+    const panel = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.55, 2.2), charred);
+    panel.position.set(NOSE_X + 0.9, FLOOR + 0.85, 0);
+    panel.rotation.z = 0.5;
+    put(panel);
+    this.screenMat = new THREE.MeshStandardMaterial({ color: 0x0a1e14, emissive: 0x2ad48a, emissiveIntensity: 0.6 });
+    for (const z of [-0.7, -0.25, 0.25, 0.7]) {
+      const sc = new THREE.Mesh(new THREE.PlaneGeometry(0.34, 0.24), this.screenMat);
+      sc.position.set(NOSE_X + 0.66, FLOOR + 0.98, z);
+      sc.rotation.set(0, -Math.PI / 2, 0.5, 'YXZ');
+      sc.userData.keep = true;
+      root.add(sc);
+    }
+    for (const z of [-0.55, 0.55]) {
+      const yoke = new THREE.Mesh(new THREE.TorusGeometry(0.13, 0.02, 5, 10, Math.PI), frame);
+      yoke.position.set(NOSE_X + 0.45, FLOOR + 0.85, z);
+      yoke.rotation.y = Math.PI / 2;
+      put(yoke);
+    }
+    for (const z of [-0.55, 0.55]) {
+      const pilot = new THREE.Mesh(new RoundedBoxGeometry(0.5, 0.9, 0.5, 2, 0.06), new THREE.MeshStandardMaterial({ color: 0x3a3a3a, roughness: 0.9 }));
+      pilot.position.set(NOSE_X - 0.2, FLOOR + 0.55, z);
+      put(pilot);
+    }
+    // The tear: exposed frames (ribs) and stringers, crumpled skin peeled outward.
+    for (const [x, arc] of [
+      [TORN + 0.15, 4.6],
+      [TORN - 0.35, 3.4],
+      [TORN - 0.8, 2.2],
+    ] as [number, number][]) {
+      const rib = new THREE.Mesh(new THREE.TorusGeometry(RADIUS - 0.04, 0.05, 6, 40, arc), metal);
+      rib.position.set(x, AXIS_Y, 0);
+      rib.rotation.set(0, Math.PI / 2, rand() * 6);
+      put(rib);
+    }
+    for (let k = 0; k < 14; k++) {
+      const a = (k / 14) * Math.PI * 2 + rand() * 0.2;
+      if (Math.sin(a) < -0.4) continue;
+      const len = 0.5 + rand() * 1.2;
+      const s = new THREE.Mesh(new THREE.BoxGeometry(len, 0.04, 0.06), metal);
+      s.position.set(TORN - len / 2 + 0.1, AXIS_Y + Math.sin(a) * (RADIUS - 0.05), Math.cos(a) * (RADIUS - 0.05));
+      s.rotation.set(a, 0, (rand() - 0.5) * 0.4, 'XYZ');
+      put(s);
+    }
+    for (let k = 0; k < 7; k++) {
+      const a = (k / 7) * Math.PI * 1.6 - 0.3;
+      const peel = new THREE.Mesh(new THREE.CylinderGeometry(RADIUS + 0.02, RADIUS + 0.02, 0.9 + rand() * 0.6, 6, 1, true, a, 0.55), skin);
+      peel.rotation.z = -Math.PI / 2;
+      peel.position.set(TORN - 0.3, AXIS_Y, 0);
+      const pivot = new THREE.Group();
+      pivot.add(peel);
+      pivot.position.set(0, 0, 0);
+      pivot.rotation.set((rand() - 0.5) * 0.3, (rand() - 0.5) * 0.25, (rand() - 0.5) * 0.2);
+      put(pivot);
+    }
+    // Debris ramp down from the torn floor (a fallen floor panel).
+    const ramp = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.08, 1.9), sootMetal);
+    ramp.position.set(TORN - 0.9, FLOOR / 2 - 0.02, 0);
+    ramp.rotation.z = Math.atan2(FLOOR, 1.9);
+    put(ramp);
 
-    // Wing toward the sea with a burning engine.
-    const wing = add(new THREE.Mesh(new THREE.BoxGeometry(2.8, 0.22, 11), hull));
-    wing.position.set(0.4, 0.55, 6.6);
-    wing.rotation.set(-0.06, 0.12, 0.05);
-    const engine = add(new THREE.Mesh(new THREE.CylinderGeometry(0.75, 0.6, 2.6, 14), charred));
-    engine.rotation.z = Math.PI / 2;
-    engine.position.set(0.9, 0.5, 5.2);
-    const intake = add(new THREE.Mesh(new THREE.TorusGeometry(0.7, 0.1, 6, 14), metal));
-    intake.rotation.y = Math.PI / 2;
-    intake.position.set(2.2, 0.5, 5.2);
+    // ------------------------------------------------------------ wing and engine
+    const wingG = new THREE.Group();
+    wingG.position.set(0.2, 0.28, 3.4);
+    wingG.rotation.set(0.04, -0.12, 0.05);
+    put(wingG);
+    const wingShape = new THREE.Shape();
+    wingShape.moveTo(0, 0);
+    wingShape.lineTo(-4.2, 0);
+    wingShape.lineTo(-6.2, 9.5);
+    wingShape.lineTo(-4.8, 9.5);
+    wingShape.lineTo(0, 0);
+    const wingGeo = new THREE.ExtrudeGeometry(wingShape, { depth: 0.22, bevelEnabled: true, bevelThickness: 0.06, bevelSize: 0.06, bevelSegments: 1 });
+    wingGeo.rotateX(Math.PI / 2);
+    put(new THREE.Mesh(wingGeo, white), wingG);
+    for (let k = 0; k < 3; k++) {
+      const flap = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.06, 2.4), white);
+      flap.position.set(-4.45 - k * 0.48, -0.25, 1.6 + k * 2.6);
+      flap.rotation.set(0, -0.2, -0.45 - k * 0.1);
+      put(flap, wingG);
+    }
+    const winglet = new THREE.Mesh(new THREE.BoxGeometry(1.2, 1.1, 0.1), new THREE.MeshStandardMaterial({ map: tailLogoTexture(), roughness: 0.4 }));
+    winglet.position.set(-5.6, 0.5, 9.5);
+    winglet.rotation.z = -0.3;
+    put(winglet, wingG);
+    // Engine nacelle with fan blades, spinner and exhaust, blackened.
+    const eng = new THREE.Group();
+    eng.position.set(-1.2, -0.15, 3.6);
+    wingG.add(eng);
+    const nacelle = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 0.72, 3.0, 28, 1, true), sootMetal);
+    nacelle.rotation.z = Math.PI / 2;
+    put(nacelle, eng);
+    const nacIn = new THREE.Mesh(new THREE.CylinderGeometry(0.86, 0.7, 3.0, 28, 1, true), charred);
+    nacIn.material = new THREE.MeshStandardMaterial({ color: 0x141312, roughness: 0.9, side: THREE.BackSide });
+    nacIn.rotation.z = Math.PI / 2;
+    put(nacIn, eng);
+    const lip = new THREE.Mesh(new THREE.TorusGeometry(0.88, 0.08, 8, 28), metal);
+    lip.rotation.y = Math.PI / 2;
+    lip.position.x = 1.5;
+    put(lip, eng);
+    const spinner = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.5, 14), metal);
+    spinner.rotation.z = -Math.PI / 2;
+    spinner.position.x = 1.25;
+    put(spinner, eng);
+    this.fan.position.set(1.05, 0, 0);
+    for (let k = 0; k < 18; k++) {
+      const blade = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.66, 0.16), metal);
+      const a = (k / 18) * Math.PI * 2;
+      blade.position.set(0, Math.cos(a) * 0.45, Math.sin(a) * 0.45);
+      blade.rotation.set(a, 0.5, 0);
+      this.fan.add(blade);
+    }
+    this.fan.userData.keep = true;
+    eng.add(this.fan);
+    const exhaust = new THREE.Mesh(new THREE.ConeGeometry(0.42, 0.9, 16, 1, true), charred);
+    exhaust.rotation.z = Math.PI / 2;
+    exhaust.position.x = -1.9;
+    put(exhaust, eng);
+    const pylon = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.5, 0.22), white);
+    pylon.position.set(-0.4, 0.62, 0);
+    put(pylon, eng);
+    eng.updateMatrixWorld(true);
+    this.engineLocal.copy(eng.getWorldPosition(new THREE.Vector3())).sub(this.group.position).applyAxisAngle(new THREE.Vector3(0, 1, 0), -this.yaw);
 
-    // Tail section thrown behind.
+    // ------------------------------------------------------------ tail section, thrown behind
     const tail = new THREE.Group();
-    tail.position.set(-13.5, 1.0, -2.2);
-    tail.rotation.set(0.05, 0.55, 0.25);
-    this.group.add(tail);
-    const tailGeo = new THREE.CylinderGeometry(1.5, 0.5, 7, 18, 1, true);
-    tailGeo.rotateZ(Math.PI / 2);
-    const tailMesh = new THREE.Mesh(tailGeo, hull);
-    tailMesh.castShadow = true;
-    tail.add(tailMesh, new THREE.Mesh(tailGeo, inner));
-    const fin = new THREE.Mesh(new THREE.BoxGeometry(2.4, 2.8, 0.18), stripe);
-    fin.position.set(-2.6, 1.9, 0);
-    fin.rotation.z = -0.35;
-    fin.castShadow = true;
-    tail.add(fin);
-    const stab = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.14, 5), hull);
-    stab.position.set(-2.8, 0.4, 0);
-    stab.castShadow = true;
-    tail.add(stab);
-    const tailRim = new THREE.Mesh(new THREE.TorusGeometry(1.5, 0.14, 6, 16), charred);
-    tailRim.rotation.y = Math.PI / 2;
-    tailRim.position.x = 3.5;
-    tail.add(tailRim);
+    tail.position.set(-15.5, 1.1, -3.2);
+    tail.rotation.set(0.05, 0.5, 0.18);
+    put(tail);
+    const coneGeo = new THREE.CylinderGeometry(1.75, 0.45, 7.6, 40, 8, true);
+    coneGeo.rotateZ(-Math.PI / 2);
+    coneGeo.rotateX(Math.PI);
+    put(new THREE.Mesh(coneGeo, skin), tail);
+    put(new THREE.Mesh(coneGeo, new THREE.MeshStandardMaterial({ color: 0x2a2826, roughness: 0.95, side: THREE.BackSide })), tail);
+    const tailRib = new THREE.Mesh(new THREE.TorusGeometry(1.72, 0.05, 6, 36, 4.2), metal);
+    tailRib.rotation.set(0, Math.PI / 2, 0.6);
+    tailRib.position.x = 3.7;
+    put(tailRib, tail);
+    const finShape = new THREE.Shape();
+    finShape.moveTo(0, 0);
+    finShape.lineTo(-2.4, 3.9);
+    finShape.lineTo(-3.9, 3.9);
+    finShape.lineTo(-3.6, 0);
+    finShape.lineTo(0, 0);
+    const logo = tailLogoTexture();
+    logo.wrapS = logo.wrapT = THREE.RepeatWrapping;
+    logo.repeat.set(1 / 4, 1 / 4);
+    logo.offset.set(1, 0);
+    const finMat = new THREE.MeshStandardMaterial({ map: logo, roughness: 0.4, metalness: 0.3 });
+    const fin = new THREE.Mesh(new THREE.ExtrudeGeometry(finShape, { depth: 0.2, bevelEnabled: true, bevelThickness: 0.05, bevelSize: 0.05, bevelSegments: 2 }), finMat);
+    fin.position.set(-0.6, 1.2, -0.1);
+    put(fin, tail);
+    const rudderShape = new THREE.Shape();
+    rudderShape.moveTo(0, 0);
+    rudderShape.lineTo(-0.25, 3.6);
+    rudderShape.lineTo(-0.85, 3.6);
+    rudderShape.lineTo(-0.75, 0);
+    rudderShape.lineTo(0, 0);
+    const rudder = new THREE.Mesh(new THREE.ExtrudeGeometry(rudderShape, { depth: 0.16, bevelEnabled: false }), finMat);
+    rudder.position.set(-4.2, 1.35, -0.08);
+    rudder.rotation.y = 0.35;
+    put(rudder, tail);
+    for (const s of [-1, 1]) {
+      const stab = new THREE.Shape();
+      stab.moveTo(0, 0);
+      stab.lineTo(-1.6, 2.8);
+      stab.lineTo(-2.6, 2.8);
+      stab.lineTo(-2.6, 0);
+      stab.lineTo(0, 0);
+      const sg = new THREE.ExtrudeGeometry(stab, { depth: 0.12, bevelEnabled: true, bevelThickness: 0.03, bevelSize: 0.03, bevelSegments: 1 });
+      sg.rotateX(s * Math.PI / 2);
+      const m = new THREE.Mesh(sg, white);
+      m.position.set(-1.0, 0.25, s * 0.35);
+      put(m, tail);
+    }
+
+    // ------------------------------------------------------------ the swath through the trees
+    const logMats = logMaterials();
+    for (let k = 0; k < 9; k++) {
+      const lx = -21 - k * 2.4 - rand() * 2;
+      const lz = -4 + (rand() - 0.5) * 9;
+      const len = 4 + rand() * 4;
+      const log = new THREE.Mesh(new THREE.CylinderGeometry(0.22 + rand() * 0.1, 0.3 + rand() * 0.1, len, 9), logMats);
+      const p = this.localToGround(lx, lz, 0.25).sub(this.center).applyAxisAngle(new THREE.Vector3(0, 1, 0), -this.yaw);
+      log.position.copy(p);
+      log.rotation.set(Math.PI / 2, 0, rand() * Math.PI, 'YXZ');
+      log.rotation.y = rand() * Math.PI;
+      put(log);
+      const yawL = log.rotation.y;
+      for (const t of [-0.35, 0, 0.35]) this.addCollider(colliders, lx + Math.sin(yawL) * len * t, lz + Math.cos(yawL) * len * t, 0.35, 0.6);
+    }
+    for (let k = 0; k < 7; k++) {
+      const lx = -22 - k * 3 - rand() * 2;
+      const lz = -10 + (k % 2 ? 1 : -1) * (4 + rand() * 4);
+      const h = 0.7 + rand() * 1.1;
+      const stump = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.36, h, 9), logMats);
+      const p = this.localToGround(lx, lz, h / 2 - 0.1).sub(this.center).applyAxisAngle(new THREE.Vector3(0, 1, 0), -this.yaw);
+      stump.position.copy(p);
+      put(stump);
+      for (let q = 0; q < 4; q++) {
+        const sp = new THREE.Mesh(new THREE.ConeGeometry(0.07, 0.3 + rand() * 0.3, 4), logMats[1]);
+        sp.position.copy(p).add(new THREE.Vector3(Math.cos(q * 1.6) * 0.18, h / 2 + 0.1, Math.sin(q * 1.6) * 0.18));
+        put(sp);
+      }
+      this.addCollider(colliders, lx, lz, 0.38, h);
+    }
 
     // Scattered debris and scorch marks.
-    const rand = mulberry32(31);
     const scorchMat = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.45, depthWrite: false });
     for (let i = 0; i < 4; i++) {
       const s = new THREE.Mesh(new THREE.CircleGeometry(2 + rand() * 2.5, 18), scorchMat);
@@ -171,29 +442,49 @@ export class CrashSite {
       const lz = -2 + rand() * 9;
       s.position.copy(this.localToGround(lx, lz, 0.05)).sub(this.center);
       s.position.applyAxisAngle(new THREE.Vector3(0, 1, 0), -this.yaw);
+      s.userData.keep = true;
       this.group.add(s);
     }
     for (let i = 0; i < 26; i++) {
-      const piece = add(new THREE.Mesh(new THREE.BoxGeometry(0.2 + rand() * 0.9, 0.04 + rand() * 0.1, 0.2 + rand() * 0.7), rand() > 0.4 ? hull : charred));
+      const piece = new THREE.Mesh(new THREE.BoxGeometry(0.2 + rand() * 0.9, 0.04 + rand() * 0.1, 0.2 + rand() * 0.7), rand() > 0.4 ? white : charred);
       const lx = -16 + rand() * 30;
       const lz = -6 + rand() * 16;
+      if (lx > TORN - 1 && lx < NOSE_X + 2 && Math.abs(lz) < 2.6) continue;
       const p = this.localToGround(lx, lz, 0.05).sub(this.center).applyAxisAngle(new THREE.Vector3(0, 1, 0), -this.yaw);
       piece.position.copy(p);
       piece.rotation.set(rand() * 0.5, rand() * 6, rand() * 0.5);
+      put(piece);
+    }
+    // Merge every static piece (screens, fan and scorch decals stay apart).
+    for (const m of bakeStatic(root)) m.castShadow = true;
+
+    // Colliders: the hull walls (the torn end stays open), nose, seats, wing, engine and tail.
+    for (let x = TORN + 0.3; x <= NOSE_X; x += 0.55) {
+      this.addCollider(colliders, x, -RADIUS - 0.12, 0.34, 3.6);
+      this.addCollider(colliders, x, RADIUS + 0.12, 0.34, 3.6);
+    }
+    for (let a = -1.2; a <= 1.2; a += 0.4) this.addCollider(colliders, NOSE_X + Math.cos(a) * 2.6, Math.sin(a) * 2.0, 0.5, 3.6);
+    for (const s of this.seatSpots) this.addCollider(colliders, s.x, s.z, 0.4, 2.0);
+    for (let k = 0; k < 6; k++) this.addCollider(colliders, -1.6 - k * 0.6, 4.4 + k * 1.6, 0.7, 0.9);
+    {
+      const e = this.engineLocal;
+      this.addCollider(colliders, e.x, e.z, 1.05, 1.6);
+      this.addCollider(colliders, e.x - 1.2, e.z, 0.9, 1.6);
+    }
+    for (let k = 0; k <= 4; k++) {
+      const t = k / 4;
+      const lx = -15.5 + Math.cos(0.5) * (3.8 - t * 7.6);
+      const lz = -3.2 - Math.sin(0.5) * (3.8 - t * 7.6);
+      this.addCollider(colliders, lx, lz, 1.6 - t * 1.0, 3.2);
     }
 
-    // Colliders along the hull, wing, engine and tail.
-    for (let x = -5; x <= 7.5; x += 2.1) this.addCollider(colliders, x, 0, 1.75, 3.2);
-    for (let z = 2.5; z <= 11; z += 1.8) this.addCollider(colliders, 0.4, z, 1.0, 1.0);
-    this.addCollider(colliders, 0.9, 5.2, 1.1, 1.4);
-    for (let x = -11; x >= -17; x -= 1.8) {
-      const t = (x + 11) / -6;
-      this.addCollider(colliders, x, -2.2 - (x + 11) * 0.55, 1.4 - t * 0.7, 2.6);
-    }
+    // Emergency light: a slow red pulse inside the cabin (part of the fixed light pool).
+    this.emergencyLight = new THREE.PointLight(0xff2a1a, 0, 9, 1.6);
+    this.emergencyLight.position.copy(this.toWorld(0.5, AXIS_Y + 1.6, 0));
 
     // Fire, smoke and the light they throw.
-    this.firePos.copy(this.toWorld(0.9, 1.1, 5.2));
-    const brokenEnd = this.toWorld(-5.8, 1.6, 0);
+    this.firePos.copy(this.toWorld(this.engineLocal.x - 0.8, this.engineLocal.y + 0.4, this.engineLocal.z));
+    const brokenEnd = this.toWorld(TORN - 0.4, AXIS_Y + 1.4, 0);
     const smokeCfg = { life: 7, rise: 2.2, spread: 1.4, size0: 1.6, size1: 7.5, alpha: 0.42, color: 0x3a3836, color2: 0x24221f, additive: false };
     const fireCfg = { life: 0.9, rise: 1.8, spread: 0.9, size0: 1.3, size1: 0.3, alpha: 0.9, color: 0xff5a12, color2: 0xffd27a, additive: true };
     const s1 = new PuffEmitter(70, smokeCfg);
@@ -211,7 +502,7 @@ export class CrashSite {
 
     // Luggage scattered on the landward side.
     const casePositions = [
-      [3.5, -4.2], [-1.5, -5.5], [7.5, -3.2], [-6.8, -4.0], [10.5, 2.8], [-9.5, 2.5], [4.8, 12.5], [-3.5, 8.8],
+      [3.5, -4.6], [-1.5, -5.8], [8.5, -3.8], [-8.2, -2.5], [10.5, 3.2], [-10.5, 2.5], [4.8, 13.5], [-8.5, 9.5],
     ];
     casePositions.forEach(([lx, lz], i) => {
       const color = CASE_COLORS[i];
@@ -231,10 +522,17 @@ export class CrashSite {
       this.suitcases.push({ mesh: g, pos, hp: 50, color, contents: CONTENTS[i], broken: false });
     });
 
-    this.spawn.copy(this.localToGround(1.5, -7.5, 0));
-    // Face the wreck when waking up.
-    const toPlane = new THREE.Vector3().subVectors(this.center, this.spawn);
-    this.spawnYaw = Math.atan2(-toPlane.x, -toPlane.z);
+    // Wake up in the aisle near the front, looking back through the tear at the clearing.
+    this.spawn.copy(this.toWorld(3.2, FLOOR, 0));
+    this.spawnYaw = Math.atan2(Math.cos(this.yaw), -Math.sin(this.yaw));
+    // Effigies at the edge of the clearing, facing the wreck.
+    for (const [lx, lz] of [
+      [-9, 17],
+      [13, -15],
+    ]) {
+      const p = this.toWorld(lx, 0, lz);
+      this.effigySpots.push({ x: p.x, z: p.z, yaw: Math.atan2(this.center.x - p.x, this.center.z - p.z) });
+    }
   }
 
   readonly dirt: THREE.Mesh;
@@ -288,6 +586,14 @@ export class CrashSite {
 
   private toWorld(lx: number, ly: number, lz: number): THREE.Vector3 {
     return new THREE.Vector3(lx, ly, lz).applyAxisAngle(new THREE.Vector3(0, 1, 0), this.yaw).add(this.center);
+  }
+
+  /** Walkable cabin floor (and the fallen panel ramp at the tear), else null. */
+  floorAt(x: number, z: number): number | null {
+    const l = new THREE.Vector3(x - this.center.x, 0, z - this.center.z).applyAxisAngle(new THREE.Vector3(0, 1, 0), -this.yaw);
+    if (l.x > TORN - 0.05 && l.x < NOSE_X + 0.9 && Math.abs(l.z) < FLOOR_HALF) return this.center.y + FLOOR;
+    if (l.x <= TORN - 0.05 && l.x > TORN - 1.85 && Math.abs(l.z) < 0.95) return this.center.y + FLOOR * ((l.x - (TORN - 1.9)) / 1.85);
+    return null;
   }
 
   /** Local plane coordinates to a point on the sand. */
@@ -344,6 +650,15 @@ export class CrashSite {
     this.flicker += dt;
     const f = Math.sin(this.flicker * 17) * 0.5 + Math.sin(this.flicker * 7.3) * 0.5;
     this.fireLight.intensity = 26 + f * 7;
+    // Red emergency lamp: a slow pulse; the cockpit screens flicker; the dead fan turns in the wind.
+    if (this.emergencyLight) this.emergencyLight.intensity = 1.2 + 4.5 * Math.pow(0.5 + 0.5 * Math.sin(this.flicker * 2.2), 2);
+    if (this.screenMat) this.screenMat.emissiveIntensity = Math.random() < 0.04 ? 0.05 : 0.45 + Math.sin(this.flicker * 13) * 0.1;
+    this.fan.rotation.x += dt * 0.5;
+    this.sparkT -= dt;
+    if (this.sparkT <= 0) {
+      this.sparkT = 1.5 + Math.random() * 3.5;
+      this.onSpark?.(this.toWorld(this.sparkLocal.x, this.sparkLocal.y, this.sparkLocal.z));
+    }
   }
 }
 

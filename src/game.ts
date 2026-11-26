@@ -26,6 +26,7 @@ import { BOAT_COST, Sailboat } from './world/boat';
 import { Altar, Cave } from './world/cave';
 import { SaveData, SaveStore } from './core/save';
 import { Screens } from './ui/screens';
+import { tr } from './ui/i18n';
 import { Village } from './world/village';
 import { Effigies, trailSpots } from './world/effigies';
 import { GrassField } from './world/grass';
@@ -46,11 +47,11 @@ interface Interactable {
 }
 
 const PIXEL_BUDGET = 2.4e6;
-const TUTORIAL = [
-  'Quebre uma mala perto do avião com o Machado',
-  'Corte 1 árvore e pegue 1 tora com [E]',
-  'Colete gravetos ou pedras no chão',
-  'Aperte [Tab] para abrir seu menu de Criação e Construção!',
+const TUTORIAL = (): string[] => [
+  tr('Quebre uma mala perto do avião com o Machado', 'Break a suitcase near the plane with the Axe'),
+  tr('Corte 1 árvore e pegue 1 tora com [E]', 'Chop 1 tree and pick up 1 log with [E]'),
+  tr('Colete gravetos ou pedras no chão', 'Gather sticks or rocks from the ground'),
+  tr('Aperte [Tab] para abrir seu menu de Criação e Construção!', 'Press [Tab] to open your Crafting and Building book!'),
 ];
 
 const store = {
@@ -175,7 +176,7 @@ export class Game implements CombatWorld {
     this.sky = new DayNight(this.scene);
 
     this.crash = new CrashSite(this.terrain, this.colliders);
-    this.scene.add(this.crash.group, this.crash.fireLight, this.crash.dirt);
+    this.scene.add(this.crash.group, this.crash.fireLight, this.crash.dirt, this.crash.emergencyLight);
     for (const s of this.crash.suitcases) this.scene.add(s.mesh);
     for (const e of [...this.crash.smoke, ...this.crash.fire]) this.scene.add(e.points);
 
@@ -254,7 +255,8 @@ export class Game implements CombatWorld {
       ],
       this.village.effigySpots,
     );
-    this.effigies = new Effigies(this.terrain, this.colliders, lib, [...this.village.effigySpots, ...trail]);
+    // New spots go at the end so saved effigy ids keep pointing at the same ones.
+    this.effigies = new Effigies(this.terrain, this.colliders, lib, [...this.village.effigySpots, ...trail, ...this.crash.effigySpots]);
     this.scene.add(this.effigies.group);
     this.grass = new GrassField(this.terrain, lib, [
       { x: this.crash.center.x, z: this.crash.center.z, r: 20 },
@@ -323,8 +325,15 @@ export class Game implements CombatWorld {
       onStep: (s, sprint) => this.sound.footstep(s, sprint, this.indoors),
       onLand: (v) => this.onLand(v),
     });
-    this.player.teleport(this.crash.spawn.x, this.crash.spawn.z, this.crash.spawnYaw);
+    this.player.platforms.push((x, z) => this.crash.floorAt(x, z));
+    this.player.placeAt(this.crash.spawn.x, this.crash.spawn.y, this.crash.spawn.z, this.crash.spawnYaw);
     this.player.wake = 0;
+    // Sparks from the torn cables, with a crackle, when the player is near.
+    this.crash.onSpark = (p) => {
+      if (p.distanceTo(this.player.pos) > 16) return;
+      this.sparks.burst(p, this.v3.set(0, -1, 0), 14, 3.2);
+      this.sound.fireHit();
+    };
     this.grass.update(this.player.pos.x, this.player.pos.z);
     const sens = Number(store.get('iss.sens'));
     if (sens > 0) this.player.sensitivity = sens;
@@ -362,6 +371,7 @@ export class Game implements CombatWorld {
       (x, z) => this.boat.deckAt(x, z),
     );
     if (save) this.applySave(save);
+    else this.stageFirstAnimal();
     this.onResize();
     window.addEventListener('resize', () => this.onResize());
     this.warmUp();
@@ -424,11 +434,58 @@ export class Game implements CombatWorld {
     if (on && !this.started) {
       this.started = true;
       this.sound.start();
-      if (this.loadedSave) this.hud.message(`DIA ${this.sky.day}`, 'Progresso carregado. A ilha continua de onde você parou.', 4);
-      else this.hud.message('ILHA DESCONHECIDA', 'Você sobreviveu à queda no meio da floresta. Quebre as malas com o machado.', 7);
+      if (this.loadedSave) this.hud.message(`${tr('DIA', 'DAY')} ${this.sky.day}`, tr('Progresso carregado. A ilha continua de onde você parou.', 'Progress loaded. The island picks up where you left it.'), 4);
+      else this.startWakeUp();
     } else if (on) {
       this.sound.start();
     }
+  }
+
+  // ---------------------------------------------------------------- wake-up and title camera
+
+  /** -1 when idle; seconds into the wake-up sequence of a new game otherwise. */
+  private wakeT = -1;
+  private menuT = 0;
+
+  /** A new game opens on the cabin floor: eyes blinking open, muffled ringing, the camera sitting up. */
+  private startWakeUp(): void {
+    this.wakeT = 0;
+    this.fadeIn = 0;
+    this.hud.setFade(0);
+    this.player.wake = 0;
+    this.sound.wakeUp();
+  }
+
+  private updateWakeUp(realDt: number): void {
+    if (this.wakeT < 0) return;
+    this.wakeT += realDt;
+    // Click or Space skips it.
+    if (this.wakeT > 0.25 && (this.input.justPressed('Space') || this.input.mouseDown)) this.wakeT = 3;
+    const t = this.wakeT;
+    // Eyelids: open a crack, close, open more, a slow blink, then wide.
+    const open =
+      t < 0.6 ? (t / 0.6) * 0.35 : t < 0.85 ? 0.35 - ((t - 0.6) / 0.25) * 0.3 : t < 1.6 ? 0.05 + ((t - 0.85) / 0.75) * 0.65 : t < 1.8 ? 0.7 - ((t - 1.6) / 0.2) * 0.25 : Math.min(1, 0.45 + ((t - 1.8) / 1.2) * 0.55);
+    const blur = Math.max(0, 1 - t / 3) * 7;
+    this.hud.setWake(t >= 3 ? null : { open, blur });
+    if (t >= 3) {
+      this.wakeT = -1;
+      this.player.wake = Math.max(this.player.wake, 1);
+      this.hud.message(tr('ILHA DESCONHECIDA', 'UNKNOWN ISLAND'), tr('Você sobreviveu à queda no meio da floresta. Saia do avião e quebre as malas com o machado.', 'You survived the crash deep in the forest. Get out of the plane and break the suitcases with the axe.'), 7);
+    }
+  }
+
+  /** Before play: the camera circles the smoking wreck in its clearing. */
+  private menuTick(dt: number): void {
+    this.menuT += dt;
+    const c = this.crash.center;
+    const a = this.menuT * 0.045 + 2.2;
+    this.camera.position.set(c.x + Math.sin(a) * 27, c.y + 8.5 + Math.sin(this.menuT * 0.11) * 1.2, c.z + Math.cos(a) * 27);
+    this.camera.lookAt(c.x - 2, c.y + 1.8, c.z);
+    windUniform.value = this.menuT;
+    this.sky.update(0, this.menuT, this.camera, c);
+    this.crash.update(dt, this.sky.ambient);
+    this.grass.update(c.x, c.z);
+    this.water.update(this.menuT, this.sky.sunDir, this.sky.sunColor, this.sky.daylight * 2.2, this.sky.horizon, this.sky.ambient);
   }
 
   // ---------------------------------------------------------------- frame
@@ -437,6 +494,7 @@ export class Game implements CombatWorld {
     const t0 = performance.now();
     const dt = Math.min(this.clock.getDelta(), 0.05);
     if (this.playing) this.tick(dt);
+    else if (!this.started) this.menuTick(dt);
     else this.player.update(0, this.input, false);
     this.render();
     this.input.endFrame();
@@ -504,6 +562,7 @@ export class Game implements CombatWorld {
     this.updateHud(dt);
     this.updateDeath(dt);
     this.updateSleep(dt);
+    this.updateWakeUp(realDt);
 
     this.vm.update(dt, {
       bobPhase: this.player.bobPhase,
@@ -1636,16 +1695,16 @@ export class Game implements CombatWorld {
       this.flags.gathered,
       this.flags.menuOpened,
     ];
-    while (this.tutorialStep < TUTORIAL.length && done[this.tutorialStep]) {
+    while (this.tutorialStep < TUTORIAL().length && done[this.tutorialStep]) {
       this.tutorialStep++;
       this.sound.pickup();
     }
-    if (this.tutorialStep >= TUTORIAL.length) {
-      this.hud.message('TUTORIAL CONCLUÍDO', 'Construa sua cabana e uma fogueira antes da noite: o fogo afasta os canibais.', 5);
+    if (this.tutorialStep >= TUTORIAL().length) {
+      this.hud.message(tr('TUTORIAL CONCLUÍDO', 'TUTORIAL COMPLETE'), tr('Construa sua cabana e uma fogueira antes da noite: o fogo afasta os canibais.', 'Build your cabin and a campfire before night: fire keeps the cannibals away.'), 5);
       this.skipTutorial();
       return;
     }
-    this.hud.setTutorial(this.tutorialStep + 1, TUTORIAL.length, TUTORIAL[this.tutorialStep]);
+    this.hud.setTutorial(this.tutorialStep + 1, TUTORIAL().length, TUTORIAL()[this.tutorialStep]);
   }
 
   private updateAudio(): void {
@@ -1703,7 +1762,7 @@ export class Game implements CombatWorld {
       const at = cabin.toWorld(0, -CABIN_D / 2 - 4.5, this.v4);
       this.player.teleport(at.x, at.z, cabin.group.rotation.y + Math.PI);
     }
-    else this.player.teleport(this.crash.spawn.x, this.crash.spawn.z, this.crash.spawnYaw);
+    else this.player.placeAt(this.crash.spawn.x, this.crash.spawn.y, this.crash.spawn.z, this.crash.spawnYaw);
     this.player.wake = 0;
     this.fadeIn = 1;
     this.menuOpen = false;
@@ -1755,6 +1814,18 @@ export class Game implements CombatWorld {
     this.player.addTrauma(0.1);
     this.hud.toast('🌉 Ponte consertada');
     this.saveGame();
+  }
+
+  /** A deer (or rabbit) grazing at the edge of the clearing, in view as the player leaves the wreck. */
+  private stageFirstAnimal(): void {
+    const a = this.wildlife.animals.find((x) => x.species === 'deer') ?? this.wildlife.animals.find((x) => x.species === 'rabbit');
+    if (!a) return;
+    const p = this.crash.localToGround(-19, 7, 0);
+    a.pos.set(p.x, p.y, p.z);
+    a.group.position.copy(a.pos);
+    a.state = 'graze';
+    a.timer = 6;
+    a.heading = a.targetHeading = Math.atan2(this.crash.center.x - p.x, this.crash.center.z - p.z) + 1.4;
   }
 
   private cavePickupsPlaced = false;
@@ -1838,15 +1909,17 @@ export class Game implements CombatWorld {
     const hasCabin = this.base.cabins.some((c) => c.complete);
     const hasFire = this.base.placed.some((p) => p.kind === 'campfire');
     let q: [string, string];
-    if (this.escaped) q = ['⛵', 'Você escapou da ilha. Explore à vontade.'];
-    else if (!hasCabin || !hasFire) q = ['🛖', 'Construa uma Cabana e uma Fogueira antes da noite [Tab]'];
-    else if (!d.has('boss')) q = ['👑', 'Derrote o Chefe Tribal na [Aldeia] a Oeste'];
-    else if (lvl < 2) q = ['📜', 'Evolua o Livro para o Nível 2 com o Totem Tribal [Tab]'];
-    else if (!d.has('guardian')) q = ['💀', 'Derrote o Guardião da [Caverna] ao Norte'];
-    else if (!this.caveLoot.flashlight || !this.caveLoot.backpack) q = ['🔦', 'Caverna: lanterna no acampamento perdido, mochila com o Senhor das Profundezas'];
-    else if (lvl < 3) q = ['📜', 'Evolua o Livro para o Nível 3 com a Relíquia [Tab]'];
-    else if (!d.has('alpha') && this.inv.mats.heart === 0 && this.boat.delivered.heart === 0) q = ['🐺', 'Cace a Fera Alfa no [Altar] a Leste'];
-    else q = ['⛵', 'Repare o [Veleiro] na Praia Sul e fuja da ilha'];
+    const dusk = this.sky.day === 1 && this.sky.hours >= 17.5 && !hasFire;
+    if (this.escaped) q = ['⛵', tr('Você escapou da ilha. Explore à vontade.', 'You escaped the island. Explore freely.')];
+    else if (dusk) q = ['🌇', tr('Está anoitecendo — abra o Livro [Tab] e construa uma Fogueira!', 'Night is falling — open the Book [Tab] and build a Campfire!')];
+    else if (!hasCabin || !hasFire) q = ['🛖', tr('Construa uma Cabana e uma Fogueira antes da noite [Tab]', 'Build a Cabin and a Campfire before nightfall [Tab]')];
+    else if (!d.has('boss')) q = ['👑', tr('Derrote o Chefe Tribal na [Aldeia] a Oeste', 'Defeat the Tribal Chief in the [Village] to the west')];
+    else if (lvl < 2) q = ['📜', tr('Evolua o Livro para o Nível 2 com o Totem Tribal [Tab]', 'Upgrade the Book to Level 2 with the Tribal Totem [Tab]')];
+    else if (!d.has('guardian')) q = ['💀', tr('Derrote o Guardião da [Caverna] ao Norte', 'Defeat the Guardian of the [Cave] to the north')];
+    else if (!this.caveLoot.flashlight || !this.caveLoot.backpack) q = ['🔦', tr('Caverna: lanterna no acampamento perdido, mochila com o Senhor das Profundezas', 'Cave: flashlight at the lost camp, backpack with the Lord of the Depths')];
+    else if (lvl < 3) q = ['📜', tr('Evolua o Livro para o Nível 3 com a Relíquia [Tab]', 'Upgrade the Book to Level 3 with the Relic [Tab]')];
+    else if (!d.has('alpha') && this.inv.mats.heart === 0 && this.boat.delivered.heart === 0) q = ['🐺', tr('Cace a Fera Alfa no [Altar] a Leste', 'Hunt the Alpha Beast at the [Altar] to the east')];
+    else q = ['⛵', tr('Repare o [Veleiro] na Praia Sul e fuja da ilha', 'Repair the [Sailboat] on the South Beach and escape')];
     this.hud.setQuest(q[0], q[1]);
     this.hud.setMarkerVisible('Altar', lvl >= 2);
   }

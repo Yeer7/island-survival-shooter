@@ -1,3 +1,4 @@
+import { tr } from './i18n';
 import './hud.css';
 import { HOTBAR_INFO, HotbarId, Inventory, MATERIAL_INFO } from '../player/inventory';
 
@@ -110,7 +111,7 @@ export class Hud {
     this.tutorial = el('div', 'hud-tutorial', quests);
     this.tutorialStep = el('span', 'step', this.tutorial);
     this.tutorialText = el('span', '', this.tutorial);
-    const skip = el('button', '', this.tutorial, '[Pular]');
+    const skip = el('button', '', this.tutorial, tr('[Pular]', '[Skip]'));
     skip.addEventListener('click', () => this.onSkipTutorial());
     this.tutorial.style.display = 'none';
 
@@ -125,7 +126,7 @@ export class Hud {
 
     const bottom = el('div', 'hud-bottom', this.root);
     this.prompts = el('div', 'hud-prompts', bottom);
-    const craftBtn = el('button', 'hud-craft-btn', bottom, '<kbd>Tab</kbd> Criar / Construir');
+    const craftBtn = el('button', 'hud-craft-btn', bottom, `<kbd>Tab</kbd> ${tr('Criar / Construir', 'Craft / Build')}`);
     craftBtn.addEventListener('click', () => this.onCraftButton());
     const row = el('div', 'hud-row', bottom);
     this.mats = el('div', 'hud-mats', row);
@@ -156,7 +157,7 @@ export class Hud {
   }
 
   updateVitals(day: number, clock: string, health: number, hunger: number, maxHealth = 100): void {
-    this.set('clock', this.clock, `Dia ${day} • ${clock}`);
+    this.set('clock', this.clock, `${tr('Dia', 'Day')} ${day} • ${clock}`);
     const h = Math.ceil(health);
     const f = Math.ceil(hunger);
     this.set('hp', this.healthFill, `scaleX(${(h / maxHealth).toFixed(3)})`, 'transform');
@@ -257,7 +258,7 @@ export class Hud {
       return;
     }
     this.questEl.style.display = '';
-    this.set('quest', this.questEl, '<span class="ico">' + icon + '</span><span><small>Objetivo</small>' + text + '</span>', 'html');
+    this.set('quest', this.questEl, '<span class="ico">' + icon + '</span><span><small>' + tr('Objetivo', 'Objective') + '</small>' + text + '</span>', 'html');
   }
 
   setTutorial(step: number, total: number, text: string | null): void {
@@ -308,6 +309,35 @@ export class Hud {
     this.msg.innerHTML = `<b>${title}</b>${body}`;
     this.msg.classList.add('on');
     window.setTimeout(() => this.msg.classList.remove('on'), seconds * 1000);
+  }
+
+  private lids: { top: HTMLDivElement; bottom: HTMLDivElement } | null = null;
+
+  /** Waking up: two eyelids (0 shut … 1 open) and the world blurred until the eyes focus. */
+  setWake(state: { open: number; blur: number } | null): void {
+    const canvas = document.getElementById('game-canvas');
+    if (!state) {
+      if (this.lids) {
+        this.lids.top.remove();
+        this.lids.bottom.remove();
+        this.lids = null;
+      }
+      if (canvas) canvas.style.filter = '';
+      return;
+    }
+    if (!this.lids) {
+      const mk = (top: boolean) => {
+        const d = document.createElement('div');
+        d.style.cssText = `position:fixed;left:-5%;width:110%;height:55%;${top ? 'top:0;border-radius:0 0 50% 50% / 0 0 30% 30%' : 'bottom:0;border-radius:50% 50% 0 0 / 30% 30% 0 0'};background:#050505;z-index:20;pointer-events:none;box-shadow:0 0 60px 40px #050505;`;
+        document.body.appendChild(d);
+        return d;
+      };
+      this.lids = { top: mk(true), bottom: mk(false) };
+    }
+    const shut = (1 - state.open) * 100;
+    this.lids.top.style.transform = `translateY(${-100 + shut}%)`;
+    this.lids.bottom.style.transform = `translateY(${100 - shut}%)`;
+    if (canvas) canvas.style.filter = state.blur > 0.2 ? `blur(${state.blur.toFixed(1)}px)` : '';
   }
 
   setFade(v: number): void {

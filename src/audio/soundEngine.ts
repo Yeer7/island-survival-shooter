@@ -366,6 +366,15 @@ export class SoundEngine {
     [523, 659, 784, 1047].forEach((f, i) => this.tone({ type: 'triangle', f0: f, gain: 0.12, decay: 0.25, when: i * 0.1 }));
   }
 
+  /** Coming round in the wreck: muffled wind swelling, fire crackle, a fading ringing in the ears. */
+  wakeUp(): void {
+    if (!this.ctx) return;
+    this.burst({ type: 'lowpass', freq: 380, endFreq: 900, gain: 0.32, attack: 1.1, decay: 2.6 });
+    this.tone({ type: 'sine', f0: 4100, f1: 3900, gain: 0.035, attack: 0.08, decay: 3.2 });
+    this.tone({ type: 'sine', f0: 70, f1: 50, gain: 0.25, attack: 0.02, decay: 1.2 });
+    for (let i = 0; i < 10; i++) this.burst({ type: 'bandpass', freq: 1800 + Math.random() * 2000, q: 6, gain: 0.07, decay: 0.03, when: 0.6 + Math.random() * 2.2 });
+  }
+
   sleep(): void {
     if (!this.ctx) return;
     [392, 330, 262].forEach((f, i) => this.tone({ f0: f, gain: 0.1, attack: 0.1, decay: 0.6, when: i * 0.35 }));

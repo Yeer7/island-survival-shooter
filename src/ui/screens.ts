@@ -1,3 +1,4 @@
+import { tr } from './i18n';
 const css = `
 .end-screen {
   position: fixed;
@@ -111,9 +112,9 @@ export class Screens {
   }
 
   showDeath(stats: RunStats, onRespawn: () => void, onNewGame: () => void): void {
-    this.death.innerHTML = `<h1>VOCÊ MORREU</h1>
-      <p>A ilha cobrou seu preço no dia ${stats.days}. Seu progresso salvo continua com você.</p>
-      <div class="row"><button data-a="respawn">Renascer na Ilha</button><button class="ghost" data-a="new">Novo Jogo</button></div>`;
+    this.death.innerHTML = `<h1>${tr('VOCÊ MORREU', 'YOU DIED')}</h1>
+      <p>${tr(`A ilha cobrou seu preço no dia ${stats.days}. Seu progresso salvo continua com você.`, `The island took its toll on day ${stats.days}. Your saved progress stays with you.`)}</p>
+      <div class="row"><button data-a="respawn">${tr('Renascer na Ilha', 'Respawn on the Island')}</button><button class="ghost" data-a="new">${tr('Novo Jogo', 'New Game')}</button></div>`;
     this.death.querySelector('[data-a="respawn"]')!.addEventListener('click', () => {
       this.hide();
       onRespawn();
@@ -123,14 +124,14 @@ export class Screens {
   }
 
   showVictory(stats: RunStats, onAgain: () => void, onContinue: () => void): void {
-    this.victory.innerHTML = `<h1>VOCÊ ESCAPOU</h1>
-      <p>O veleiro deixa a ilha para trás enquanto o sol toca o mar.</p>
+    this.victory.innerHTML = `<h1>${tr('VOCÊ ESCAPOU', 'YOU ESCAPED')}</h1>
+      <p>${tr('O veleiro deixa a ilha para trás enquanto o sol toca o mar.', 'The sailboat leaves the island behind as the sun touches the sea.')}</p>
       <div class="stats">
-        <div class="stat"><b>${stats.days}</b><span>Dias sobrevividos</span></div>
-        <div class="stat"><b>${stats.kills}</b><span>Inimigos derrotados</span></div>
-        <div class="stat"><b>${stats.hunted}</b><span>Animais caçados</span></div>
+        <div class="stat"><b>${stats.days}</b><span>${tr('Dias sobrevividos', 'Days survived')}</span></div>
+        <div class="stat"><b>${stats.kills}</b><span>${tr('Inimigos derrotados', 'Enemies defeated')}</span></div>
+        <div class="stat"><b>${stats.hunted}</b><span>${tr('Animais caçados', 'Animals hunted')}</span></div>
       </div>
-      <div class="row"><button data-a="again">Jogar Novamente</button><button class="ghost" data-a="continue">Continuar na Ilha</button></div>`;
+      <div class="row"><button data-a="again">${tr('Jogar Novamente', 'Play Again')}</button><button class="ghost" data-a="continue">${tr('Continuar na Ilha', 'Stay on the Island')}</button></div>`;
     this.victory.querySelector('[data-a="again"]')!.addEventListener('click', onAgain);
     this.victory.querySelector('[data-a="continue"]')!.addEventListener('click', () => {
       this.hide();

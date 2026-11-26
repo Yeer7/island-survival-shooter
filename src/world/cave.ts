@@ -122,12 +122,91 @@ function buildPath(): Sample[] {
 
 // ------------------------------------------------------------------ textures
 
+let rockMaps: { map: THREE.Texture; normal: THREE.Texture; rough: THREE.Texture } | null = null;
+const rockMats = new Map<number, THREE.MeshStandardMaterial>();
+/**
+ * Matte cave rock from the Poly Haven "Rock Face" scan (CC0): albedo, normal and
+ * roughness at 512 px, tiled by world-scale UVs. One material per tint.
+ */
+function caveRock(tint = 0xffffff, vertexColors = false): THREE.MeshStandardMaterial {
+  const key = tint + (vertexColors ? 0x1000000 : 0);
+  const hit = rockMats.get(key);
+  if (hit) return hit;
+  if (!rockMaps) {
+    const L = new THREE.TextureLoader();
+    const load = (f: string, srgb: boolean) => {
+      const t = L.load(`assets/textures/${f}`);
+      t.wrapS = t.wrapT = THREE.RepeatWrapping;
+      t.anisotropy = 4;
+      if (srgb) t.colorSpace = THREE.SRGBColorSpace;
+      return t;
+    };
+    rockMaps = { map: load('rock_face_diff_512.jpg', true), normal: load('rock_face_nor_gl_512.jpg', false), rough: load('rock_face_rough_512.jpg', false) };
+  }
+  const m = new THREE.MeshStandardMaterial({
+    color: tint,
+    map: rockMaps.map,
+    normalMap: rockMaps.normal,
+    normalScale: new THREE.Vector2(1.2, 1.2),
+    roughnessMap: rockMaps.rough,
+    roughness: 1,
+    metalness: 0,
+    flatShading: true,
+    vertexColors,
+    side: THREE.DoubleSide,
+  });
+  rockMats.set(key, m);
+  return m;
+}
+
+const uvCache = new WeakMap<THREE.BufferGeometry, THREE.BufferGeometry>();
+/** Box-projected UVs (about three tiles across the model) so any rock model takes the rock texture. */
+function boxUV(src: THREE.BufferGeometry): THREE.BufferGeometry {
+  const hit = uvCache.get(src);
+  if (hit) return hit;
+  const g = src.index ? src.toNonIndexed() : src.clone();
+  g.computeVertexNormals();
+  g.computeBoundingBox();
+  const bb = g.boundingBox!;
+  const size = Math.max(bb.max.x - bb.min.x, bb.max.y - bb.min.y, bb.max.z - bb.min.z) || 1;
+  const k = 3 / size;
+  const p = g.attributes.position;
+  const n = g.attributes.normal;
+  const uv = new Float32Array(p.count * 2);
+  for (let i = 0; i < p.count; i++) {
+    const ax = Math.abs(n.getX(i));
+    const ay = Math.abs(n.getY(i));
+    const az = Math.abs(n.getZ(i));
+    let u: number;
+    let v: number;
+    if (ax >= ay && ax >= az) {
+      u = p.getZ(i);
+      v = p.getY(i);
+    } else if (ay >= az) {
+      u = p.getX(i);
+      v = p.getZ(i);
+    } else {
+      u = p.getX(i);
+      v = p.getY(i);
+    }
+    uv[i * 2] = u * k;
+    uv[i * 2 + 1] = v * k;
+  }
+  g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+  if (g.attributes.color) g.deleteAttribute('color');
+  uvCache.set(src, g);
+  return g;
+}
+
+const ROCK_MODELS = new Set(['rockMedium', 'rockSmall', 'rockTall', 'rockCliff', 'rockLarge', 'rockRound', 'pebble']);
+
 let speleoMat: THREE.MeshStandardMaterial | null = null;
 /** Wet limestone: rock texture with bump, slightly glossy. */
 function limestone(): THREE.MeshStandardMaterial {
   if (!speleoMat) {
     const t = detailTextures();
-    speleoMat = new THREE.MeshStandardMaterial({ color: 0x9a948a, roughness: 0.5, map: t.rock, bumpMap: t.rockBump, bumpScale: 3, flatShading: true });
+    speleoMat = caveRock(0xd8d2c8);
+    void t;
   }
   return speleoMat;
 }
@@ -299,8 +378,15 @@ export class Cave {
   private model(name: AssetName, fit: { by: 'height' | 'max' | 'footprint'; value: number }): THREE.Group | null {
     if (!this.lib.has(name)) return null;
     const m = this.lib.instance(name, fit);
+    const rock = ROCK_MODELS.has(name);
     m.traverse((o) => {
-      if ((o as THREE.Mesh).isMesh) o.castShadow = o.receiveShadow = true;
+      const mesh = o as THREE.Mesh;
+      if (!mesh.isMesh) return;
+      mesh.castShadow = mesh.receiveShadow = true;
+      if (rock) {
+        mesh.geometry = boxUV(mesh.geometry);
+        mesh.material = caveRock(0xb9b4ac);
+      }
     });
     return m;
   }
@@ -541,6 +627,10 @@ export class Cave {
       const n = Math.hypot(s.tx, s.tz) || 1;
       const nx = s.tz / n;
       const nz = -s.tx / n;
+      let arc = 0;
+      let px = 0;
+      let py = 0;
+      let pz = 0;
       for (let j = 0; j <= M; j++) {
         const a = (j / M) * Math.PI * 2;
         const ca = Math.cos(a);
@@ -555,12 +645,19 @@ export class Cave {
         const out = big * 1.8 + fine * 0.45;
         const lat = lat0 + ca * out;
         const y = y0 + (sa > 0 ? sa * out * 0.9 : sa * out * 0.4);
-        pos.push(o.x + s.x + nx * lat, y, o.z + s.z + nz * lat);
+        const vx = o.x + s.x + nx * lat;
+        const vz = o.z + s.z + nz * lat;
+        if (j > 0) arc += Math.hypot(vx - px, y - py, vz - pz);
+        px = vx;
+        py = y;
+        pz = vz;
+        pos.push(vx, y, vz);
         // Wet slate: darker and bluer deep in the chasm, a teal sheen near the water.
         const deep = Math.min(1, Math.max(0, -y / 14));
         const wet = 0.85 + fine * 0.3;
-        col.push((0.42 - deep * 0.25) * wet, (0.44 - deep * 0.2) * wet + deep * 0.06 * (y < -10 ? 1 : 0), (0.48 - deep * 0.14) * wet + (y < -10 ? 0.08 : 0));
-        uv.push((j / M) * (w + h) * 0.7, s.d / 2.5);
+        const lift = 1.9;
+        col.push((0.42 - deep * 0.25) * wet * lift, ((0.44 - deep * 0.2) * wet + deep * 0.06 * (y < -10 ? 1 : 0)) * lift, ((0.48 - deep * 0.14) * wet + (y < -10 ? 0.08 : 0)) * lift);
+        uv.push(arc / 2.4, s.d / 2.4);
       }
     }
     const idx: number[] = [];
@@ -577,7 +674,7 @@ export class Cave {
     sg.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
     sg.setIndex(idx);
     sg.computeVertexNormals();
-    const slate = new THREE.MeshStandardMaterial({ map: tex.rock, bumpMap: tex.rockBump, bumpScale: 2.5, vertexColors: true, roughness: 0.6, metalness: 0.05, side: THREE.DoubleSide, flatShading: true });
+    const slate = caveRock(0xffffff, true);
     const shell = new THREE.Mesh(sg, slate);
     shell.receiveShadow = true;
     shell.userData.keep = true;
@@ -604,7 +701,7 @@ export class Cave {
         const x = o.x + s.x + nx * lat;
         const z = o.z + s.z + nz * lat;
         fpos.push(x, (fbm(x * 0.8, 0, z * 0.8, 2) - 0.5) * 0.06 - (Math.abs(lat) > w - 0.6 ? 0.08 : 0), z);
-        fuv.push(lat / 2.5, s.d / 2.5);
+        fuv.push(lat / 2.4, s.d / 2.4);
       }
       const base = fpos.length / 3 - (FW + 1);
       if (row > 0) {
@@ -621,7 +718,7 @@ export class Cave {
     fg.setAttribute('uv', new THREE.Float32BufferAttribute(fuv, 2));
     fg.setIndex(fidx);
     fg.computeVertexNormals();
-    const floorMat = new THREE.MeshStandardMaterial({ color: 0x4a4946, map: tex.rock, bumpMap: tex.rockBump, bumpScale: 1.5, roughness: 0.7, side: THREE.DoubleSide });
+    const floorMat = caveRock(0x8c8780);
     const floor = new THREE.Mesh(fg, floorMat);
     floor.receiveShadow = true;
     floor.userData.keep = true;
@@ -631,6 +728,7 @@ export class Cave {
     this.buildChasm(root, rand);
     this.buildHall(root, rand);
     this.dress(root, rand);
+    this.sealEnds(root, rand);
 
     for (const m of bakeStatic(root)) m.receiveShadow = true;
     this.inside.add(root);
@@ -846,7 +944,7 @@ export class Cave {
       cg.setAttribute('uv', new THREE.Float32BufferAttribute(cu, 2));
       cg.setIndex(ci);
       cg.computeVertexNormals();
-      const cliff = new THREE.Mesh(cg, new THREE.MeshStandardMaterial({ color: 0x55585e, map: detailTextures().rock, bumpMap: detailTextures().rockBump, bumpScale: 3, roughness: 0.6, side: THREE.DoubleSide, flatShading: true }));
+      const cliff = new THREE.Mesh(cg, caveRock(0x9a9690));
       cliff.receiveShadow = true;
       root.add(cliff);
       // Boulders bulging out of each face.
@@ -964,7 +1062,7 @@ export class Cave {
   /** Chamber 3: the cathedral hall with pillars, stalactites, a crystal pool, bones and the loot. */
   private buildHall(root: THREE.Group, rand: () => number): void {
     const C = 74;
-    const pillarMat = new THREE.MeshStandardMaterial({ color: 0x6a6b70, roughness: 0.65, map: detailTextures().rock, bumpMap: detailTextures().rockBump, bumpScale: 3, flatShading: true });
+    const pillarMat = caveRock(0xa8a39b);
     // Natural pillars, floor to ceiling.
     for (const [dd, lat] of this.pillarSpots) {
       const p = this.at(dd, lat, -0.5);
@@ -978,7 +1076,10 @@ export class Cave {
         r.scale.x *= frac === 1 ? 0.38 : 0.7;
         r.scale.z *= frac === 1 ? 0.38 : 0.7;
         r.traverse((o) => {
-          if ((o as THREE.Mesh).isMesh) (o as THREE.Mesh).material = pillarMat;
+          if ((o as THREE.Mesh).isMesh) {
+            (o as THREE.Mesh).geometry = boxUV((o as THREE.Mesh).geometry);
+            (o as THREE.Mesh).material = pillarMat;
+          }
         });
         r.position.copy(p);
         r.rotation.y = rand() * 6;
@@ -1134,6 +1235,101 @@ export class Cave {
     this.lights.push({ pos: head.clone().lerp(new THREE.Vector3(tp.x, 0.9, tp.z), 0.3), color: 0xe6eeff, intensity: 26, distance: 18, flicker: false });
     // A cold fill high in the vault so the hall reads as big.
     this.lights.push({ pos: this.at(C - 2, 0, 8), color: 0x6f8fb8, intensity: 18, distance: 30, flicker: false });
+  }
+
+  /**
+   * A rough rock face across the path at distance `d`, spanning lateral lat0..lat1 and
+   * heights y0..y1. FBM bumps only push away from the player's side (`face` = +1 when
+   * the player stands at larger d), so the walkable space never shrinks.
+   */
+  private rockPanel(root: THREE.Object3D, d: number, face: number, lat0: number, lat1: number, y0: number, y1: number): void {
+    const cols = Math.max(4, Math.round((lat1 - lat0) / 0.5));
+    const rows = Math.max(4, Math.round((y1 - y0) / 0.5));
+    const cp: number[] = [];
+    const cu: number[] = [];
+    const ci: number[] = [];
+    for (let r = 0; r <= rows; r++) {
+      const y = y0 + ((y1 - y0) * r) / rows;
+      for (let c = 0; c <= cols; c++) {
+        const lat = lat0 + ((lat1 - lat0) * c) / cols;
+        const base = this.at(d, lat, y);
+        const bump = Math.max(0, fbm(base.x * 0.45 + 11, y * 0.45, base.z * 0.45, 4) - 0.3) * 2.2;
+        const p = this.at(d - face * bump, lat, y);
+        cp.push(p.x, p.y, p.z);
+        cu.push(lat / 2.4, y / 2.4);
+      }
+    }
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const a = r * (cols + 1) + c;
+        const b = a + cols + 1;
+        ci.push(a, b, a + 1, b, b + 1, a + 1);
+      }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(cp, 3));
+    g.setAttribute('uv', new THREE.Float32BufferAttribute(cu, 2));
+    g.setIndex(ci);
+    g.computeVertexNormals();
+    const m = new THREE.Mesh(g, caveRock(0xa09b94));
+    m.receiveShadow = true;
+    m.castShadow = true;
+    root.add(m);
+  }
+
+  /** Close the far end of the hall with solid rock, and make the way out a narrow lit fissure. */
+  private sealEnds(root: THREE.Group, rand: () => number): void {
+    // Back of the cathedral: a full rock wall with boulders and formations at its foot.
+    const bd = END_Z - 2.6;
+    const bw = halfWidth(bd) + 3;
+    this.rockPanel(root, bd, -1, -bw, bw, -1.5, ceiling(bd) + 3);
+    for (let k = 0; k < 5; k++) {
+      const r = this.model(k % 2 ? 'rockCliff' : 'rockLarge', { by: 'footprint', value: 2.2 + rand() * 2.2 });
+      if (!r) continue;
+      const lat = -bw * 0.7 + (k / 4) * bw * 1.4 + (rand() - 0.5);
+      const p = this.at(bd + 0.2, lat, -0.4);
+      r.position.copy(p);
+      r.rotation.y = rand() * 6;
+      root.add(r);
+      this.obstacles.push({ x: p.x, z: p.z, r: 0.9 });
+    }
+    for (let k = 0; k < 6; k++) {
+      const h = 0.6 + rand() * 1.8;
+      const c = speleothem(h, 0.2 + h * 0.12, 90 + k);
+      c.position.copy(this.at(bd - 0.8 - rand() * 0.8, (rand() - 0.5) * bw * 1.4, -0.05));
+      root.add(c);
+    }
+    // The way out: rock closes in, leaving a narrow fissure with daylight behind it.
+    const ed = 0.45;
+    const ew = halfWidth(1) + 3;
+    const eh = ceiling(1) + 2.5;
+    const gap = 0.42;
+    this.rockPanel(root, ed, 1, -ew, -gap, -1, eh);
+    this.rockPanel(root, ed, 1, gap, ew, -1, eh);
+    this.rockPanel(root, ed, 1, -gap - 0.05, gap + 0.05, 2.5, eh);
+    const c = document.createElement('canvas');
+    c.width = 16;
+    c.height = 128;
+    const g = c.getContext('2d')!;
+    const grd = g.createLinearGradient(0, 0, 0, 128);
+    grd.addColorStop(0, 'rgba(200,225,255,0.95)');
+    grd.addColorStop(1, 'rgba(120,160,220,0.55)');
+    g.fillStyle = grd;
+    g.fillRect(0, 0, 16, 128);
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    const light = new THREE.Mesh(new THREE.PlaneGeometry(1.1, 2.7), new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, fog: false, side: THREE.DoubleSide }));
+    light.position.copy(this.at(ed - 0.12, 0, 1.25));
+    light.rotation.y = this.headingAt(ed) + Math.PI;
+    light.userData.keep = true;
+    this.inside.add(light);
+    // A faint shaft of that light spilling onto the floor.
+    const shaft = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 2.6), new THREE.MeshBasicMaterial({ color: 0x9cc4ff, transparent: true, opacity: 0.16, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, fog: false }));
+    shaft.rotation.x = -Math.PI / 2;
+    shaft.rotation.z = -this.headingAt(1.6);
+    shaft.position.copy(this.at(1.6, 0, 0.04));
+    shaft.userData.keep = true;
+    this.inside.add(shaft);
   }
 
   /** Recolour a model's meshes with one material (for glowing crystals and bioluminescent caps). */
@@ -1494,13 +1690,58 @@ export class Cave {
     const wood = new THREE.MeshStandardMaterial({ color: 0x6e4a2c, roughness: 0.85, map: detailTextures().plank });
     const iron = new THREE.MeshStandardMaterial({ color: 0x3b3a38, roughness: 0.5, metalness: 0.5 });
     const brass = new THREE.MeshStandardMaterial({ color: 0xb08a3e, roughness: 0.4, metalness: 0.6 });
-    const body = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.5, 0.62), wood);
-    body.position.y = 0.25;
-    g.add(body);
+    // Hollow box: floor and four walls, lined dark inside, open at the top.
+    const t = 0.045;
+    const W = 1.1;
+    const D = 0.62;
+    const H = 0.5;
+    const bottom = new THREE.Mesh(new THREE.BoxGeometry(W, t, D), wood);
+    bottom.position.y = t / 2;
+    g.add(bottom);
+    for (const z of [-D / 2 + t / 2, D / 2 - t / 2]) {
+      const wall = new THREE.Mesh(new THREE.BoxGeometry(W, H, t), wood);
+      wall.position.set(0, H / 2, z);
+      g.add(wall);
+    }
+    for (const x of [-W / 2 + t / 2, W / 2 - t / 2]) {
+      const wall = new THREE.Mesh(new THREE.BoxGeometry(t, H, D - 2 * t), wood);
+      wall.position.set(x, H / 2, 0);
+      g.add(wall);
+    }
+    const lining = new THREE.MeshStandardMaterial({ color: 0x3a1210, roughness: 1 });
+    const floor = new THREE.Mesh(new THREE.PlaneGeometry(W - 2 * t, D - 2 * t), lining);
+    floor.rotation.x = -Math.PI / 2;
+    floor.position.y = t + 0.002;
+    g.add(floor);
+    for (const [x, z, ry, w] of [
+      [0, -D / 2 + t + 0.002, 0, W - 2 * t],
+      [0, D / 2 - t - 0.002, Math.PI, W - 2 * t],
+      [-W / 2 + t + 0.002, 0, Math.PI / 2, D - 2 * t],
+      [W / 2 - t - 0.002, 0, -Math.PI / 2, D - 2 * t],
+    ] as [number, number, number, number][]) {
+      const side = new THREE.Mesh(new THREE.PlaneGeometry(w, H - t - 0.01), lining);
+      side.position.set(x, t + (H - t) / 2, z);
+      side.rotation.y = ry;
+      g.add(side);
+    }
+    // Gold coins and a gem inside.
+    const gold = new THREE.MeshStandardMaterial({ color: 0xe8b84a, roughness: 0.35, metalness: 0.7 });
+    for (let k = 0; k < 9; k++) {
+      const coin = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.008, 10), gold);
+      coin.position.set(-0.35 + (k % 5) * 0.12 + Math.sin(k) * 0.03, t + 0.01 + (k > 4 ? 0.012 : 0), -0.12 + Math.floor(k / 5) * 0.16);
+      coin.rotation.set((k % 3) * 0.3, k, 0);
+      g.add(coin);
+    }
+    const gem = new THREE.Mesh(new THREE.OctahedronGeometry(0.06, 0), new THREE.MeshStandardMaterial({ color: 0x7fe8ff, emissive: 0x2ab8d8, emissiveIntensity: 1.4, roughness: 0.15 }));
+    gem.position.set(0.3, t + 0.06, 0.05);
+    g.add(gem);
+    // Iron straps on the front and back faces.
     for (const x of [-0.42, 0.42]) {
-      const band = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.52, 0.64), iron);
-      band.position.set(x, 0.25, 0);
-      g.add(band);
+      for (const z of [-D / 2 - 0.006, D / 2 + 0.006]) {
+        const band = new THREE.Mesh(new THREE.BoxGeometry(0.06, H + 0.01, 0.012), iron);
+        band.position.set(x, H / 2, z);
+        g.add(band);
+      }
     }
     // Lid on a hinge at the back edge.
     this.chestLid.position.set(0, 0.5, -0.31);
@@ -1527,9 +1768,9 @@ export class Cave {
     g.add(hasp, lock, shackle);
     // Treasure glow inside, shown when it opens.
     this.chestGlowMat = new THREE.MeshStandardMaterial({ color: 0xffd27a, emissive: 0xffb040, emissiveIntensity: 0, transparent: true, opacity: 0 });
-    const glow = new THREE.Mesh(new THREE.PlaneGeometry(1.0, 0.55), this.chestGlowMat);
+    const glow = new THREE.Mesh(new THREE.PlaneGeometry(0.98, 0.5), this.chestGlowMat);
     glow.rotation.x = -Math.PI / 2;
-    glow.position.y = 0.49;
+    glow.position.y = 0.049;
     g.add(glow);
     g.traverse((o) => {
       if ((o as THREE.Mesh).isMesh) o.castShadow = o.receiveShadow = true;
@@ -1550,8 +1791,8 @@ export class Cave {
     }
     if (this.chestGlow) this.chestGlow.intensity = 5;
     if (this.chestGlowMat) {
-      this.chestGlowMat.opacity = 0.85;
-      this.chestGlowMat.emissiveIntensity = 2;
+      this.chestGlowMat.opacity = 0.35;
+      this.chestGlowMat.emissiveIntensity = 1.2;
     }
   }
 

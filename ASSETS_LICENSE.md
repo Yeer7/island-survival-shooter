@@ -50,6 +50,9 @@ Run `npm run lint:assets` to check every `.glb`/`.gltf`/`.fbx` and texture (pars
 | `cave/mineral.glb` | Mineral (glowing crystals) | Quaternius | https://poly.pizza/m/STixpWYaTd | CC0 1.0 | Repacked with `scripts/repack_glb.py` |
 | `cave/mushroom.glb` | Mushroom (cave mushrooms, faint glow added in code) | Quaternius | https://poly.pizza/m/db1tjMhmiA | CC0 1.0 | Repacked with `scripts/repack_glb.py` |
 | `cave/mushroom_cluster.glb` | Mushroom (cluster) | Quaternius | https://poly.pizza/m/aOW08oSrd4 | CC0 1.0 | Embedded texture resized to 256 px (`scripts/repack_glb.py`) |
+| `textures/rock_face_diff_512.jpg` | Rock Face — albedo (cave walls, floor and every rock inside the cave) | Poly Haven (photography Charlotte Baglioni, processing Dario Barresi) | https://polyhaven.com/a/rock_face | CC0 1.0 | 1k JPG resized to 512 px and desaturated 65% toward grey |
+| `textures/rock_face_nor_gl_512.jpg` | Rock Face — normal map (OpenGL) | Poly Haven | https://polyhaven.com/a/rock_face | CC0 1.0 | 1k JPG resized to 512 px |
+| `textures/rock_face_rough_512.jpg` | Rock Face — roughness | Poly Haven | https://polyhaven.com/a/rock_face | CC0 1.0 | 1k JPG resized to 512 px (greyscale) |
 | `village/skull.glb` | Skull (effigies, door posts, gates, skull pile) | Quaternius | https://poly.pizza/m/YgmRBtFlcF | CC0 1.0 | None (tinted bone-white in code) |
 | `village/bone.glb` | Bone (effigies, hanging bones, scattered bones) | Quaternius | https://poly.pizza/m/uMs0lDp1u3 | CC0 1.0 | None (tinted bone-white in code) |
 | `village/crate.glb` | Crate (lootable village crates) | Quaternius | https://poly.pizza/m/3VGWnZPXmG | CC0 1.0 | None |

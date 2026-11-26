@@ -30,6 +30,7 @@ export interface CombatWorld {
 export class Melee {
   private cooldown = 0;
   private pending = -1;
+  private whooshT = -1;
   private spec: MeleeSpec = MELEE.axe;
 
   constructor(private vm: ViewModel, private world: CombatWorld, private sound: SoundEngine) {}
@@ -43,17 +44,27 @@ export class Melee {
     this.spec = spec;
     this.cooldown = spec.duration;
     this.pending = spec.duration * spec.impactAt;
-    if (spec.kind === 'swing') this.vm.swing(spec.duration);
-    else this.vm.stab(spec.duration);
-    this.sound.whoosh();
+    if (spec.kind === 'swing') {
+      this.vm.swing(spec.duration);
+      // The rush of air belongs to the downswing, not the lift.
+      this.whooshT = spec.duration * 0.24;
+    } else {
+      this.vm.stab(spec.duration);
+      this.sound.whoosh();
+    }
   }
 
   cancel(): void {
     this.pending = -1;
+    this.whooshT = -1;
   }
 
   update(dt: number): void {
     this.cooldown -= dt;
+    if (this.whooshT > 0) {
+      this.whooshT -= dt;
+      if (this.whooshT <= 0) this.sound.whoosh();
+    }
     if (this.pending > 0) {
       this.pending -= dt;
       if (this.pending <= 0) this.world.meleeImpact(this.spec);

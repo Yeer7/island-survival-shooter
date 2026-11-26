@@ -26,6 +26,11 @@ function fromAsset(name: AssetName, fit: { by: 'height' | 'max' | 'footprint'; v
 
 const std = (color: number, roughness = 0.7, metalness = 0) => new THREE.MeshStandardMaterial({ color, roughness, metalness });
 
+/** Sleeve and cuff materials, shared with the viewmodel's separately drawn forearm. */
+export function armMaterials(): { sleeve: THREE.Material; cuff: THREE.Material; skin: THREE.Material } {
+  return { sleeve: MAT.sleeve, cuff: MAT.cuff, skin: MAT.skin };
+}
+
 const MAT = {
   handle: std(0x2b2b2e, 0.6),
   grip: std(0xd94a1e, 0.55),
@@ -38,8 +43,12 @@ const MAT = {
 
 export { buildAxe, buildTacticalAxe } from './axes';
 
-/** Sleeved forearm with a closed hand. Origin = palm centre. Forearm runs toward +Z/-Y. */
-export function buildArm(left = false): THREE.Group {
+/**
+ * Sleeved forearm with a closed hand. Origin = palm centre. Forearm runs toward +Z/-Y.
+ * With `handOnly` the cuff and sleeve are left out (the viewmodel then draws the forearm
+ * itself from the wrist down to an elbow below the camera).
+ */
+export function buildArm(left = false, handOnly = false): THREE.Group {
   const g = new THREE.Group();
   const hand = new THREE.Mesh(new THREE.BoxGeometry(0.075, 0.085, 0.095), MAT.skin);
   const fingers = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.03, 0.05), MAT.skin);
@@ -56,6 +65,17 @@ export function buildArm(left = false): THREE.Group {
   const sleeve = new THREE.Mesh(new THREE.CylinderGeometry(0.052, 0.062, 0.5, 10), MAT.sleeve);
   sleeve.rotation.x = Math.PI / 2;
   sleeve.position.set(0, -0.015, 0.39);
+  if (handOnly) {
+    // Knuckles wrapped round the handle instead of a flat block.
+    for (let k = 0; k < 4; k++) {
+      const kn = new THREE.Mesh(new THREE.SphereGeometry(0.017, 6, 5), MAT.skin);
+      kn.scale.set(1, 0.9, 1.1);
+      kn.position.set(-0.03, 0.03 - k * 0.022, -0.05);
+      g.add(kn);
+    }
+    g.add(hand, thumb, wrist);
+    return g;
+  }
   g.add(hand, fingers, thumb, wrist, cuff, sleeve);
   return g;
 }

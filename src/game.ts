@@ -1280,16 +1280,28 @@ export class Game implements CombatWorld {
 
   /** Weight on impact: a short hold plus a small camera jolt toward the side that was struck. */
   private impactFeel(heavy: boolean): void {
-    this.hitStop(heavy ? 45 : 35);
-    const side = this.inv.selected === 'spear' ? 0 : -1;
-    this.player.addRecoil(heavy ? 0.5 : 0.32, side * (heavy ? 0.28 : 0.18));
+    this.hitStop(heavy ? 55 : 45);
+    const sel = this.inv.selected;
+    const axe = sel === 'axe' || sel === 'flameAxe';
+    if (axe) this.vm.onImpact(heavy);
+    // Kick along the cut: the diagonal chop dips and pulls left, the side chop pulls left harder.
+    const sideChop = axe && this.vm.swingVariant === 1;
+    const side = sel === 'spear' ? 0 : -1;
+    const pitch = (heavy ? 0.5 : 0.34) * (sideChop ? 0.45 : 1);
+    const yaw = side * (heavy ? 0.28 : 0.18) * (sideChop ? 1.8 : 1);
+    this.player.addRecoil(pitch, yaw);
+    this.player.addTrauma(heavy ? 0.12 : 0.07);
   }
 
   meleeImpact(spec: MeleeSpec): void {
     const o = this.camera.position;
     const d = this.camera.getWorldDirection(this.v2);
     const hit = this.raycast(o, d, spec.reach, spec.kind === 'stab' ? 0.25 : 0.35);
-    if (!hit) return;
+    if (!hit) {
+      // A miss: only a whisper of the swing's momentum on the camera.
+      if (spec.kind === 'swing') this.player.addRecoil(0.06, -0.05);
+      return;
+    }
     const p = this.v1.copy(o).addScaledVector(d, hit.t);
     const n = this.v3.copy(d).negate().setY(0.3).normalize();
     const floor = this.terrain.height(p.x, p.z) + 0.02;

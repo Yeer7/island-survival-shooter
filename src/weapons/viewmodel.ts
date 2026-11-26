@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { clamp, damp, easeOutCubic, lerp } from '../core/math';
 import { HotbarId } from '../player/inventory';
-import { buildArm, buildArrow, buildAxe, buildBow, buildFish, buildLog, buildTacticalAxe, buildMeat, buildRod, buildSpear, buildTorch } from './models';
+import { armMaterials, buildArm, buildArrow, buildAxe, buildBow, buildFish, buildLog, buildTacticalAxe, buildMeat, buildRod, buildSpear, buildTorch } from './models';
 
 type Action = 'none' | 'swing' | 'stab' | 'cast' | 'release' | 'use' | 'draw';
 
@@ -93,6 +93,19 @@ export class ViewModel {
   private flameT = 0;
   /** Clock for the idle breathing. */
   private breathT = 0;
+  /** Which of the two alternating chops is playing (0 = diagonal, 1 = side). */
+  swingVariant = 0;
+  private lastSwing = -10;
+  private clock = 0;
+  /** Hit-stop: the blade stays buried for a moment, trembling, then is wrenched back. */
+  private stuckT = 0;
+  private wrench = 0;
+  /** Forearm drawn from the wrist down to an elbow below the camera (never across the view). */
+  private forearm!: THREE.Mesh;
+  private cuff!: THREE.Mesh;
+  private v1 = new THREE.Vector3();
+  private v2 = new THREE.Vector3();
+  private q1 = new THREE.Quaternion();
   /** 0..1 bow draw, set by the bow logic. */
   bowDraw = 0;
   arrowNocked = true;
@@ -113,7 +126,19 @@ export class ViewModel {
     this.scene.add(this.hemi, this.keyLight);
     this.camera.add(this.fireLight);
 
-    this.rightArm = buildArm(false);
+    this.rightArm = buildArm(false, true);
+    {
+      // The right forearm is not rigid with the hand: it runs from the wrist to a fixed
+      // elbow low and to the right of the camera, so a chop never swings the sleeve up
+      // across the screen.
+      const am = armMaterials();
+      const fg = new THREE.CylinderGeometry(0.05, 0.066, 1, 10, 1);
+      fg.translate(0, -0.5, 0);
+      this.forearm = new THREE.Mesh(fg, am.sleeve);
+      const cg = new THREE.CylinderGeometry(0.051, 0.051, 0.05, 10);
+      this.cuff = new THREE.Mesh(cg, am.cuff);
+      this.root.add(this.forearm, this.cuff);
+    }
     this.root.add(this.rightArm);
 
     const axe = buildAxe();
@@ -261,7 +286,16 @@ export class ViewModel {
   }
 
   swing(duration: number): void {
+    // Chopping on in a rhythm alternates the diagonal chop and the side chop.
+    this.swingVariant = this.clock - this.lastSwing < duration + 0.45 ? 1 - this.swingVariant : 0;
+    this.lastSwing = this.clock;
     this.start('swing', duration);
+  }
+
+  /** The blow landed: bury the blade for a beat with a tremor, then wrench it back. */
+  onImpact(heavy: boolean): void {
+    this.stuckT = heavy ? 0.06 : 0.045;
+    this.wrench = 1;
   }
 
   stab(duration: number): void {
@@ -292,6 +326,26 @@ export class ViewModel {
     return out.applyMatrix4(worldCamera.matrixWorld);
   }
 
+  /** Stretch the sleeve from the wrist to the elbow anchor below and right of the camera. */
+  private updateForearm(): void {
+    const show = this.rightArm.visible && this.current !== 'bow';
+    this.forearm.visible = this.cuff.visible = show;
+    if (!show) return;
+    this.rightArm.updateMatrix();
+    const wrist = this.v1.set(0, -0.012, 0.12).applyMatrix4(this.rightArm.matrix);
+    const elbow = this.v2.set(0.4, -0.78, 0.12);
+    const dir = elbow.clone().sub(wrist);
+    const len = dir.length();
+    dir.normalize();
+    // The cylinder hangs from its top (the wrist) down along -Y; point -Y at the elbow.
+    this.q1.setFromUnitVectors(new THREE.Vector3(0, -1, 0), dir);
+    this.forearm.position.copy(wrist);
+    this.forearm.quaternion.copy(this.q1);
+    this.forearm.scale.set(1, len, 1);
+    this.cuff.position.copy(wrist).addScaledVector(dir, 0.015);
+    this.cuff.quaternion.copy(this.q1);
+  }
+
   private setPose(p: Pose): void {
     this.rightArm.position.set(p.px, p.py, p.pz);
     this.rightArm.rotation.set(p.rx, p.ry, p.rz);
@@ -308,22 +362,31 @@ export class ViewModel {
         return out;
       }
       case 'swing': {
-        // 1) Wind-up: up and out to the right, wrist cocked back, shoulder open.
-        const windup = P(rest.px - 0.02, rest.py + 0.19, rest.pz + 0.06, rest.rx + 0.42, rest.ry - 0.15, rest.rz - 0.12);
-        // 2) Strike: a fast diagonal from high right to low left across the crosshair,
-        //    pitching forward so the edge leads, wrist rolling through, a small lunge.
-        const strike = P(rest.px - 0.15, rest.py - 0.13, rest.pz - 0.17, rest.rx - 0.78, rest.ry + 0.28, rest.rz + 0.55);
-        // 3) Follow-through: carries on a little lower and slows down.
-        const follow = P(strike.px - 0.04, strike.py - 0.05, strike.pz, strike.rx - 0.1, strike.ry + 0.05, strike.rz + 0.1);
-        if (t < 0.28) return mix(out, rest, windup, easeOutCubic(t / 0.28));
-        if (t < 0.44) {
-          const k = (t - 0.28) / 0.16;
+        const side = this.swingVariant === 1;
+        // A: diagonal chop, high right to centre-left. B: flatter side chop, right to centre.
+        const windup = side
+          ? P(rest.px + 0.03, rest.py + 0.07, rest.pz + 0.06, rest.rx + 0.18, rest.ry - 0.35, rest.rz - 0.5)
+          : P(rest.px + 0.03, rest.py + 0.17, rest.pz + 0.07, rest.rx + 0.38, rest.ry - 0.22, rest.rz - 0.2);
+        const strike = side
+          ? P(rest.px - 0.19, rest.py + 0.01, rest.pz - 0.18, rest.rx - 0.25, rest.ry + 0.5, rest.rz - 0.45)
+          : P(rest.px - 0.17, rest.py - 0.02, rest.pz - 0.2, rest.rx - 0.5, rest.ry + 0.3, rest.rz + 0.55);
+        // Follow-through: a little further, pulled back as the blade is freed.
+        const follow = P(strike.px - 0.03, strike.py - 0.035, strike.pz + 0.035, strike.rx - 0.08, strike.ry + 0.06, strike.rz + (side ? 0.04 : 0.08));
+        // The strike lands by 0.40 so the blade is fully through when the blow resolves
+        // (impactAt 0.42) and the hit-stop buries it.
+        if (t < 0.28) {
+          // Heavy lift: slow to start, settling into the top of the arc.
+          const k = t / 0.28;
+          return mix(out, rest, windup, k * k * (3 - 2 * k));
+        }
+        if (t < 0.4) {
+          // Explosive arc down through the crosshair.
+          const k = (t - 0.28) / 0.12;
           return mix(out, windup, strike, k * k * k);
         }
-        if (t < 0.58) return mix(out, strike, follow, easeOutCubic((t - 0.44) / 0.14));
-        // Return with a soft, damped settle (a hint of overshoot).
-        const k = (t - 0.58) / 0.42;
-        const e = 1 - Math.pow(1 - k, 3) + Math.sin(k * Math.PI) * 0.06;
+        if (t < 0.54) return mix(out, strike, follow, easeOutCubic((t - 0.4) / 0.14));
+        const k = (t - 0.54) / 0.46;
+        const e = 1 - Math.pow(1 - k, 3) + Math.sin(k * Math.PI) * 0.07;
         return mix(out, follow, rest, e);
       }
       case 'stab': {
@@ -361,10 +424,14 @@ export class ViewModel {
     this.keyLight.color.copy(s.key);
     this.keyLight.intensity = Math.max(0.35, s.keyIntensity * 0.75);
 
+    this.clock += dt;
     if (this.action !== 'none') {
-      this.actionT += dt;
+      // While the blade is stuck in the wood the motion holds.
+      if (this.stuckT > 0) this.stuckT -= dt;
+      else this.actionT += dt;
       if (this.actionT >= this.actionDur) this.action = 'none';
     }
+    this.wrench = Math.max(0, this.wrench - dt * 5);
 
     const rest = REST[this.current];
     this.sprint = damp(this.sprint, s.sprint ? 1 : 0, 8, dt);
@@ -389,8 +456,22 @@ export class ViewModel {
     p.px += Math.cos(bt * 0.9) * 0.0025 * calm;
     p.rx += Math.sin(bt * 1.8 + 0.6) * 0.012 * calm;
     p.rz += Math.cos(bt * 0.9) * 0.014 * calm;
-    mix(this.pose, this.pose, p, 1 - Math.exp(-30 * dt));
+    // Tremor while stuck, then the pull-back as it comes free.
+    if (this.stuckT > 0) {
+      p.px += (Math.random() - 0.5) * 0.007;
+      p.py += (Math.random() - 0.5) * 0.007;
+      p.rz += (Math.random() - 0.5) * 0.05;
+    } else if (this.wrench > 0) {
+      p.pz += 0.035 * this.wrench;
+      p.py += 0.012 * this.wrench;
+      p.rx += 0.1 * this.wrench;
+    }
+    // A chop is applied as animated (no smoothing to swallow the snap); everything else
+    // eases in.
+    if (this.action === 'swing') Object.assign(this.pose, p);
+    else mix(this.pose, this.pose, p, 1 - Math.exp(-30 * dt));
     this.setPose(this.pose);
+    this.updateForearm();
 
     if (this.current === 'bow') {
       const attr = this.bowString.geometry.attributes.position as THREE.BufferAttribute;

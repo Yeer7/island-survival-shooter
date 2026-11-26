@@ -287,6 +287,10 @@ varying vec2 vTPos;`)
           float dGrass = texture2D(tGrass, tuv * 0.8).r;
           float dRock = texture2D(tRock, tuv * 0.3).r;
           float macro = texture2D(tGrass, vTPos * 0.011 + 0.3).r;
+          // Forest floor under the grass: a finer moss/earth layer and more contrast.
+          float fine = texture2D(tGrass, tuv * 3.1 + 0.17).r;
+          float floorMask = (1.0 - vSurf.x) * (1.0 - vSurf.y);
+          dGrass = mix(dGrass, pow(dGrass, 1.35) * (0.7 + 0.6 * fine) * 1.12, floorMask);
           float det = mix(dGrass, dSand, vSurf.x);
           det = mix(det, dRock, vSurf.y);
           diffuseColor.rgb *= det * 1.32 * (0.86 + 0.28 * macro);`,

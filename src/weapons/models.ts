@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { barkMaterial } from '../world/pines';
 import { AssetName, library } from '../assets/assets';
 import { detailTextures } from '../world/textures';
 
@@ -132,9 +133,10 @@ let _logMats: THREE.Material[] | null = null;
 export function logMaterials(): THREE.Material[] {
   if (!_logMats) {
     const tex = detailTextures();
-    const bark = new THREE.MeshStandardMaterial({ color: new THREE.Color(0x6b4a2e).multiplyScalar(1.35), roughness: 0.95, map: tex.bark, bumpMap: tex.barkBump, bumpScale: 3 });
+    // Logs wear the same Poly Haven pine bark as the trees they came from.
+    void tex;
     const ring = std(0xcaa472, 0.8);
-    _logMats = [bark, ring, ring];
+    _logMats = [barkMaterial(), ring, ring];
   }
   return _logMats;
 }

@@ -9,9 +9,6 @@ import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
  * origin at the base (feet), centred on X/Z.
  */
 export const ASSET_FILES = {
-  pineA: 'assets/nature/pine_a.glb',
-  pineB: 'assets/nature/pine_b.glb',
-  pineC: 'assets/nature/pine_c.glb',
   rockLarge: 'assets/nature/rock_large.glb',
   rockMedium: 'assets/nature/rock_medium.glb',
   rockCliff: 'assets/nature/rock_cliff.glb',

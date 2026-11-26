@@ -12,8 +12,8 @@ Run `npm run lint:assets` to check every `.glb`/`.gltf`/`.fbx` and texture (pars
 
 | Shipped file | Original asset | Author | Source | Licence | Changes |
 | --- | --- | --- | --- | --- | --- |
-| `nature/pine_a.glb` | Pine | Quaternius | https://poly.pizza/m/79gmlLnweB | CC0 1.0 | Embedded textures resized to 512 px (`scripts/repack_glb.py`) |
-| `nature/pine_b.glb` | Pine | Quaternius | https://poly.pizza/m/igSu0cPoBz | CC0 1.0 | Textures resized to 512 px |
+| `nature/pine_a.glb` | Pine | Quaternius | https://poly.pizza/m/79gmlLnweB | CC0 1.0 | Embedded textures resized to 512 px (`scripts/repack_glb.py`) — no longer loaded: pines are built in code since 2026-11-26 |
+| `nature/pine_b.glb` | Pine | Quaternius | https://poly.pizza/m/igSu0cPoBz | CC0 1.0 | Textures resized to 512 px — no longer loaded: pines are built in code since 2026-11-26 |
 | `nature/pine_c.glb` | Pine | Quaternius | https://poly.pizza/m/rfnxJv0Rqa | CC0 1.0 | Textures resized to 512 px |
 | `nature/rock_large.glb` | Rock Large | Quaternius | https://poly.pizza/m/54jZKTAt5p | CC0 1.0 | None (material replaced in code) |
 | `nature/rock_medium.glb` | Rock | Quaternius | https://poly.pizza/m/Z6M4GNkgWt | CC0 1.0 | None |
@@ -26,7 +26,7 @@ Run `npm run lint:assets` to check every `.glb`/`.gltf`/`.fbx` and texture (pars
 | `ultimate/Grass_Small.gltf` + `Grass_Small.bin` | Grass_Small | Quaternius — Ultimate Stylized Nature Pack (May 2022) | https://quaternius.com/packs/ultimatenature.html | CC0 1.0 | None (normals set straight up in code) |
 | `ultimate/Grass.png` | Grass texture | Quaternius — Ultimate Stylized Nature Pack (May 2022) | https://quaternius.com/packs/ultimatenature.html | CC0 1.0 | Resized 1024 → 512 px |
 | `ultimate/Bush_Leaves.png` | Bush_Leaves texture | Quaternius — Ultimate Stylized Nature Pack (May 2022) | https://quaternius.com/packs/ultimatenature.html | CC0 1.0 | Resized 1024 → 512 px |
-| `ultimate/PalmTree_1.fbx`, `PalmTree_2.fbx`, `PalmTree_3.fbx` | PalmTree_1–3 | Quaternius — Ultimate Stylized Nature Pack (May 2022) | https://quaternius.com/packs/ultimatenature.html | CC0 1.0 | None (materials rebuilt in code from the textures below) |
+| `ultimate/PalmTree_1.fbx`, `PalmTree_2.fbx`, `PalmTree_3.fbx` | PalmTree_1–3 | Quaternius — Ultimate Stylized Nature Pack (May 2022) | https://quaternius.com/packs/ultimatenature.html | CC0 1.0 | None (materials rebuilt in code from the textures below) — no longer loaded: palms are built in code since 2026-11-26 |
 | `ultimate/PalmTree_Trunk.jpg` | PalmTree_Trunk texture | Quaternius — Ultimate Stylized Nature Pack (May 2022) | https://quaternius.com/packs/ultimatenature.html | CC0 1.0 | Resized 2048 → 512 px |
 | `ultimate/PalmTree_Leaves.png` | PalmTree_Leaves texture | Quaternius — Ultimate Stylized Nature Pack (May 2022) | https://quaternius.com/packs/ultimatenature.html | CC0 1.0 | Resized 1024 → 512 px |
 | `survivalpack/FirstAidKit.fbx` | FirstAidKit (Curativo drop) | Quaternius — Survival Pack (Sept 2020) | https://quaternius.com/packs/survival.html | CC0 1.0 | None (flat colours converted to PBR in code) |
@@ -53,6 +53,9 @@ Run `npm run lint:assets` to check every `.glb`/`.gltf`/`.fbx` and texture (pars
 | `textures/rock_face_diff_512.jpg` | Rock Face — albedo (cave walls, floor and every rock inside the cave) | Poly Haven (photography Charlotte Baglioni, processing Dario Barresi) | https://polyhaven.com/a/rock_face | CC0 1.0 | 1k JPG resized to 512 px and desaturated 65% toward grey |
 | `textures/rock_face_nor_gl_512.jpg` | Rock Face — normal map (OpenGL) | Poly Haven | https://polyhaven.com/a/rock_face | CC0 1.0 | 1k JPG resized to 512 px |
 | `textures/rock_face_rough_512.jpg` | Rock Face — roughness | Poly Haven | https://polyhaven.com/a/rock_face | CC0 1.0 | 1k JPG resized to 512 px (greyscale) |
+| `textures/pine_bark_diff_512.jpg` | Pine Bark — albedo (pine trunks, branches, stumps and logs) | Poly Haven (Dimitrios Savva) | https://polyhaven.com/a/pine_bark | CC0 1.0 | 1k JPG resized to 512 px |
+| `textures/pine_bark_nor_gl_512.jpg` | Pine Bark — normal map (OpenGL) | Poly Haven (Dimitrios Savva) | https://polyhaven.com/a/pine_bark | CC0 1.0 | 1k JPG resized to 512 px |
+| `textures/pine_bark_rough_512.jpg` | Pine Bark — roughness | Poly Haven (Dimitrios Savva) | https://polyhaven.com/a/pine_bark | CC0 1.0 | 1k JPG resized to 512 px (greyscale) |
 | `village/skull.glb` | Skull (effigies, door posts, gates, skull pile) | Quaternius | https://poly.pizza/m/YgmRBtFlcF | CC0 1.0 | None (tinted bone-white in code) |
 | `village/bone.glb` | Bone (effigies, hanging bones, scattered bones) | Quaternius | https://poly.pizza/m/uMs0lDp1u3 | CC0 1.0 | None (tinted bone-white in code) |
 | `village/crate.glb` | Crate (lootable village crates) | Quaternius | https://poly.pizza/m/3VGWnZPXmG | CC0 1.0 | None |

@@ -6,6 +6,7 @@ import { ColliderGrid, Circle } from './colliders';
 import { LAKE_CENTER, LAKE_LEVEL, LAKE_RADIUS, Terrain } from './terrain';
 import { detailTextures } from './textures';
 import { PALM_CUT, buildPalmVariants, palmMaterials, palmStumpGeometry } from './palms';
+import { PINE_CUT, barkMaterial, buildPineVariants, needleMaterial, pineCutMaterial, pineStumpGeometry } from './pines';
 import { SEA_LEVEL } from './terrain';
 
 export interface Exclusion {
@@ -85,7 +86,6 @@ class InstancedSet {
   }
 }
 
-const TREE_ASSETS: AssetName[] = ['pineA', 'pineB', 'pineC'];
 const PALM_HEIGHT = 8;
 /** Normalised tree height in metres before the per-tree scale. */
 const TREE_HEIGHT = 9.5;
@@ -121,8 +121,6 @@ interface FallingTree {
   bounces: number;
 }
 
-/** Height a fallen trunk can rest on: the ground, or just under the sea surface. */
-const PINE_CUT = 0.55;
 
 export interface ForestEvents {
   onFallStart(tree: Tree): void;
@@ -152,9 +150,9 @@ export class Forest {
   constructor(private terrain: Terrain, colliders: ColliderGrid, exclusions: Exclusion[], private events: ForestEvents, lib: AssetLibrary, count = 350, groves: { x: number; z: number; r0: number; r1: number; count: number }[] = []) {
     // Variants 0-2 are the CC0 pines; 3-5 are coconut palms built in code (choppable too).
     const palmsV = buildPalmVariants();
-    const pines = TREE_ASSETS.map((n) => lib.parts(n, { by: 'height', value: TREE_HEIGHT }));
-    this.variants = [...pines, ...palmsV.map((v) => v.standing)];
-    this.fallParts = [...pines, ...palmsV.map((v) => v.falling)];
+    const pinesV = buildPineVariants();
+    this.variants = [...pinesV.map((v) => v.standing), ...palmsV.map((v) => v.standing)];
+    this.fallParts = [...pinesV.map((v) => v.falling), ...palmsV.map((v) => v.falling)];
     const pineSpine: { p: THREE.Vector3; r: number }[] = [];
     for (let y = 1; y <= TREE_HEIGHT; y += 0.75) {
       const crown = y < 2 ? 0 : 2.3 * (1 - (y - 2) / (TREE_HEIGHT - 2));
@@ -167,6 +165,17 @@ export class Forest {
         if (sm.alphaTest > 0) addWind(sm, v < 3 ? 3.0 : 5.0, v < 3 ? 0.012 : 0.02);
       }
     });
+    // Needle sprays are double-sided cards: keep their up-leaning normal on both faces so
+    // the underside of a spray never turns black.
+    {
+      const nm = needleMaterial();
+      const windCompile = nm.onBeforeCompile;
+      nm.onBeforeCompile = (shader, renderer) => {
+        windCompile.call(nm, shader, renderer);
+        shader.fragmentShader = shader.fragmentShader.replace('#include <normal_fragment_begin>', THREE.ShaderChunk.normal_fragment_begin.replace('normal *= faceDirection;', ''));
+      };
+      nm.customProgramCacheKey = () => 'pine-needles-wind';
+    }
 
     const rand = mulberry32(4242);
     const placed: { x: number; z: number; kind: 'pine' | 'palm' }[] = [];
@@ -229,10 +238,11 @@ export class Forest {
     this.sets = this.variants.map((parts) => new InstancedSet(parts, placed.length, true));
     // Cut stump: dark bark on the side (same as the logs) and a pale ring-cut top.
     const tex = detailTextures();
-    const stumpGeo = new THREE.CylinderGeometry(0.4, 0.5, 0.7, 12, 1);
-    stumpGeo.translate(0, 0.35, 0);
-    const bark = new THREE.MeshStandardMaterial({ color: new THREE.Color(0x5a3d26).multiplyScalar(1.35), roughness: 0.95, map: tex.bark, bumpMap: tex.barkBump, bumpScale: 3 });
-    const cut = new THREE.MeshStandardMaterial({ color: new THREE.Color(0xd9b98a), roughness: 0.85, map: tex.rings });
+    // Pine stump: the trunk's own foot in the same Poly Haven bark, ring-cut top at PINE_CUT.
+    void tex;
+    const stumpGeo = pineStumpGeometry();
+    const bark = barkMaterial();
+    const cut = pineCutMaterial();
     const stumpMesh = new THREE.InstancedMesh(stumpGeo, [bark, cut, bark], Math.max(1, placed.length));
     this.stumps = new InstancedSet([], placed.length, true);
     stumpMesh.castShadow = true;
@@ -264,7 +274,7 @@ export class Forest {
       this.dummy.scale.setScalar(scale);
       this.dummy.updateMatrix();
       if (palm) tint.setRGB(1, 1, 1);
-      else tint.setHSL(0.25 + (rand() - 0.5) * 0.05, 0.2 + rand() * 0.2, 0.5 + rand() * 0.12).multiplyScalar(1.9);
+      else tint.setScalar(0.88 + rand() * 0.22);
       tree.slot = this.sets[variant].push(this.dummy.matrix, tint);
       this.stumps.push(this.zero);
       this.palmStumps.push(this.zero);
@@ -278,29 +288,14 @@ export class Forest {
   private writeStump(i: number): void {
     const t = this.trees[i];
     this.sets[t.variant].set(t.slot, this.zero);
-    if (t.kind === 'palm') {
-      // The palm stump is the trunk's own foot: same place, yaw and scale, top at the cut.
-      this.dummy.position.set(t.x, t.y, t.z);
-      this.dummy.rotation.set(0, t.rotY, 0);
-      this.dummy.scale.setScalar(t.scale);
-      this.dummy.updateMatrix();
-      this.palmStumps.set(i, this.dummy.matrix);
-      for (const m of this.palmStumps.meshes) m.computeBoundingSphere();
-      return;
-    }
-    // Sit the stump on the lowest ground under its rim (and a little into it) so it
-    // never hovers on a slope.
-    let low = this.terrain.height(t.x, t.z);
-    for (let k = 0; k < 8; k++) {
-      const a = (k / 8) * Math.PI * 2;
-      low = Math.min(low, this.terrain.height(t.x + Math.cos(a) * 0.5 * t.scale, t.z + Math.sin(a) * 0.5 * t.scale));
-    }
-    this.dummy.position.set(t.x, low - 0.12, t.z);
+    // The stump is the trunk's own foot: same place, yaw and scale, top exactly at the cut.
+    const set = t.kind === 'palm' ? this.palmStumps : this.stumps;
+    this.dummy.position.set(t.x, t.y, t.z);
     this.dummy.rotation.set(0, t.rotY, 0);
-    this.dummy.scale.set(t.scale, t.scale * (0.85 + (t.slot % 5) * 0.06), t.scale);
+    this.dummy.scale.setScalar(t.scale);
     this.dummy.updateMatrix();
-    this.stumps.set(i, this.dummy.matrix);
-    for (const m of this.stumps.meshes) m.computeBoundingSphere();
+    set.set(i, this.dummy.matrix);
+    for (const m of set.meshes) m.computeBoundingSphere();
   }
 
   private fallMesh(variant: number): THREE.Group {

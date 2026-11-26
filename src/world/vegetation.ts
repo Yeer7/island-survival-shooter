@@ -5,6 +5,8 @@ import { mulberry32, smoothstep } from '../core/math';
 import { ColliderGrid, Circle } from './colliders';
 import { LAKE_CENTER, LAKE_LEVEL, LAKE_RADIUS, Terrain } from './terrain';
 import { detailTextures } from './textures';
+import { PALM_CUT, buildPalmVariants, palmMaterials, palmStumpGeometry } from './palms';
+import { SEA_LEVEL } from './terrain';
 
 export interface Exclusion {
   x: number;
@@ -84,7 +86,6 @@ class InstancedSet {
 }
 
 const TREE_ASSETS: AssetName[] = ['pineA', 'pineB', 'pineC'];
-const PALM_ASSETS: AssetName[] = ['palm1', 'palm2', 'palm3'];
 const PALM_HEIGHT = 8;
 /** Normalised tree height in metres before the per-tree scale. */
 const TREE_HEIGHT = 9.5;
@@ -110,16 +111,25 @@ interface FallingTree {
   pivot: THREE.Group;
   axis: THREE.Vector3;
   dir: THREE.Vector3;
+  /** Where the pivot (top of the cut) starts, and the resting angle the ground allows. */
+  base: THREE.Vector3;
+  rest: number;
+  cut: number;
   angle: number;
   vel: number;
   landed: number;
-  bounced: boolean;
+  bounces: number;
 }
+
+/** Height a fallen trunk can rest on: the ground, or just under the sea surface. */
+const PINE_CUT = 0.55;
 
 export interface ForestEvents {
   onFallStart(tree: Tree): void;
-  onLanded(tree: Tree, dir: THREE.Vector3): void;
-  onSettled(tree: Tree, dir: THREE.Vector3): void;
+  /** `crown`: where the top hit the ground. */
+  onLanded(tree: Tree, dir: THREE.Vector3, crown: THREE.Vector3): void;
+  /** `along`: world points on the fallen trunk at 25 %, 50 %, 75 % and 100 % of its length. */
+  onSettled(tree: Tree, dir: THREE.Vector3, along: THREE.Vector3[]): void;
 }
 
 /** ~350 instanced CC0 pines (three variants) that can be chopped, fall and leave stumps. */
@@ -127,23 +137,34 @@ export class Forest {
   readonly trees: Tree[] = [];
   readonly group = new THREE.Group();
   private variants: InstancePart[][];
+  /** The piece that falls (palms: everything above the cut, with a closed base). */
+  private fallParts: InstancePart[][];
+  /** Spine samples per variant (model space) used to rest a fallen tree on the ground. */
+  private spines: { p: THREE.Vector3; r: number }[][];
   private sets: InstancedSet[];
   private stumps: InstancedSet;
+  private palmStumps: InstancedSet;
   private falling: FallingTree[] = [];
   private dummy = new THREE.Object3D();
   private q = new THREE.Quaternion();
   private zero = new THREE.Matrix4().makeScale(0, 0, 0);
 
   constructor(private terrain: Terrain, colliders: ColliderGrid, exclusions: Exclusion[], private events: ForestEvents, lib: AssetLibrary, count = 350, groves: { x: number; z: number; r0: number; r1: number; count: number }[] = []) {
-    // Variants 0-2 are pines; 3-5 are the beach palms (choppable too).
-    this.variants = [
-      ...TREE_ASSETS.map((n) => lib.parts(n, { by: 'height', value: TREE_HEIGHT })),
-      ...PALM_ASSETS.map((n) => lib.parts(n, { by: 'height', value: PALM_HEIGHT })),
-    ];
+    // Variants 0-2 are the CC0 pines; 3-5 are coconut palms built in code (choppable too).
+    const palmsV = buildPalmVariants();
+    const pines = TREE_ASSETS.map((n) => lib.parts(n, { by: 'height', value: TREE_HEIGHT }));
+    this.variants = [...pines, ...palmsV.map((v) => v.standing)];
+    this.fallParts = [...pines, ...palmsV.map((v) => v.falling)];
+    const pineSpine: { p: THREE.Vector3; r: number }[] = [];
+    for (let y = 1; y <= TREE_HEIGHT; y += 0.75) {
+      const crown = y < 2 ? 0 : 2.3 * (1 - (y - 2) / (TREE_HEIGHT - 2));
+      pineSpine.push({ p: new THREE.Vector3(0, y, 0), r: 0.3 + crown * 0.18 });
+    }
+    this.spines = [pineSpine, pineSpine, pineSpine, ...palmsV.map((v) => v.spine)];
     this.variants.forEach((parts, v) => {
       for (const p of parts) {
         const sm = p.material as THREE.MeshStandardMaterial;
-        if (sm.alphaTest > 0) addWind(sm, v < 3 ? 3.0 : 4.0, v < 3 ? 0.012 : 0.02);
+        if (sm.alphaTest > 0) addWind(sm, v < 3 ? 3.0 : 5.0, v < 3 ? 0.012 : 0.02);
       }
     });
 
@@ -221,6 +242,12 @@ export class Forest {
     // useless: never cull them (they are one cheap draw).
     stumpMesh.frustumCulled = false;
     this.stumps.meshes.push(stumpMesh);
+    // Palm stump: same radius and ringed bark as the palm trunk, so the cut lines up.
+    const pm = palmMaterials();
+    this.palmStumps = new InstancedSet([{ geometry: palmStumpGeometry(), material: pm.trunk }], placed.length, true);
+    const palmStumpMesh = this.palmStumps.meshes[0];
+    palmStumpMesh.material = [pm.trunk, pm.cut, pm.trunk];
+    palmStumpMesh.frustumCulled = false;
     const tint = new THREE.Color();
     placed.forEach((p, i) => {
       const palm = p.kind === 'palm';
@@ -240,15 +267,27 @@ export class Forest {
       else tint.setHSL(0.25 + (rand() - 0.5) * 0.05, 0.2 + rand() * 0.2, 0.5 + rand() * 0.12).multiplyScalar(1.9);
       tree.slot = this.sets[variant].push(this.dummy.matrix, tint);
       this.stumps.push(this.zero);
+      this.palmStumps.push(this.zero);
       this.trees.push(tree);
     });
     for (const s of this.sets) s.finish(this.group);
     this.stumps.finish(this.group);
+    this.palmStumps.finish(this.group);
   }
 
   private writeStump(i: number): void {
     const t = this.trees[i];
     this.sets[t.variant].set(t.slot, this.zero);
+    if (t.kind === 'palm') {
+      // The palm stump is the trunk's own foot: same place, yaw and scale, top at the cut.
+      this.dummy.position.set(t.x, t.y, t.z);
+      this.dummy.rotation.set(0, t.rotY, 0);
+      this.dummy.scale.setScalar(t.scale);
+      this.dummy.updateMatrix();
+      this.palmStumps.set(i, this.dummy.matrix);
+      for (const m of this.palmStumps.meshes) m.computeBoundingSphere();
+      return;
+    }
     // Sit the stump on the lowest ground under its rim (and a little into it) so it
     // never hovers on a slope.
     let low = this.terrain.height(t.x, t.z);
@@ -266,7 +305,7 @@ export class Forest {
 
   private fallMesh(variant: number): THREE.Group {
     const g = new THREE.Group();
-    for (const p of this.variants[variant]) {
+    for (const p of this.fallParts[variant]) {
       const m = new THREE.Mesh(p.geometry, p.material);
       m.castShadow = true;
       g.add(m);
@@ -322,24 +361,82 @@ export class Forest {
     dir.normalize();
     // Lean a little sideways so trees never fall straight onto the player.
     dir.applyAxisAngle(new THREE.Vector3(0, 1, 0), (Math.random() - 0.5) * 0.6);
+    if (t.kind === 'palm') {
+      // A palm goes where its curve and the weight of its crown pull it, nudged by the blow,
+      // so it never swings over backwards onto its fronds.
+      const lean = new THREE.Vector3(Math.cos(t.rotY), 0, -Math.sin(t.rotY));
+      dir.multiplyScalar(0.55).addScaledVector(lean, 1.0);
+      if (dir.lengthSq() < 0.05) dir.copy(lean);
+      dir.normalize();
+    }
     this.writeStump(i);
-    t.collider.r = 0.38 * t.scale;
-    t.collider.y1 = t.y + 0.6;
+    t.collider.r = (t.kind === 'palm' ? 0.3 : 0.38) * t.scale;
+    t.collider.y1 = t.y + 0.6 * t.scale;
 
+    const cut = (t.kind === 'palm' ? PALM_CUT : PINE_CUT) * t.scale;
     const group = new THREE.Group();
-    group.position.set(t.x, t.y + 0.55, t.z);
+    const base = new THREE.Vector3(t.x, t.y + cut, t.z);
+    group.position.copy(base);
     const pivot = new THREE.Group();
     const inner = this.fallMesh(t.variant);
     inner.rotation.y = t.rotY;
     inner.scale.setScalar(t.scale);
-    inner.position.y = -0.55;
+    inner.position.y = -cut;
     pivot.add(inner);
     group.add(pivot);
     this.group.add(group);
     const axis = new THREE.Vector3(dir.z, 0, -dir.x);
-    this.falling.push({ tree: t, group, pivot, axis, dir, angle: 0.02, vel: 0.25, landed: -1, bounced: false });
+    const f: FallingTree = { tree: t, group, pivot, axis, dir, base, rest: Math.PI / 2, cut, angle: 0.02, vel: 0.25, landed: -1, bounces: 0 };
+    f.rest = this.restAngle(f);
+    this.falling.push(f);
     this.events.onFallStart(t);
     return true;
+  }
+
+  /** Slide out of the axe notch: a few centimetres along the fall as it tips. */
+  private slip(f: FallingTree, angle: number): number {
+    return 0.14 * f.tree.scale * smoothstep(0.2, f.rest, angle);
+  }
+
+  /** World point of a model-space point on a falling tree at a given angle. */
+  private fallPoint(f: FallingTree, p: THREE.Vector3, angle: number, out: THREE.Vector3): THREE.Vector3 {
+    this.q.setFromAxisAngle(f.axis, angle);
+    out.copy(p).multiplyScalar(f.tree.scale).applyAxisAngle(this.yAxis, f.tree.rotY);
+    out.y -= f.cut;
+    out.applyQuaternion(this.q).add(f.base).addScaledVector(f.dir, this.slip(f, angle));
+    return out;
+  }
+
+  /** Lowest surface a fallen trunk can lie on at (x, z). */
+  private restHeight(x: number, z: number): number {
+    return Math.max(this.terrain.height(x, z), SEA_LEVEL - 0.35);
+  }
+
+  /** First angle at which any part of the trunk or crown touches the ground (slopes included). */
+  private restAngle(f: FallingTree): number {
+    const spine = this.spines[f.tree.variant];
+    const w = new THREE.Vector3();
+    for (let a = 0.3; a < 2.3; a += 0.015) {
+      for (const sp of spine) {
+        this.fallPoint(f, sp.p, a, w);
+        if (w.y - sp.r * f.tree.scale < this.restHeight(w.x, w.z)) return Math.max(0.6, a - 0.015);
+      }
+    }
+    return 2.3;
+  }
+
+  private yAxis = new THREE.Vector3(0, 1, 0);
+
+  /** World points on a fallen trunk at fractions of its spine (root → crown). */
+  private alongTrunk(f: FallingTree, fracs: number[]): THREE.Vector3[] {
+    const spine = this.spines[f.tree.variant];
+    const trunk = spine.filter((sp) => Math.abs(sp.p.x) + Math.abs(sp.p.z) < 6 || sp === spine[0]);
+    const top = f.tree.kind === 'palm' ? trunk.findIndex((sp) => sp.r >= 0.45) : trunk.length - 1;
+    const last = top > 0 ? top : trunk.length - 1;
+    return fracs.map((fr) => {
+      const k = Math.min(last, Math.round(fr * last));
+      return this.fallPoint(f, trunk[k].p, f.angle, new THREE.Vector3());
+    });
   }
 
   update(dt: number): void {
@@ -348,30 +445,32 @@ export class Forest {
       if (f.landed < 0) {
         f.vel += 2.4 * Math.sin(f.angle + 0.06) * dt;
         f.angle += f.vel * dt;
-        const rest = Math.PI / 2 - 0.08;
-        if (f.angle >= rest) {
-          f.angle = rest;
-          if (!f.bounced) {
-            f.bounced = true;
-            f.vel = -f.vel * 0.18;
-            this.events.onLanded(f.tree, f.dir);
-          } else {
-            f.vel = 0;
-            f.landed = 0;
+        if (f.angle >= f.rest) {
+          f.angle = f.rest;
+          if (f.bounces === 0) {
+            const crown = this.alongTrunk(f, [1])[0];
+            crown.y = this.restHeight(crown.x, crown.z) + 0.3;
+            this.events.onLanded(f.tree, f.dir, crown);
           }
+          f.bounces++;
+          // A damped rebound or two, then it lies still.
+          f.vel = f.bounces < 3 ? -Math.abs(f.vel) * (f.bounces === 1 ? 0.2 : 0.1) : 0;
+          if (f.bounces >= 3) f.landed = 0;
         }
       } else {
         f.landed += dt;
         if (f.landed > 0.55) {
+          const along = this.alongTrunk(f, [0.25, 0.5, 0.75, 1]);
           this.group.remove(f.group);
           this.falling.splice(k, 1);
           f.tree.state = 'stump';
-          this.events.onSettled(f.tree, f.dir);
+          this.events.onSettled(f.tree, f.dir, along);
           continue;
         }
       }
       this.q.setFromAxisAngle(f.axis, f.angle);
       f.pivot.quaternion.copy(this.q);
+      f.group.position.copy(f.base).addScaledVector(f.dir, this.slip(f, f.angle));
     }
   }
 

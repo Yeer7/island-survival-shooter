@@ -226,8 +226,8 @@ export class Game implements CombatWorld {
     ];
     this.forest = new Forest(this.terrain, this.colliders, exclusions, {
       onFallStart: (t) => this.onTreeFallStart(t),
-      onLanded: (t, d) => this.onTreeLanded(t, d),
-      onSettled: (t, d) => this.onTreeSettled(t, d),
+      onLanded: (t, d, c) => this.onTreeLanded(t, d, c),
+      onSettled: (t, d, a) => this.onTreeSettled(t, d, a),
     }, lib, 330, [{ x: this.crash.center.x, z: this.crash.center.z, r0: 26, r1: 58, count: 70 }]);
     this.scene.add(this.forest.group);
     this.props = new Props(this.terrain, this.colliders, exclusions, this.forest, lib);
@@ -1521,46 +1521,38 @@ export class Game implements CombatWorld {
     this.hud.toast(tr('🌲 Madeira!', '🌲 Timber!'));
   }
 
-  private onTreeLanded(t: Tree, dir: THREE.Vector3): void {
-    const tip = this.v1.set(t.x + dir.x * 6 * t.scale, 0, t.z + dir.z * 6 * t.scale);
-    tip.y = this.terrain.height(tip.x, tip.z) + 0.5;
+  private onTreeLanded(t: Tree, _dir: THREE.Vector3, crown: THREE.Vector3): void {
+    const tip = this.v1.copy(crown);
     const dist = Math.hypot(t.x - this.player.pos.x, t.z - this.player.pos.z);
     this.sound.treeCrash(dist);
     this.player.addTrauma(0.45 * (1 - smoothstep(4, 30, dist)));
-    this.debris.burst(tip, this.v3.set(0, 1, 0), 26, 0x3f6e34, { speed: 4, size: 0.12, floor: tip.y - 0.4, life: 1.4 });
+    this.debris.burst(tip, this.v3.set(0, 1, 0), 26, t.kind === 'palm' ? 0x4f8a3a : 0x3f6e34, { speed: 4, size: 0.12, floor: tip.y - 0.4, life: 1.4 });
+    // Palms come down on the beach: a puff of sand where the crown hits.
+    if (t.kind === 'palm') this.debris.burst(tip, this.v3.set(0, 1, 0), 18, 0xd8c08a, { speed: 3, size: 0.07, floor: tip.y - 0.4, life: 1.1 });
   }
 
-  private onTreeSettled(t: Tree, dir: THREE.Vector3): void {
+  private onTreeSettled(t: Tree, dir: THREE.Vector3, along: THREE.Vector3[]): void {
     const rotY = Math.atan2(dir.x, dir.z) + Math.PI / 2;
+    const drop = (type: 'log' | 'stick' | 'coconut', p: THREE.Vector3, amount: number, side = 0) => {
+      const x = p.x + dir.z * side;
+      const z = p.z - dir.x * side;
+      const y = this.groundY(x, z);
+      this.pickups.add(type, this.v1.set(x, y, z), amount, rotY + (Math.random() - 0.5) * 0.3);
+      if (type === 'log') this.debris.burst(this.v1.set(x, y + 0.2, z), this.v3.set(0, 1, 0), 8, 0xc2a070, { speed: 2, size: 0.07, floor: y });
+    };
     if (t.kind === 'palm') {
-      // A palm gives 2 logs and a coconut.
-      for (let i = 0; i < 2; i++) {
-        const along = (2 + i * 2.6) * t.scale;
-        const x = t.x + dir.x * along;
-        const z = t.z + dir.z * along;
-        const y = this.groundY(x, z);
-        this.pickups.add('log', this.v1.set(x, y, z), 1, rotY + (Math.random() - 0.5) * 0.3);
-        this.debris.burst(this.v1.set(x, y + 0.2, z), this.v3.set(0, 1, 0), 8, 0xc2a070, { speed: 2, size: 0.07, floor: y });
-      }
-      const cx = t.x + dir.x * 7 * t.scale + dir.z * 0.8;
-      const cz = t.z + dir.z * 7 * t.scale - dir.x * 0.8;
-      this.pickups.add('coconut', this.v1.set(cx, this.groundY(cx, cz), cz), 1);
+      // A palm gives 2 logs where its trunk lay and a coconut by its crown.
+      drop('log', along[0], 1);
+      drop('log', along[1], 1);
+      drop('coconut', along[3], 1, 0.7);
       this.hud.toast(tr('🌴 2 toras + 1 coco — [E] para pegar', '🌴 2 logs + 1 coconut — [E] to pick up'));
       return;
     }
-    for (let i = 0; i < 3; i++) {
-      const along = (1.8 + i * 2.3) * t.scale;
-      const side = (i - 1) * 0.25;
-      const x = t.x + dir.x * along + dir.z * side;
-      const z = t.z + dir.z * along - dir.x * side;
-      const y = this.groundY(x, z);
-      this.pickups.add('log', this.v1.set(x, y, z), 1, rotY + (Math.random() - 0.5) * 0.3);
-      this.debris.burst(this.v1.set(x, y + 0.2, z), this.v3.set(0, 1, 0), 8, 0xc2a070, { speed: 2, size: 0.07, floor: y });
-    }
+    drop('log', along[0], 1, -0.25);
+    drop('log', along[1], 1);
+    drop('log', along[2], 1, 0.25);
     // Branches come down too.
-    const bx = t.x + dir.x * 5 * t.scale + dir.z * 1.2;
-    const bz = t.z + dir.z * 5 * t.scale - dir.x * 1.2;
-    this.pickups.add('stick', this.v1.set(bx, this.groundY(bx, bz), bz), 2);
+    drop('stick', along[3], 2, 1.2);
     this.hud.toast(tr('🪵 3 toras + gravetos — [E] para pegar', '🪵 3 logs + sticks — [E] to pick up'));
   }
 

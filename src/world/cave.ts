@@ -1112,6 +1112,7 @@ export class Cave {
       const lat = (rand() < 0.5 ? -1 : 1) * (w * (0.45 + rand() * 0.5));
       const h = 0.5 + rand() * 2.4;
       const p = this.at(dd, lat, -0.05);
+      if (!this.clearOfCamp(p.x, p.z) || !this.dry(p.x, p.z)) continue;
       const c = speleothem(h, 0.18 + h * 0.13, k * 13 + 3);
       c.position.copy(p);
       c.rotation.y = rand() * 6;
@@ -1124,11 +1125,18 @@ export class Cave {
     const pool = new THREE.MeshStandardMaterial({ color: 0x1a8a9a, emissive: 0x0c7a8e, emissiveIntensity: 0.8, emissiveMap: ct, map: ct, roughness: 0.08, metalness: 0.1, transparent: true, opacity: 0.85 });
     this.water.push(pool);
     const poolP = this.at(80, -6.2, 0.04);
-    const pg = new THREE.CircleGeometry(3.6, 28);
+    // A flat disc with an irregular rim; only the rim moves, every normal points straight up
+    // and the UVs follow the final shape, so the surface shows no creases.
+    const pg = new THREE.CircleGeometry(3.6, 64);
     const pp = pg.attributes.position;
+    const puv = pg.attributes.uv;
     for (let i = 1; i < pp.count; i++) {
-      const k2 = 0.85 + vnoise(pp.getX(i) * 1.5, pp.getY(i) * 1.5, 3) * 0.3;
+      const k2 = 0.88 + vnoise(Math.atan2(pp.getY(i), pp.getX(i)) * 1.2 + 5, 0.5, 3) * 0.24;
       pp.setXY(i, pp.getX(i) * k2, pp.getY(i) * k2);
+    }
+    for (let i = 0; i < pp.count; i++) {
+      puv.setXY(i, pp.getX(i) / 7.2 + 0.5, pp.getY(i) / 7.2 + 0.5);
+      pg.attributes.normal.setXYZ(i, 0, 0, 1);
     }
     const pm = new THREE.Mesh(pg, pool);
     pm.rotation.x = -Math.PI / 2;
@@ -1147,6 +1155,7 @@ export class Cave {
     // Bones of those who came before.
     for (let k = 0; k < 14; k++) {
       const p = this.at(C - 9 + rand() * 16, (rand() - 0.5) * 14, 0);
+      if (!this.dry(p.x, p.z) || !this.clearOfCamp(p.x, p.z)) continue;
       const b = this.model(k % 4 === 0 ? 'skull' : 'bone', k % 4 === 0 ? { by: 'height', value: 0.24 } : { by: 'max', value: 0.3 + rand() * 0.3 });
       if (!b) continue;
       b.position.copy(p);
@@ -1288,6 +1297,7 @@ export class Cave {
       if (!r) continue;
       const lat = -bw * 0.7 + (k / 4) * bw * 1.4 + (rand() - 0.5);
       const p = this.at(bd + 0.2, lat, -0.4);
+      if (!this.clearOfCamp(p.x, p.z)) continue;
       r.position.copy(p);
       r.rotation.y = rand() * 6;
       root.add(r);
@@ -1295,8 +1305,10 @@ export class Cave {
     }
     for (let k = 0; k < 6; k++) {
       const h = 0.6 + rand() * 1.8;
+      const sp = this.at(bd - 0.8 - rand() * 0.8, (rand() - 0.5) * bw * 1.4, -0.05);
+      if (!this.clearOfCamp(sp.x, sp.z)) continue;
       const c = speleothem(h, 0.2 + h * 0.12, 90 + k);
-      c.position.copy(this.at(bd - 0.8 - rand() * 0.8, (rand() - 0.5) * bw * 1.4, -0.05));
+      c.position.copy(sp);
       root.add(c);
     }
     // The way out: rock closes in, leaving a narrow fissure with daylight behind it.
@@ -1330,6 +1342,25 @@ export class Cave {
     shaft.position.copy(this.at(1.6, 0, 0.04));
     shaft.userData.keep = true;
     this.inside.add(shaft);
+  }
+
+  /** Camp furniture and the pool (from the hall's fixed layout) that clutter must keep clear of. */
+  private campSpots(): { camp: THREE.Vector3[]; pool: THREE.Vector3 } {
+    return {
+      camp: [this.at(74 + 9.5, -3.5, 0), this.at(74 + 6, 3.4, 0), this.at(74 + 3, 6.0, 0), this.at(74 + 3.6, 5.2, 0)],
+      pool: this.at(80, -6.2, 0),
+    };
+  }
+
+  /** True when (x, z) is at least `r` from the tent, table, chest and floodlight. */
+  private clearOfCamp(x: number, z: number, r = 3.2): boolean {
+    return this.campSpots().camp.every((c) => Math.hypot(c.x - x, c.z - z) >= r);
+  }
+
+  /** True on dry ground outside the crystal pool. */
+  private dry(x: number, z: number): boolean {
+    const p = this.campSpots().pool;
+    return Math.hypot(p.x - x, p.z - z) > 4.0;
   }
 
   /** Recolour a model's meshes with one material (for glowing crystals and bioluminescent caps). */
@@ -1414,6 +1445,7 @@ export class Cave {
       for (let k = 0; k < 4; k++) {
         const a = (k / 4) * Math.PI * 2 + rand();
         const p = this.at(d + Math.cos(a) * 1.7, lat + Math.sin(a) * 1.7, -0.05);
+        if (!this.clearOfCamp(p.x, p.z) || !this.dry(p.x, p.z)) continue;
         crystal(p, 0.5 + rand() * 0.8, i % 2 ? amber : cyan, k === 0);
       }
     });
@@ -1453,7 +1485,8 @@ export class Cave {
     this.pillarSpots.forEach(([d, lat]) => {
       for (let q = 0; q < 4; q++) {
         const a = rand() * 6.28;
-        shroom(this.at(d + Math.cos(a) * 1.5, lat + Math.sin(a) * 1.5, 0), 0.2 + rand() * 0.35);
+        const sp = this.at(d + Math.cos(a) * 1.5, lat + Math.sin(a) * 1.5, 0);
+        if (this.clearOfCamp(sp.x, sp.z) && this.dry(sp.x, sp.z)) shroom(sp, 0.2 + rand() * 0.35);
       }
     });
 
@@ -1469,6 +1502,7 @@ export class Cave {
       const r = this.model(name, { by: 'footprint', value: size });
       if (!r) continue;
       const p = this.at(d, side * (w + 0.15 - rand() * 0.6), -size * 0.25);
+      if (!this.clearOfCamp(p.x, p.z) || !this.dry(p.x, p.z)) continue;
       r.position.copy(p);
       r.rotation.set(rand() * 3, rand() * 6, rand() * 3);
       root.add(r);

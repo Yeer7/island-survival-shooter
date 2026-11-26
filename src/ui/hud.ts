@@ -1,4 +1,4 @@
-import { tr } from './i18n';
+import { onLangChange, tr } from './i18n';
 import './hud.css';
 import { HOTBAR_INFO, HotbarId, Inventory, MATERIAL_INFO } from '../player/inventory';
 
@@ -69,7 +69,7 @@ export class Hud {
     this.vignette = el('div', 'hud-vignette', this.root);
 
     const vit = el('div', 'hud-vitals', this.root);
-    this.clock = el('div', 'hud-clock', vit, 'Dia 1 • 08:00');
+    this.clock = el('div', 'hud-clock', vit, `${tr('Dia', 'Day')} 1 • 08:00`);
     this.healthBar = el('div', 'hud-bar health', vit);
     el('span', 'ico', this.healthBar, '❤');
     const ht = el('div', 'track', this.healthBar);
@@ -128,6 +128,10 @@ export class Hud {
     this.prompts = el('div', 'hud-prompts', bottom);
     const craftBtn = el('button', 'hud-craft-btn', bottom, `<kbd>Tab</kbd> ${tr('Criar / Construir', 'Craft / Build')}`);
     craftBtn.addEventListener('click', () => this.onCraftButton());
+    onLangChange(() => {
+      skip.textContent = tr('[Pular]', '[Skip]');
+      craftBtn.innerHTML = `<kbd>Tab</kbd> ${tr('Criar / Construir', 'Craft / Build')}`;
+    });
     const row = el('div', 'hud-row', bottom);
     this.mats = el('div', 'hud-mats', row);
     for (const [key, icon] of [['logs', '🪵'], ['sticks', MATERIAL_INFO.sticks.icon], ['rocks', MATERIAL_INFO.rocks.icon], ['cloth', MATERIAL_INFO.cloth.icon], ['hide', MATERIAL_INFO.hide.icon], ['arrows', MATERIAL_INFO.arrows.icon]]) {

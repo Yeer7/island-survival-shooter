@@ -1,43 +1,45 @@
+import { bilabel, tr } from '../ui/i18n';
+
 export type ToolId = 'axe' | 'flameAxe' | 'spear' | 'bow' | 'torch' | 'rod' | 'flashlight';
 export type FoodId = 'food' | 'cookedMeat' | 'cookedFish' | 'meat' | 'fish' | 'bandage';
 export type HotbarId = ToolId | FoodId;
 export type MaterialId = 'sticks' | 'rocks' | 'cloth' | 'hide' | 'arrows' | 'totem' | 'relic' | 'heart';
 
 export const HOTBAR_INFO: Record<HotbarId, { label: string; icon: string }> = {
-  axe: { label: 'Machado de Emergência', icon: '🪓' },
-  flameAxe: { label: 'Machado Flamejante', icon: '🔥' },
-  spear: { label: 'Lança de Madeira', icon: '🔱' },
-  bow: { label: 'Arco de Caça', icon: '🏹' },
-  torch: { label: 'Tocha', icon: '🕯️' },
-  rod: { label: 'Vara de Pesca', icon: '🎣' },
-  flashlight: { label: 'Lanterna Tática', icon: '🔦' },
-  food: { label: 'Comida enlatada', icon: '🥫' },
-  cookedMeat: { label: 'Carne Assada', icon: '🍖' },
-  cookedFish: { label: 'Peixe Assado', icon: '🐟' },
-  meat: { label: 'Carne Crua', icon: '🥩' },
-  fish: { label: 'Peixe Cru', icon: '🐠' },
-  bandage: { label: 'Curativo', icon: '🩹' },
+  axe: bilabel('Machado de Emergência', 'Emergency Axe', '🪓'),
+  flameAxe: bilabel('Machado Flamejante', 'Flaming Axe', '🔥'),
+  spear: bilabel('Lança de Madeira', 'Wooden Spear', '🔱'),
+  bow: bilabel('Arco de Caça', 'Hunting Bow', '🏹'),
+  torch: bilabel('Tocha', 'Torch', '🕯️'),
+  rod: bilabel('Vara de Pesca', 'Fishing Rod', '🎣'),
+  flashlight: bilabel('Lanterna Tática', 'Tactical Flashlight', '🔦'),
+  food: bilabel('Comida enlatada', 'Canned Food', '🥫'),
+  cookedMeat: bilabel('Carne Assada', 'Roast Meat', '🍖'),
+  cookedFish: bilabel('Peixe Assado', 'Roast Fish', '🐟'),
+  meat: bilabel('Carne Crua', 'Raw Meat', '🥩'),
+  fish: bilabel('Peixe Cru', 'Raw Fish', '🐠'),
+  bandage: bilabel('Curativo', 'Bandage', '🩹'),
 };
 
 export const MATERIAL_INFO: Record<MaterialId, { label: string; icon: string }> = {
-  sticks: { label: 'Gravetos', icon: '🥢' },
-  rocks: { label: 'Pedras', icon: '🪨' },
-  cloth: { label: 'Pano', icon: '🧵' },
-  hide: { label: 'Pele', icon: '🟫' },
-  arrows: { label: 'Flechas', icon: '➶' },
-  totem: { label: 'Totem Tribal', icon: '🗿' },
-  relic: { label: 'Relíquia da Caverna', icon: '💎' },
-  heart: { label: 'Coração Alfa', icon: '❤️‍🔥' },
+  sticks: bilabel('Gravetos', 'Sticks', '🥢'),
+  rocks: bilabel('Pedras', 'Rocks', '🪨'),
+  cloth: bilabel('Pano', 'Cloth', '🧵'),
+  hide: bilabel('Pele', 'Hide', '🟫'),
+  arrows: bilabel('Flechas', 'Arrows', '➶'),
+  totem: bilabel('Totem Tribal', 'Tribal Totem', '🗿'),
+  relic: bilabel('Relíquia da Caverna', 'Cave Relic', '💎'),
+  heart: bilabel('Coração Alfa', 'Alpha Heart', '❤️‍🔥'),
 };
 
 /** Effects of eating/using a consumable: hunger and health deltas. */
 export const FOOD_EFFECT: Record<FoodId, { hunger: number; health: number; text: string }> = {
-  food: { hunger: 35, health: 0, text: '+35 Fome' },
-  cookedMeat: { hunger: 45, health: 5, text: '+45 Fome' },
-  cookedFish: { hunger: 32, health: 5, text: '+32 Fome' },
-  meat: { hunger: 12, health: -6, text: '+12 Fome (cru!)' },
-  fish: { hunger: 9, health: -4, text: '+9 Fome (cru!)' },
-  bandage: { hunger: 0, health: 40, text: '+40 Vida' },
+  food: { hunger: 35, health: 0, get text() { return tr('+35 Fome', '+35 Hunger'); } },
+  cookedMeat: { hunger: 45, health: 5, get text() { return tr('+45 Fome', '+45 Hunger'); } },
+  cookedFish: { hunger: 32, health: 5, get text() { return tr('+32 Fome', '+32 Hunger'); } },
+  meat: { hunger: 12, health: -6, get text() { return tr('+12 Fome (cru!)', '+12 Hunger (raw!)'); } },
+  fish: { hunger: 9, health: -4, get text() { return tr('+9 Fome (cru!)', '+9 Hunger (raw!)'); } },
+  bandage: { hunger: 0, health: 40, get text() { return tr('+40 Vida', '+40 Health'); } },
 };
 
 const TOOL_ORDER: ToolId[] = ['axe', 'flameAxe', 'spear', 'bow', 'torch', 'flashlight', 'rod'];

@@ -26,7 +26,7 @@ import { BOAT_COST, Sailboat } from './world/boat';
 import { Altar, Cave } from './world/cave';
 import { SaveData, SaveStore } from './core/save';
 import { Screens } from './ui/screens';
-import { tr } from './ui/i18n';
+import { recipeLabel, tr } from './ui/i18n';
 import { Village } from './world/village';
 import { Effigies, trailSpots } from './world/effigies';
 import { GrassField } from './world/grass';
@@ -281,7 +281,7 @@ export class Game implements CombatWorld {
         onRoar: (c) => this.sound.roar(c.role === 'alpha' ? 'alpha' : c.role === 'guardian' || c.role === 'deepLord' ? 'guardian' : 'boss'),
         onAlert: (c) => this.onCannibalAlert(c),
         onBurn: (c, killed) => {
-          if (killed) this.hud.toast(`🔥 ${c.cfg.name} queimou até cair`);
+          if (killed) this.hud.toast(tr(`🔥 ${c.cfg.name} queimou até cair`, `🔥 ${c.cfg.name} burned down`));
         },
       },
       (save?.defeated ?? []) as BossRole[],
@@ -343,14 +343,14 @@ export class Game implements CombatWorld {
     this.bow = new Bow(this.vm, this, this.sound);
 
     this.hud = new Hud([
-      { name: 'Avião', cls: 'plane', x: this.crash.center.x, z: this.crash.center.z },
-      { name: 'Lago', cls: 'lake', x: LAKE_CENTER.x, z: LAKE_CENTER.z },
-      { name: 'Aldeia', cls: 'plane', x: this.village.center.x, z: this.village.center.z },
-      { name: 'Caverna', cls: 'plane', x: this.cave.mouth.x, z: this.cave.mouth.z },
+      { get name() { return tr('Avião', 'Plane'); }, cls: 'plane', x: this.crash.center.x, z: this.crash.center.z },
+      { get name() { return tr('Lago', 'Lake'); }, cls: 'lake', x: LAKE_CENTER.x, z: LAKE_CENTER.z },
+      { get name() { return tr('Aldeia', 'Village'); }, cls: 'plane', x: this.village.center.x, z: this.village.center.z },
+      { get name() { return tr('Caverna', 'Cave'); }, cls: 'plane', x: this.cave.mouth.x, z: this.cave.mouth.z },
       { name: 'Altar', cls: 'plane', x: this.altar.center.x, z: this.altar.center.z },
-      { name: 'Veleiro', cls: 'lake', x: this.boat.pos.x, z: this.boat.pos.z },
-      { name: 'Saída', cls: 'lake', x: this.cave.entryInside.x, z: this.cave.entryInside.z, indoor: true },
-      { name: 'Chefe', cls: 'plane', x: this.cave.chestPos.x, z: this.cave.chestPos.z, indoor: true },
+      { get name() { return tr('Veleiro', 'Sailboat'); }, cls: 'lake', x: this.boat.pos.x, z: this.boat.pos.z },
+      { get name() { return tr('Saída', 'Exit'); }, cls: 'lake', x: this.cave.entryInside.x, z: this.cave.entryInside.z, indoor: true },
+      { get name() { return tr('Chefe', 'Boss'); }, cls: 'plane', x: this.cave.chestPos.x, z: this.cave.chestPos.z, indoor: true },
     ]);
     this.hud.onCraftButton = () => (this.menuOpen ? this.closeMenu() : this.openMenu());
     this.hud.setFade(1);
@@ -656,11 +656,11 @@ export class Game implements CombatWorld {
     if (this.pendingUse || this.vm.busy) return;
     const fx = FOOD_EFFECT[id];
     if (id === 'bandage' && this.vitals.health >= this.vitals.maxHealth - 1) {
-      this.hud.toast('Sua vida está cheia');
+      this.hud.toast(tr('Sua vida está cheia', 'Your health is full'));
       return;
     }
     if (id !== 'bandage' && this.vitals.hunger > 97) {
-      this.hud.toast('Você não está com fome');
+      this.hud.toast(tr('Você não está com fome', 'You are not hungry'));
       return;
     }
     const dur = id === 'bandage' ? 1.15 : 0.95;
@@ -695,7 +695,7 @@ export class Game implements CombatWorld {
       case 'log':
         if (inv.logs >= this.inv.maxLogs) {
           this.sound.denied();
-          this.hud.toast(`Ombro cheio (${this.inv.maxLogs}/${this.inv.maxLogs}) — [G] solta`);
+          this.hud.toast(tr(`Ombro cheio (${this.inv.maxLogs}/${this.inv.maxLogs}) — [G] solta`, `Shoulder full (${this.inv.maxLogs}/${this.inv.maxLogs}) — [G] drops`));
           return;
         }
         inv.logs++;
@@ -723,7 +723,7 @@ export class Game implements CombatWorld {
       case 'totem':
         inv.mats.totem += 1;
         this.sound.levelUp();
-        this.hud.message('TOTEM TRIBAL', 'Abra o menu [Tab] e evolua para o Nível 2: Arco, Muro, Portão e Armadura Reforçada.', 6);
+        this.hud.message(tr('TOTEM TRIBAL', 'TRIBAL TOTEM'), tr('Abra o menu [Tab] e evolua para o Nível 2: Arco, Muro, Portão e Armadura Reforçada.', 'Open the book [Tab] and upgrade to Level 2: Bow, Wall, Gate and Reinforced Armor.'), 6);
         break;
       case 'arrow':
         inv.mats.arrows += p.amount;
@@ -731,13 +731,13 @@ export class Game implements CombatWorld {
       case 'relic':
         inv.mats.relic += 1;
         this.sound.levelUp();
-        this.hud.message('RELÍQUIA DA CAVERNA', 'Evolua o Livro [Tab] para o Nível 3 (Machado Flamejante). A caverna está aberta.', 6);
+        this.hud.message(tr('RELÍQUIA DA CAVERNA', 'CAVE RELIC'), tr('Evolua o Livro [Tab] para o Nível 3 (Machado Flamejante). A caverna está aberta.', 'Upgrade the Book [Tab] to Level 3 (Flaming Axe). The cave is open.'), 6);
         this.saveGame();
         break;
       case 'heart':
         inv.mats.heart += 1;
         this.sound.levelUp();
-        this.hud.message('CORAÇÃO ALFA', 'Leve o coração ao Veleiro na Praia Sul para terminar o reparo.', 6);
+        this.hud.message(tr('CORAÇÃO ALFA', 'ALPHA HEART'), tr('Leve o coração ao Veleiro na Praia Sul para terminar o reparo.', 'Bring the heart to the Sailboat on the South Beach to finish the repair.'), 6);
         this.saveGame();
         break;
       case 'flashlight':
@@ -745,12 +745,12 @@ export class Game implements CombatWorld {
         this.caveLoot.flashlight = true;
         this.select('flashlight');
         this.sound.flashlightClick();
-        this.hud.message('LANTERNA TÁTICA', 'Um feixe forte para a caverna e para as noites.', 4);
+        this.hud.message(tr('LANTERNA TÁTICA', 'TACTICAL FLASHLIGHT'), tr('Um feixe forte para a caverna e para as noites.', 'A strong beam for the cave and the nights.'), 4);
         break;
       case 'backpack':
         inv.hasBackpack = true;
         this.caveLoot.backpack = true;
-        this.hud.message('MOCHILA TÁTICA', 'Agora você carrega 4 toras e coleta o dobro de gravetos e pedras.', 5);
+        this.hud.message(tr('MOCHILA TÁTICA', 'TACTICAL BACKPACK'), tr('Agora você carrega 4 toras e coleta o dobro de gravetos e pedras.', 'You now carry 4 logs and gather twice the sticks and rocks.'), 5);
         break;
       case 'stick':
         inv.mats.sticks += p.amount * (inv.hasBackpack ? 2 : 1);
@@ -788,40 +788,40 @@ export class Game implements CombatWorld {
   private findInteractable(): Interactable | null {
     const target = this.pickups.highlighted;
     if (target) {
-      if (target.type === 'log' && this.inv.logs >= this.inv.maxLogs) return { key: 'E', text: `Ombro cheio (${this.inv.maxLogs}/${this.inv.maxLogs})`, run: () => this.collect(target) };
-      return { key: 'E', text: `Pegar ${ITEM_LABEL[target.type]}`, run: () => this.collect(target) };
+      if (target.type === 'log' && this.inv.logs >= this.inv.maxLogs) return { key: 'E', text: tr(`Ombro cheio (${this.inv.maxLogs}/${this.inv.maxLogs})`, `Shoulder full (${this.inv.maxLogs}/${this.inv.maxLogs})`), run: () => this.collect(target) };
+      return { key: 'E', text: `${tr('Pegar', 'Pick up')} ${ITEM_LABEL[target.type]}`, run: () => this.collect(target) };
     }
     const p = this.player.pos;
     for (const pl of this.base.placed) {
       const d = Math.hypot(pl.pos.x - p.x, pl.pos.z - p.z);
       if (pl.kind === 'campfire' && d < 2.4) {
-        if (pl.cooking) return { key: 'E', text: `Assando… ${Math.ceil(pl.cooking.t)}s`, run: () => {} };
+        if (pl.cooking) return { key: 'E', text: `${tr('Assando…', 'Roasting…')} ${Math.ceil(pl.cooking.t)}s`, run: () => {} };
         const raw: 'meat' | 'fish' | null = this.inv.food.meat > 0 ? 'meat' : this.inv.food.fish > 0 ? 'fish' : null;
-        if (raw) return { key: 'E', text: `Assar ${raw === 'meat' ? 'Carne' : 'Peixe'}`, run: () => this.startCooking(pl, raw) };
+        if (raw) return { key: 'E', text: raw === 'meat' ? tr('Assar Carne', 'Roast Meat') : tr('Assar Peixe', 'Roast Fish'), run: () => this.startCooking(pl, raw) };
       }
       if (pl.kind === 'logHolder' && d < 2.4) {
-        if (this.inv.logs > 0 && pl.logs < 12) return { key: 'E', text: `Guardar toras (${pl.logs}/12)`, run: () => this.depositLogs(pl) };
-        if (pl.logs > 0 && this.inv.logs < this.inv.maxLogs) return { key: 'E', text: `Pegar tora (${pl.logs}/12)`, run: () => this.takeLog(pl) };
+        if (this.inv.logs > 0 && pl.logs < 12) return { key: 'E', text: `${tr('Guardar toras', 'Store logs')} (${pl.logs}/12)`, run: () => this.depositLogs(pl) };
+        if (pl.logs > 0 && this.inv.logs < this.inv.maxLogs) return { key: 'E', text: `${tr('Pegar tora', 'Take log')} (${pl.logs}/12)`, run: () => this.takeLog(pl) };
       }
-      if (pl.kind === 'bed' && d < 2.1) return { key: 'E', text: 'Dormir e Salvar', run: () => this.startSleep() };
-      if (pl.kind === 'gate' && d < 2.8) return { key: 'E', text: pl.open ? 'Fechar portão' : 'Abrir portão', run: () => this.base.toggleGate(pl) };
+      if (pl.kind === 'bed' && d < 2.1) return { key: 'E', text: tr('Dormir e Salvar', 'Sleep and Save'), run: () => this.startSleep() };
+      if (pl.kind === 'gate' && d < 2.8) return { key: 'E', text: pl.open ? tr('Fechar portão', 'Close gate') : tr('Abrir portão', 'Open gate'), run: () => this.base.toggleGate(pl) };
     }
     if (this.indoors) {
-      if (p.distanceTo(this.cave.entryInside) < 3.2) return { key: 'E', text: 'Voltar à Superfície', run: () => this.leaveCave() };
+      if (p.distanceTo(this.cave.entryInside) < 3.2) return { key: 'E', text: tr('Voltar à Superfície', 'Back to the Surface'), run: () => this.leaveCave() };
       if (!this.cave.bridgeRepaired && Math.hypot(p.x - this.cave.bridgePos.x, p.z - this.cave.bridgePos.z) < 3.2) {
-        return { key: 'E', text: `Consertar ponte (Gravetos ${this.inv.mats.sticks}/4 · Panos ${this.inv.mats.cloth}/2)`, run: () => this.repairBridge() };
+        return { key: 'E', text: tr(`Consertar ponte (Gravetos ${this.inv.mats.sticks}/4 · Panos ${this.inv.mats.cloth}/2)`, `Repair bridge (Sticks ${this.inv.mats.sticks}/4 · Cloth ${this.inv.mats.cloth}/2)`), run: () => this.repairBridge() };
       }
       return null;
     }
     if (Math.hypot(p.x - this.cave.mouth.x, p.z - this.cave.mouth.z) < 6) {
-      if (this.tribe.defeated.has('guardian')) return { key: 'E', text: 'Entrar na Caverna', run: () => this.enterCave() };
-      return { key: 'E', text: 'O Guardião bloqueia a entrada', run: () => this.hud.toast('💀 Derrote o Guardião da Caverna primeiro') };
+      if (this.tribe.defeated.has('guardian')) return { key: 'E', text: tr('Entrar na Caverna', 'Enter the Cave'), run: () => this.enterCave() };
+      return { key: 'E', text: tr('O Guardião bloqueia a entrada', 'The Guardian blocks the entrance'), run: () => this.hud.toast(tr('💀 Derrote o Guardião da Caverna primeiro', '💀 Defeat the Cave Guardian first')) };
     }
     if (Math.hypot(p.x - this.boat.pos.x, p.z - this.boat.pos.z) < 8.5) {
       if (this.player.swimming) {
         return {
           key: 'E',
-          text: 'Subir pela escada do Veleiro',
+          text: tr('Subir pela escada do Veleiro', 'Climb the Sailboat ladder'),
           run: () => {
             const d = this.boat.sternDeck(this.v4);
             this.player.placeAt(d.x, d.y, d.z, this.player.yaw);
@@ -830,11 +830,14 @@ export class Game implements CombatWorld {
         };
       }
       if (this.escaped) return null;
-      if (this.boat.complete) return { key: 'E', text: 'Zarpar no Veleiro', run: () => this.sail() };
+      if (this.boat.complete) return { key: 'E', text: tr('Zarpar no Veleiro', 'Set sail'), run: () => this.sail() };
       const d = this.boat.delivered;
       return {
         key: 'E',
-        text: `Reparar Veleiro (Toras ${d.logs}/${BOAT_COST.logs} · Gravetos ${d.sticks}/${BOAT_COST.sticks} · Panos ${d.cloth}/${BOAT_COST.cloth} · Coração ${d.heart}/1)`,
+        text: tr(
+          `Reparar Veleiro (Toras ${d.logs}/${BOAT_COST.logs} · Gravetos ${d.sticks}/${BOAT_COST.sticks} · Panos ${d.cloth}/${BOAT_COST.cloth} · Coração ${d.heart}/1)`,
+          `Repair Sailboat (Logs ${d.logs}/${BOAT_COST.logs} · Sticks ${d.sticks}/${BOAT_COST.sticks} · Cloth ${d.cloth}/${BOAT_COST.cloth} · Heart ${d.heart}/1)`,
+        ),
         run: () => this.repairBoat(),
       };
     }
@@ -842,22 +845,25 @@ export class Game implements CombatWorld {
     if (cab) {
       if (cab.complete) {
         const dw = cab.doorWorld(this.v4);
-        if (Math.hypot(dw.x - p.x, dw.z - p.z) < 2.2) return { key: 'E', text: cab.doorOpen ? 'Fechar Porta' : 'Abrir Porta', run: () => this.toggleCabinDoor(cab) };
+        if (Math.hypot(dw.x - p.x, dw.z - p.z) < 2.2) return { key: 'E', text: cab.doorOpen ? tr('Fechar Porta', 'Close Door') : tr('Abrir Porta', 'Open Door'), run: () => this.toggleCabinDoor(cab) };
         const hasBed = this.base.placed.some((pl) => pl.kind === 'bed' && cab.inside(pl.pos.x, pl.pos.z, 0));
         if (!hasBed && cab.inside(p.x, p.z, 0)) {
           return {
             key: 'E',
-            text: 'Dormir',
+            text: tr('Dormir', 'Sleep'),
             run: () => {
               this.sound.denied();
-              this.hud.toast('🛏️ Construa uma Cama pelo Livro [Tab] e coloque aqui dentro para dormir!');
+              this.hud.toast(tr('🛏️ Construa uma Cama pelo Livro [Tab] e coloque aqui dentro para dormir!', '🛏️ Build a Bed from the Book [Tab] and place it in here to sleep!'));
             },
           };
         }
         return null;
       }
       const d = cab.delivered;
-      const text = `Entregar (Toras ${d.logs}/${CABIN_COST.logs} · Gravetos ${d.sticks}/${CABIN_COST.sticks} · Pedras ${d.rocks}/${CABIN_COST.rocks})`;
+      const text = tr(
+        `Entregar (Toras ${d.logs}/${CABIN_COST.logs} · Gravetos ${d.sticks}/${CABIN_COST.sticks} · Pedras ${d.rocks}/${CABIN_COST.rocks})`,
+        `Deliver (Logs ${d.logs}/${CABIN_COST.logs} · Sticks ${d.sticks}/${CABIN_COST.sticks} · Rocks ${d.rocks}/${CABIN_COST.rocks})`,
+      );
       return { key: 'E', text, run: () => this.deliverCabin(cab) };
     }
     return null;
@@ -868,7 +874,7 @@ export class Game implements CombatWorld {
     const n = take.logs + take.sticks + take.rocks;
     if (n === 0) {
       this.sound.denied();
-      this.hud.toast('Traga toras (no ombro), gravetos e pedras');
+      this.hud.toast(tr('Traga toras (no ombro), gravetos e pedras', 'Bring logs (on your shoulder), sticks and rocks'));
       return;
     }
     this.inv.logs -= take.logs;
@@ -878,10 +884,10 @@ export class Game implements CombatWorld {
     this.sound.build();
     this.player.addTrauma(0.08);
     if (cabin.complete) {
-      this.hud.message('CABANA PRONTA', 'Abra a porta com [E]. Construa uma Cama pelo Livro [Tab] para dormir e salvar.', 5.5);
+      this.hud.message(tr('CABANA PRONTA', 'CABIN READY'), tr('Abra a porta com [E]. Construa uma Cama pelo Livro [Tab] para dormir e salvar.', 'Open the door with [E]. Build a Bed from the Book [Tab] to sleep and save.'), 5.5);
       this.sound.levelUp();
     } else {
-      this.hud.toast(`🛖 Cabana ${Math.round(cabin.progress * 100)}%`);
+      this.hud.toast(`🛖 ${tr('Cabana', 'Cabin')} ${Math.round(cabin.progress * 100)}%`);
     }
   }
 
@@ -905,7 +911,7 @@ export class Game implements CombatWorld {
       // A night's rest takes the edge off real hunger (but is no meal).
       if (this.vitals.hunger < 30) this.vitals.hunger = Math.min(100, this.vitals.hunger + 20);
       this.saveGame();
-      this.hud.message(`DIA ${this.sky.day} · 07:00`, 'Você dormiu, recuperou toda a vida e o jogo foi salvo.', 3.5);
+      this.hud.message(`${tr('DIA', 'DAY')} ${this.sky.day} · 07:00`, tr('Você dormiu, recuperou toda a vida e o jogo foi salvo.', 'You slept, recovered all your health and the game was saved.'), 3.5);
     }
     if (this.sleepT > 3.4) {
       this.sleepT = -1;
@@ -932,7 +938,7 @@ export class Game implements CombatWorld {
     this.inv.food[item]--;
     pl.cooking = { item, t: 4 };
     this.sound.sizzle();
-    this.hud.toast(item === 'meat' ? '🔥 Assando carne…' : '🔥 Assando peixe…');
+    this.hud.toast(item === 'meat' ? tr('🔥 Assando carne…', '🔥 Roasting meat…') : tr('🔥 Assando peixe…', '🔥 Roasting fish…'));
   }
 
   private updateCooking(dt: number): void {
@@ -942,7 +948,7 @@ export class Game implements CombatWorld {
       if (pl.cooking.t <= 0) {
         const cooked = pl.cooking.item === 'meat' ? 'cookedMeat' : 'cookedFish';
         this.inv.food[cooked]++;
-        this.hud.toast(`${HOTBAR_INFO[cooked].icon} ${HOTBAR_INFO[cooked].label} pronto!`);
+        this.hud.toast(`${HOTBAR_INFO[cooked].icon} ${HOTBAR_INFO[cooked].label} ${tr('pronto!', 'ready!')}`);
         this.sound.pickup();
         pl.cooking = null;
       }
@@ -1014,11 +1020,11 @@ export class Game implements CombatWorld {
       case 'tool':
         this.inv.tools.add(r.id as ToolId);
         if (r.id === 'bow' && this.inv.mats.arrows === 0) this.inv.mats.arrows = 5;
-        this.hud.toast(`${r.icon} ${r.label} criado!`);
+        this.hud.toast(`${r.icon} ${recipeLabel(r)} ${tr('criado!', 'crafted!')}`);
         break;
       case 'item':
         this.inv.mats.arrows += 5;
-        this.hud.toast('➶ +5 Flechas');
+        this.hud.toast(tr('➶ +5 Flechas', '➶ +5 Arrows'));
         break;
       case 'armor': {
         const lvl = r.id === 'hideArmor' ? 1 : 2;
@@ -1026,7 +1032,7 @@ export class Game implements CombatWorld {
         const max = this.inv.armor === 2 ? 200 : 150;
         this.vitals.health += max - this.vitals.maxHealth;
         this.vitals.maxHealth = max;
-        this.hud.toast(`${r.icon} ${r.label}: vida máxima ${max}`);
+        this.hud.toast(`${r.icon} ${recipeLabel(r)}: ${tr('vida máxima', 'max health')} ${max}`);
         break;
       }
     }
@@ -1041,7 +1047,7 @@ export class Game implements CombatWorld {
     this.base.benchLevel = level;
     this.saveGame();
     this.sound.levelUp();
-    this.hud.toast(`🛠️ Bancada Nível ${level}!`);
+    this.hud.toast(`🛠️ ${tr('Livro Nível', 'Book Level')} ${level}!`);
     this.craft.render(this.craftState());
   }
 
@@ -1051,7 +1057,7 @@ export class Game implements CombatWorld {
     setGhost(ghost, true);
     this.scene.add(ghost);
     this.placing = { recipe: r, kind, ghost, yaw: this.player.yaw, valid: false, x: 0, z: 0 };
-    this.hud.toast(`${r.icon} Clique para colocar · [R] girar · [Q] cancelar`);
+    this.hud.toast(`${r.icon} ${tr('Clique para colocar · [R] girar · [Q] cancelar', 'Click to place · [R] rotate · [Q] cancel')}`);
   }
 
   private updatePlacement(): void {
@@ -1089,13 +1095,13 @@ export class Game implements CombatWorld {
     if (!pl) return;
     if (!pl.valid || !CraftMenu.affordable(pl.recipe.cost, this.resources())) {
       this.sound.denied();
-      this.hud.toast(pl.valid ? 'Materiais insuficientes' : pl.kind === 'bed' ? 'Coloque a Cama dentro de uma Cabana pronta' : 'Lugar inválido');
+      this.hud.toast(pl.valid ? tr('Materiais insuficientes', 'Not enough materials') : pl.kind === 'bed' ? tr('Coloque a Cama dentro de uma Cabana pronta', 'Place the Bed inside a finished Cabin') : tr('Lugar inválido', 'Invalid spot'));
       return;
     }
     this.pay(pl.recipe.cost);
     if (pl.kind === 'cabin') {
       this.base.placeCabin(pl.x, pl.z, pl.yaw);
-      this.hud.message('CABANA MARCADA', 'Entregue 6 toras, 10 gravetos e 6 pedras com [E] para erguê-la.', 4.5);
+      this.hud.message(tr('CABANA MARCADA', 'CABIN MARKED'), tr('Entregue 6 toras, 10 gravetos e 6 pedras com [E] para erguê-la.', 'Deliver 6 logs, 10 sticks and 6 rocks with [E] to raise it.'), 4.5);
     } else {
       const placed = this.base.place(pl.kind, pl.x, pl.z, pl.yaw);
       const ratio = this.renderer.getPixelRatio();
@@ -1105,7 +1111,7 @@ export class Game implements CombatWorld {
     this.sound.build();
     const fy = this.base.cabinFloorAt(pl.x, pl.z) ?? this.terrain.height(pl.x, pl.z);
     this.debris.burst(this.v1.set(pl.x, fy + 0.2, pl.z), this.v3.set(0, 1, 0), 14, 0xc2a070, { speed: 2.5, size: 0.07, floor: fy });
-    this.hud.toast(`${pl.recipe.icon} ${pl.recipe.label} construído`);
+    this.hud.toast(`${pl.recipe.icon} ${recipeLabel(pl.recipe)} ${tr('construído', 'built')}`);
     this.cancelPlacement();
   }
 
@@ -1120,7 +1126,7 @@ export class Game implements CombatWorld {
   private useRod(): void {
     if (this.fishing) {
       this.stopFishing();
-      this.hud.toast('Linha recolhida');
+      this.hud.toast(tr('Linha recolhida', 'Line reeled in'));
       return;
     }
     if (this.vm.busy) return;
@@ -1129,7 +1135,7 @@ export class Game implements CombatWorld {
     const hit = this.raycast(o, d, 16, 0);
     if (!hit || hit.kind !== 'water') {
       this.sound.denied();
-      this.hud.toast('Mire na água (lago ou mar) para lançar');
+      this.hud.toast(tr('Mire na água (lago ou mar) para lançar', 'Aim at the water (lake or sea) to cast'));
       return;
     }
     const spot = o.clone().addScaledVector(d, hit.t);
@@ -1172,7 +1178,7 @@ export class Game implements CombatWorld {
         this.inv.food.fish++;
         this.sound.fishCaught();
         this.debris.burst(f.spot, this.v3.set(0, 1, 0), 12, 0xdff3ff, { speed: 2.5, size: 0.05, life: 0.6 });
-        this.hud.toast('🐠 +1 Peixe Cru (asse na fogueira)');
+        this.hud.toast(tr('🐠 +1 Peixe Cru (asse na fogueira)', '🐠 +1 Raw Fish (roast it on the campfire)'));
         this.vm.cast(0.6);
         this.stopFishing();
         return;
@@ -1424,7 +1430,7 @@ export class Game implements CombatWorld {
     this.hud.showTargetHealth(Math.max(0, a.hp) / a.cfg.hp);
     this.hud.hitMarker(killed ? 'kill' : 'white');
     this.sound.hitConfirm(false, killed);
-    if (killed) this.hud.toast(a.species === 'deer' ? '🦌 Cervo abatido' : a.species === 'turtle' ? '🐢 Tartaruga abatida' : '🐇 Coelho abatido');
+    if (killed) this.hud.toast(a.species === 'deer' ? tr('🦌 Cervo abatido', '🦌 Deer down') : a.species === 'turtle' ? tr('🐢 Tartaruga abatida', '🐢 Turtle down') : tr('🐇 Coelho abatido', '🐇 Rabbit down'));
   }
 
   private onAnimalDeath(a: Animal): void {
@@ -1465,7 +1471,7 @@ export class Game implements CombatWorld {
       const z = s.pos.z + Math.sin(a) * 0.45;
       this.pickups.add(type, this.v1.set(x, this.cave.isInside(s.pos) ? 0 : this.terrain.height(x, z), z), 1);
     });
-    this.hud.toast(this.cave.isInside(s.pos) ? '📦 Suprimentos encontrados' : '🧳 Mala aberta');
+    this.hud.toast(this.cave.isInside(s.pos) ? tr('📦 Suprimentos encontrados', '📦 Supplies found') : tr('🧳 Mala aberta', '🧳 Suitcase opened'));
   }
 
   /** A blow on an effigy: wobble and chips, and on the last blow it topples and drops cloth and sticks. */
@@ -1503,12 +1509,12 @@ export class Game implements CombatWorld {
       const z = e.pos.z + Math.cos(a) * d;
       this.pickups.add(type, this.v2.set(x, this.terrain.height(x, z), z), 1);
     });
-    this.hud.toast(`🪵 Efígie derrubada: ${cloth} pano${cloth > 1 ? 's' : ''} e ${sticks} gravetos`);
+    this.hud.toast(tr(`🪵 Efígie derrubada: ${cloth} pano${cloth > 1 ? 's' : ''} e ${sticks} gravetos`, `🪵 Effigy torn down: ${cloth} cloth and ${sticks} sticks`));
   }
 
   private onTreeFallStart(_t: Tree): void {
     this.sound.treeCreak();
-    this.hud.toast('🌲 Madeira!');
+    this.hud.toast(tr('🌲 Madeira!', '🌲 Timber!'));
   }
 
   private onTreeLanded(t: Tree, dir: THREE.Vector3): void {
@@ -1535,7 +1541,7 @@ export class Game implements CombatWorld {
       const cx = t.x + dir.x * 7 * t.scale + dir.z * 0.8;
       const cz = t.z + dir.z * 7 * t.scale - dir.x * 0.8;
       this.pickups.add('coconut', this.v1.set(cx, this.groundY(cx, cz), cz), 1);
-      this.hud.toast('🌴 2 toras + 1 coco — [E] para pegar');
+      this.hud.toast(tr('🌴 2 toras + 1 coco — [E] para pegar', '🌴 2 logs + 1 coconut — [E] to pick up'));
       return;
     }
     for (let i = 0; i < 3; i++) {
@@ -1551,7 +1557,7 @@ export class Game implements CombatWorld {
     const bx = t.x + dir.x * 5 * t.scale + dir.z * 1.2;
     const bz = t.z + dir.z * 5 * t.scale - dir.x * 1.2;
     this.pickups.add('stick', this.v1.set(bx, this.groundY(bx, bz), bz), 2);
-    this.hud.toast('🪵 3 toras + gravetos — [E] para pegar');
+    this.hud.toast(tr('🪵 3 toras + gravetos — [E] para pegar', '🪵 3 logs + sticks — [E] to pick up'));
   }
 
   private onLand(speed: number): void {
@@ -1663,21 +1669,25 @@ export class Game implements CombatWorld {
     const prompts: { key: string; text: string }[] = [];
     const sel = this.inv.selected;
     if (this.placing) {
-      prompts.push({ key: 'Clique', text: this.placing.valid ? `Colocar ${this.placing.recipe.label}` : 'Lugar inválido' }, { key: 'R', text: 'Girar' }, { key: 'Q', text: 'Cancelar' });
+      prompts.push(
+        { key: tr('Clique', 'Click'), text: this.placing.valid ? `${tr('Colocar', 'Place')} ${recipeLabel(this.placing.recipe)}` : tr('Lugar inválido', 'Invalid spot') },
+        { key: 'R', text: tr('Girar', 'Rotate') },
+        { key: 'Q', text: tr('Cancelar', 'Cancel') },
+      );
     } else if (this.interact) {
       prompts.push({ key: this.interact.key, text: this.interact.text });
     } else {
-      const tr = this.forest.raycast(eye, fwd, 3.0, 0.3);
+      const treeHit = this.forest.raycast(eye, fwd, 3.0, 0.3);
       const cs = this.crash.raycastCases(eye, fwd, 3.0, 0.15);
       const chopper = sel === 'axe' || sel === 'flameAxe';
-      if (cs && (!tr || cs.t < tr.t)) prompts.push(chopper ? { key: 'Clique', text: 'Quebrar mala' } : { key: '1', text: 'Machado para abrir a mala' });
-      else if (tr) prompts.push(chopper ? { key: 'Clique', text: 'Cortar árvore' } : { key: '1', text: 'Machado para cortar' });
+      if (cs && (!treeHit || cs.t < treeHit.t)) prompts.push(chopper ? { key: tr('Clique', 'Click'), text: tr('Quebrar mala', 'Break suitcase') } : { key: '1', text: tr('Machado para abrir a mala', 'Axe to open the suitcase') });
+      else if (treeHit) prompts.push(chopper ? { key: tr('Clique', 'Click'), text: tr('Cortar árvore', 'Chop tree') } : { key: '1', text: tr('Machado para cortar', 'Axe to chop') });
     }
-    if (this.inv.logs > 0 && !this.placing) prompts.push({ key: 'G', text: 'Soltar Tora' });
-    if (sel === 'bow' && this.inv.mats.arrows === 0) prompts.push({ key: '!', text: 'Sem flechas — crie na bancada' });
-    if (sel === 'bow' && this.inv.mats.arrows > 0 && !this.placing) prompts.push({ key: 'Segure', text: 'Puxar o arco' });
-    if (sel === 'rod' && !this.placing) prompts.push({ key: 'Clique', text: this.fishing ? 'Recolher linha' : 'Lançar na água' });
-    if (!this.inv.isTool(sel) && !this.pendingUse && !this.placing) prompts.push({ key: 'Clique', text: sel === 'bandage' ? 'Usar curativo' : 'Comer' });
+    if (this.inv.logs > 0 && !this.placing) prompts.push({ key: 'G', text: tr('Soltar Tora', 'Drop Log') });
+    if (sel === 'bow' && this.inv.mats.arrows === 0) prompts.push({ key: '!', text: tr('Sem flechas — crie no Livro [Tab]', 'No arrows — craft them in the Book [Tab]') });
+    if (sel === 'bow' && this.inv.mats.arrows > 0 && !this.placing) prompts.push({ key: tr('Segure', 'Hold'), text: tr('Puxar o arco', 'Draw the bow') });
+    if (sel === 'rod' && !this.placing) prompts.push({ key: tr('Clique', 'Click'), text: this.fishing ? tr('Recolher linha', 'Reel in') : tr('Lançar na água', 'Cast into the water') });
+    if (!this.inv.isTool(sel) && !this.pendingUse && !this.placing) prompts.push({ key: tr('Clique', 'Click'), text: sel === 'bandage' ? tr('Usar curativo', 'Use bandage') : tr('Comer', 'Eat') });
     this.hud.setPrompts(prompts);
   }
 
@@ -1721,7 +1731,7 @@ export class Game implements CombatWorld {
   private updateHud(dt: number): void {
     this.hud.update(dt);
     this.hud.updateVitals(this.sky.day, this.sky.clockText, this.vitals.health, this.vitals.hunger, this.vitals.maxHealth);
-    this.hud.setArmor(this.inv.armor === 2 ? '🛡️ Armadura Reforçada' : this.inv.armor === 1 ? '🦺 Armadura de Pele' : '');
+    this.hud.setArmor(this.inv.armor === 2 ? tr('🛡️ Armadura Reforçada', '🛡️ Reinforced Armor') : this.inv.armor === 1 ? tr('🦺 Armadura de Pele', '🦺 Hide Armor') : '');
     const f = this.player.forward;
     const heading = (((Math.atan2(f.x, -f.z) * 180) / Math.PI) + 360) % 360;
     this.hud.setIndoorCompass(this.indoors);
@@ -1791,7 +1801,7 @@ export class Game implements CombatWorld {
     this.player.placeAt(e.x, 0, e.z, 0);
     this.fadeIn = 1;
     this.sound.roar('guardian');
-    this.hud.message('CAVERNA NORTE', 'Escura e úmida. Uma tocha ou lanterna ajuda. [E] na entrada para voltar.', 5);
+    this.hud.message(tr('CAVERNA NORTE', 'NORTH CAVE'), tr('Escura e úmida. Uma tocha ou lanterna ajuda. [E] na entrada para voltar.', 'Dark and damp. A torch or flashlight helps. [E] at the entrance to go back.'), 5);
   }
 
   private leaveCave(): void {
@@ -1804,7 +1814,7 @@ export class Game implements CombatWorld {
   private repairBridge(): void {
     if (this.inv.mats.sticks < 4 || this.inv.mats.cloth < 2) {
       this.sound.denied();
-      this.hud.toast('A ponte precisa de 4 Gravetos e 2 Panos');
+      this.hud.toast(tr('A ponte precisa de 4 Gravetos e 2 Panos', 'The bridge needs 4 Sticks and 2 Cloth'));
       return;
     }
     this.inv.mats.sticks -= 4;
@@ -1812,7 +1822,7 @@ export class Game implements CombatWorld {
     this.cave.setBridge(true);
     this.sound.bridge();
     this.player.addTrauma(0.1);
-    this.hud.toast('🌉 Ponte consertada');
+    this.hud.toast(tr('🌉 Ponte consertada', '🌉 Bridge repaired'));
     this.saveGame();
   }
 
@@ -1856,7 +1866,7 @@ export class Game implements CombatWorld {
         this.sound.hurt();
         const b = this.cave.bridgePos;
         this.player.placeAt(b.x, 0, b.z + 3, 0);
-        this.hud.toast('Você caiu no abismo! Conserte a ponte [E].');
+        this.hud.toast(tr('Você caiu no abismo! Conserte a ponte [E].', 'You fell into the chasm! Repair the bridge [E].'));
       }
     }
   }
@@ -1869,7 +1879,7 @@ export class Game implements CombatWorld {
     const take = this.boat.deliver(have);
     if (take.logs + take.sticks + take.cloth + take.heart === 0) {
       this.sound.denied();
-      this.hud.toast('Traga toras, gravetos, panos e o Coração Alfa');
+      this.hud.toast(tr('Traga toras, gravetos, panos e o Coração Alfa', 'Bring logs, sticks, cloth and the Alpha Heart'));
       return;
     }
     const fromShoulder = Math.min(this.inv.logs, take.logs);
@@ -1882,9 +1892,9 @@ export class Game implements CombatWorld {
     this.sound.repair();
     this.player.addTrauma(0.06);
     if (this.boat.complete) {
-      this.hud.message('VELEIRO PRONTO', 'Suba pela escada da popa e [E] para zarpar.', 5);
+      this.hud.message(tr('VELEIRO PRONTO', 'SAILBOAT READY'), tr('Suba pela escada da popa e [E] para zarpar.', 'Climb the stern ladder and press [E] to set sail.'), 5);
       this.sound.levelUp();
-    } else this.hud.toast(`⛵ Veleiro ${Math.round(this.boat.progress * 100)}%`);
+    } else this.hud.toast(`⛵ ${tr('Veleiro', 'Sailboat')} ${Math.round(this.boat.progress * 100)}%`);
     this.saveGame();
   }
 
@@ -1949,7 +1959,7 @@ export class Game implements CombatWorld {
       escaped: this.escaped,
       effigies: this.effigies.brokenIds(),
     };
-    if (SaveStore.save(data)) this.hud.toast('💾 Jogo salvo');
+    if (SaveStore.save(data)) this.hud.toast(tr('💾 Jogo salvo', '💾 Game saved'));
   }
 
   private applySave(d: SaveData): void {
@@ -2007,7 +2017,7 @@ export class Game implements CombatWorld {
     this.hud.showTargetHealth(Math.max(0, c.hp) / c.maxHp);
     this.hud.hitMarker(killed ? 'kill' : 'red');
     this.sound.hitConfirm(true, killed);
-    if (killed) this.hud.toast(c.role === 'boss' || c.role === 'guardian' || c.role === 'alpha' ? `👑 ${c.cfg.name} derrotado!` : '💀 Canibal derrotado');
+    if (killed) this.hud.toast(c.role === 'boss' || c.role === 'guardian' || c.role === 'alpha' ? `👑 ${c.cfg.name} ${tr('derrotado!', 'defeated!')}` : tr('💀 Canibal derrotado', '💀 Cannibal defeated'));
   }
 
   private onCannibalHit(dmg: number, c: Cannibal): void {
@@ -2040,12 +2050,12 @@ export class Game implements CombatWorld {
       this.pickups.add(type, this.v4.set(x, c.cave ? 0 : this.terrain.height(x, z), z), 1);
     });
     if (c.role === 'deepLord') {
-      this.hud.message('O SENHOR DAS PROFUNDEZAS CAIU', 'Ele deixou cair a Mochila Tática: pegue com [E]!', 6);
+      this.hud.message(tr('O SENHOR DAS PROFUNDEZAS CAIU', 'THE LORD OF THE DEPTHS HAS FALLEN'), tr('Ele deixou cair a Mochila Tática: pegue com [E]!', 'He dropped the Tactical Backpack: pick it up with [E]!'), 6);
       this.dropCaveBackpack(c.pos);
     }
-    if (c.role === 'boss') this.hud.message('O CHEFE CAIU', 'Pegue o Totem Tribal [E] para evoluir seu menu para o Nível 2.', 6);
-    if (c.role === 'guardian') this.hud.message('O GUARDIÃO CAIU', 'Pegue a Relíquia [E]. A entrada da caverna está livre.', 6);
-    if (c.role === 'alpha') this.hud.message('A FERA ALFA CAIU', 'Pegue o Coração Alfa [E] e leve-o ao Veleiro.', 6);
+    if (c.role === 'boss') this.hud.message(tr('O CHEFE CAIU', 'THE CHIEF HAS FALLEN'), tr('Pegue o Totem Tribal [E] para evoluir seu menu para o Nível 2.', 'Take the Tribal Totem [E] to upgrade your Book to Level 2.'), 6);
+    if (c.role === 'guardian') this.hud.message(tr('O GUARDIÃO CAIU', 'THE GUARDIAN HAS FALLEN'), tr('Pegue a Relíquia [E]. A entrada da caverna está livre.', 'Take the Relic [E]. The cave entrance is clear.'), 6);
+    if (c.role === 'alpha') this.hud.message(tr('A FERA ALFA CAIU', 'THE ALPHA BEAST HAS FALLEN'), tr('Pegue o Coração Alfa [E] e leve-o ao Veleiro.', 'Take the Alpha Heart [E] and bring it to the Sailboat.'), 6);
     if (bossKill) this.saveGame();
   }
 
@@ -2064,13 +2074,13 @@ export class Game implements CombatWorld {
     if (since >= 0 && since < 4) return;
     this.lastAlertAt = this.time;
     this.sound.alert();
-    if (c.night) this.hud.toast('⚠️ Você foi avistado!');
+    if (c.night) this.hud.toast(tr('⚠️ Você foi avistado!', '⚠️ You have been spotted!'));
   }
 
   private onScoutSpotted(): void {
     if (this.time - this.spottedT < 25) return;
     this.spottedT = this.time;
-    this.hud.toast('👁️ Algo está te observando da floresta…');
+    this.hud.toast(tr('👁️ Algo está te observando da floresta…', '👁️ Something is watching you from the forest…'));
   }
 
   /** Debug helper: boss items and a pile of materials to test every recipe. */

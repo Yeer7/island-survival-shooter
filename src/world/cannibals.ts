@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { tr } from '../ui/i18n';
 import { AssetLibrary, AssetName } from '../assets/assets';
 import { clamp, wrapAngle } from '../core/math';
 import { buildBone, buildFeather, buildHorn } from '../weapons/models';
@@ -60,6 +61,24 @@ const ROLE: Record<Role, RoleCfg> = {
   deepLord: { asset: 'enemyDeepLord', height: 3.3, hp: 340, walk: 1.4, run: 3.8, damage: 28, reach: 3.0, radius: 0.9, windup: 0.75, attackTime: 1.4, aggro: 18, leash: 26, name: 'Senhor das Profundezas', clips: GIANT_CLIPS },
   alpha: { asset: 'enemyWolf', height: 2.3, hp: 650, walk: 1.8, run: 6.5, damage: 34, reach: 3.0, radius: 0.9, windup: 0.6, attackTime: 1.2, aggro: 26, leash: 45, name: 'Fera Alfa', clips: WOLF_CLIPS },
 };
+/** Enemy names follow the current language (the Portuguese ones stay in the table). */
+const NAME_EN: Record<string, string> = {
+  scout: 'Scout',
+  stalker: 'Stalker',
+  raider: 'Raider',
+  guard: 'Guard',
+  boss: 'Tribal Chief',
+  guardian: 'Cave Guardian',
+  skeleton: 'Giant Spider',
+  skelGuard: 'Skeleton Guard',
+  deepLord: 'Lord of the Depths',
+  alpha: 'Alpha Beast',
+};
+for (const [role, cfg] of Object.entries(ROLE)) {
+  const pt = cfg.name;
+  Object.defineProperty(cfg, 'name', { get: () => tr(pt, NAME_EN[role] ?? pt) });
+}
+
 
 export interface Cannibal {
   role: Role;

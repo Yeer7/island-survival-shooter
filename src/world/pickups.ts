@@ -1,10 +1,11 @@
 import * as THREE from 'three';
 import { library } from '../assets/assets';
+import { getLang } from '../ui/i18n';
 import { buildArrow, buildHide, buildLog, buildMeat, buildSticks, buildTotem } from '../weapons/models';
 
 export type ItemType = 'food' | 'bandage' | 'cloth' | 'stick' | 'log' | 'rock' | 'meat' | 'hide' | 'arrow' | 'totem' | 'coconut' | 'relic' | 'heart' | 'flashlight' | 'backpack';
 
-export const ITEM_LABEL: Record<ItemType, string> = {
+const ITEM_PT: Record<ItemType, string> = {
   food: 'Comida',
   bandage: 'Curativo',
   cloth: 'Pano',
@@ -21,6 +22,27 @@ export const ITEM_LABEL: Record<ItemType, string> = {
   flashlight: 'Lanterna Tática',
   backpack: 'Mochila Tática',
 };
+const ITEM_EN: Record<ItemType, string> = {
+  food: 'Food',
+  bandage: 'Bandage',
+  cloth: 'Cloth',
+  stick: 'Sticks',
+  log: 'Log',
+  rock: 'Rock',
+  meat: 'Raw Meat',
+  hide: 'Animal Hide',
+  arrow: 'Arrow',
+  totem: 'Tribal Totem',
+  coconut: 'Coconut',
+  relic: 'Cave Relic',
+  heart: 'Alpha Heart',
+  flashlight: 'Tactical Flashlight',
+  backpack: 'Tactical Backpack',
+};
+/** Display names of pickups in the current language (ids and saves are unchanged). */
+export const ITEM_LABEL: Record<ItemType, string> = new Proxy({} as Record<ItemType, string>, {
+  get: (_, k: string) => (getLang() === 'en' ? ITEM_EN : ITEM_PT)[k as ItemType],
+});
 
 export interface Pickup {
   type: ItemType;

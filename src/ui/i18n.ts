@@ -42,6 +42,17 @@ export function onLangChange(f: () => void): void {
 
 export const tr = (pt: string, en: string): string => (lang === 'pt' ? pt : en);
 
+/** `{ label }` whose text follows the current language (for static tables read every frame). */
+export const bilabel = (pt: string, en: string, icon: string): { label: string; icon: string } => ({
+  icon,
+  get label() {
+    return tr(pt, en);
+  },
+});
+
+/** A Survival Book recipe's name in the current language. */
+export const recipeLabel = (r: { id: string; label: string }): string => (lang === 'en' ? (RECIPE_EN[r.id]?.label ?? r.label) : r.label);
+
 /** English names and descriptions for the Survival Book recipes (the Portuguese ones live in RECIPES). */
 export const RECIPE_EN: Record<string, { label: string; desc: string }> = {
   cabin: { label: 'Log Cabin', desc: 'A roomy cabin (7.5 × 6.5 m) with a door, windows, porch and lantern. Pick the spot, then deliver 6 logs, 10 sticks and 6 rocks with [E].' },

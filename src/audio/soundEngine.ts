@@ -2,10 +2,39 @@ import { clamp } from '../core/math';
 import type { Surface } from '../world/terrain';
 
 /**
- * Every sound in the game is synthesised with the Web Audio API: no downloads.
- * Short one-shots are noise bursts and oscillators through filters and envelopes;
- * the ambience is looping filtered noise with slow LFOs.
+ * Sound for the game. Impacts, chops, swings, creaks, crashes and footsteps play real
+ * recorded CC0 samples (Kenney Impact Sounds / RPG Audio, mastered by
+ * scripts/master_audio.py into public/assets/audio); they decode in the background after
+ * the first press, and until a family has decoded (or if it fails) the old synthesised
+ * version plays instead. Everything else is synthesised: noise bursts and oscillators
+ * through filters and envelopes, and the ambience is looping filtered noise with slow LFOs.
  */
+
+/** Sample families and their take counts (files are `<family>_<n>.ogg`). */
+const BANK: Record<string, number> = {
+  chop: 4,
+  whoosh: 3,
+  creak: 2,
+  crash: 2,
+  hit: 4,
+  thud: 3,
+  break: 3,
+  knock: 3,
+  step_grass: 4,
+  step_wood: 4,
+  step_stone: 4,
+  step_sand: 4,
+};
+
+interface PlayOpts {
+  gain: number;
+  /** Base playback rate before the ±7% variation. */
+  rate?: number;
+  when?: number;
+  toEcho?: number;
+  /** Low-pass cutoff (Hz) for distance. */
+  lowpass?: number;
+}
 export class SoundEngine {
   private ctx: AudioContext | null = null;
   private master!: GainNode;
@@ -18,6 +47,12 @@ export class SoundEngine {
   private crickets!: GainNode;
   private nextCrackle = 0;
   private fireLevel = 0;
+  /** Decoded takes per family; a family is absent until all its takes decoded. */
+  private bank = new Map<string, AudioBuffer[]>();
+  /** Last take played per family, so the same take never plays twice in a row. */
+  private lastTake = new Map<string, number>();
+  /** Sample loading report (for checks): decoded families, failures, samples played. */
+  readonly sampleStats = { families: 0, failed: 0, played: 0, fallbacks: 0 };
 
   get ready(): boolean {
     return this.ctx !== null;
@@ -35,9 +70,29 @@ export class SoundEngine {
     const comp = ctx.createDynamicsCompressor();
     comp.threshold.value = -14;
     comp.ratio.value = 4;
+    // A fast, hard limiter after the glue compressor so no impact ever clips.
+    const limiter = ctx.createDynamicsCompressor();
+    limiter.threshold.value = -4;
+    limiter.knee.value = 0;
+    limiter.ratio.value = 20;
+    limiter.attack.value = 0.001;
+    limiter.release.value = 0.12;
     this.master = ctx.createGain();
     this.master.gain.value = 0.8;
-    this.master.connect(comp).connect(ctx.destination);
+    // Soft clip for the transient the limiter's 1 ms attack lets through: unity for
+    // normal levels, approaching a -1 dBFS ceiling (0.891) and never above it.
+    const clip = ctx.createWaveShaper();
+    const N = 2049;
+    const curve = new Float32Array(N);
+    const ceil = 0.891;
+    for (let i = 0; i < N; i++) {
+      const x = (i / (N - 1)) * 2 - 1;
+      curve[i] = ceil * Math.tanh(x / ceil);
+    }
+    clip.curve = curve;
+    this.master.connect(comp).connect(limiter).connect(clip).connect(ctx.destination);
+    this.limiter = limiter;
+    this.outTap = clip;
     this.sfx = ctx.createGain();
     this.sfx.gain.value = 0.9;
     this.sfx.connect(this.master);
@@ -59,6 +114,75 @@ export class SoundEngine {
     for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
 
     this.startAmbience();
+    this.loadSamples();
+  }
+
+  private limiter!: DynamicsCompressorNode;
+  /** Last node before the speakers (for output checks). */
+  private outTap!: AudioNode;
+
+  /** Fetch and decode the sample bank in the background; each family switches on when ready. */
+  private loadSamples(): void {
+    const ctx = this.ctx!;
+    for (const [family, n] of Object.entries(BANK)) {
+      const takes = Array.from({ length: n }, (_, i) =>
+        fetch(`assets/audio/${family}_${i}.ogg`)
+          .then((r) => {
+            if (!r.ok) throw new Error(`${r.status}`);
+            return r.arrayBuffer();
+          })
+          .then((b) => ctx.decodeAudioData(b)),
+      );
+      Promise.all(takes)
+        .then((bufs) => {
+          this.bank.set(family, bufs);
+          this.sampleStats.families++;
+        })
+        .catch(() => {
+          // Unsupported codec or a missing file: the synthesised sound stays.
+          this.sampleStats.failed++;
+        });
+    }
+  }
+
+  /**
+   * Play one take of a family: never the same take twice in a row, ±7% rate and
+   * ±1.5 dB per play. Returns false when the family is not decoded (caller synthesises).
+   */
+  private play(family: string, o: PlayOpts): boolean {
+    const ctx = this.ctx;
+    const takes = this.bank.get(family);
+    if (!ctx || !takes || !takes.length) {
+      this.sampleStats.fallbacks++;
+      return false;
+    }
+    const last = this.lastTake.get(family) ?? -1;
+    let i = Math.floor(Math.random() * takes.length);
+    if (takes.length > 1 && i === last) i = (i + 1 + Math.floor(Math.random() * (takes.length - 1))) % takes.length;
+    this.lastTake.set(family, i);
+    const t = ctx.currentTime + (o.when ?? 0);
+    const s = ctx.createBufferSource();
+    s.buffer = takes[i];
+    s.playbackRate.value = (o.rate ?? 1) * (0.93 + Math.random() * 0.14);
+    const g = ctx.createGain();
+    g.gain.value = o.gain * Math.pow(10, ((Math.random() * 2 - 1) * 1.5) / 20);
+    let head: AudioNode = s;
+    if (o.lowpass) {
+      const f = ctx.createBiquadFilter();
+      f.type = 'lowpass';
+      f.frequency.value = o.lowpass;
+      head.connect(f);
+      head = f;
+    }
+    head.connect(g).connect(this.sfx);
+    if (o.toEcho) {
+      const e = ctx.createGain();
+      e.gain.value = o.toEcho;
+      g.connect(e).connect(this.echo);
+    }
+    s.start(t);
+    this.sampleStats.played++;
+    return true;
   }
 
   private src(): AudioBufferSourceNode {
@@ -214,11 +338,14 @@ export class SoundEngine {
 
   whoosh(): void {
     if (!this.ctx) return;
+    if (this.play('whoosh', { gain: 0.7 })) return;
     this.burst({ type: 'bandpass', freq: 500, endFreq: 1600, q: 1.2, gain: 0.12, attack: 0.08, decay: 0.12 });
   }
 
   chopWood(): void {
     if (!this.ctx) return;
+    // The player's own blow leads the mix: the loudest regular cue, a little forest slap-back.
+    if (this.play('chop', { gain: 1.0, toEcho: 0.12 })) return;
     const p = 0.9 + Math.random() * 0.2;
     this.burst({ type: 'bandpass', freq: 1100 * p, q: 1.4, gain: 0.7, decay: 0.07, toEcho: 0.15 });
     this.tone({ f0: 190 * p, f1: 80, gain: 0.55, decay: 0.12 });
@@ -228,6 +355,11 @@ export class SoundEngine {
   /** Axe on an effigy: a dry stick knock and the tied bones rattling. */
   effigyHit(): void {
     if (!this.ctx) return;
+    if (this.play('knock', { gain: 0.85, rate: 0.9 })) {
+      // The tied bones still rattle.
+      for (let i = 0; i < 4; i++) this.burst({ type: 'bandpass', freq: 3000 + Math.random() * 1800, q: 9, gain: 0.1, decay: 0.025, when: 0.05 + Math.random() * 0.25 });
+      return;
+    }
     const p = 0.92 + Math.random() * 0.16;
     this.burst({ type: 'bandpass', freq: 2100 * p, q: 2.2, gain: 0.55, decay: 0.05 });
     this.tone({ f0: 430 * p, f1: 240, gain: 0.32, decay: 0.08 });
@@ -238,6 +370,11 @@ export class SoundEngine {
   /** An effigy giving way: sticks snapping, a hollow thud, bones clattering and cloth flapping. */
   effigyBreak(): void {
     if (!this.ctx) return;
+    if (this.play('break', { gain: 0.78, toEcho: 0.1 })) {
+      this.play('thud', { gain: 0.6, when: 0.55 });
+      for (let i = 0; i < 6; i++) this.burst({ type: 'bandpass', freq: 2600 + Math.random() * 2200, q: 10, gain: 0.1, decay: 0.03, when: 0.5 + Math.random() * 0.5 });
+      return;
+    }
     this.burst({ type: 'highpass', freq: 1500, gain: 0.6, decay: 0.09, toEcho: 0.12 });
     this.burst({ type: 'bandpass', freq: 900, q: 1.6, gain: 0.55, decay: 0.16, when: 0.02 });
     this.tone({ f0: 230, f1: 70, gain: 0.45, decay: 0.22, when: 0.01 });
@@ -251,12 +388,14 @@ export class SoundEngine {
 
   hitSoft(): void {
     if (!this.ctx) return;
+    if (this.play('hit', { gain: 0.72 })) return;
     this.burst({ type: 'lowpass', freq: 700, gain: 0.35, decay: 0.12 });
     this.tone({ f0: 120, f1: 60, gain: 0.3, decay: 0.1 });
   }
 
   breakCase(): void {
     if (!this.ctx) return;
+    if (this.play('break', { gain: 0.78, toEcho: 0.08 })) return;
     this.burst({ type: 'highpass', freq: 1800, gain: 0.45, decay: 0.15, toEcho: 0.1 });
     this.burst({ type: 'bandpass', freq: 700, q: 2, gain: 0.5, decay: 0.2, when: 0.03 });
     this.tone({ type: 'triangle', f0: 900, f1: 400, gain: 0.12, decay: 0.08, when: 0.05 });
@@ -265,6 +404,7 @@ export class SoundEngine {
 
   treeCreak(): void {
     if (!this.ctx) return;
+    if (this.play('creak', { gain: 0.9, rate: 0.95 })) return;
     const ctx = this.ctx;
     const t = ctx.currentTime;
     const o = ctx.createOscillator();
@@ -295,6 +435,12 @@ export class SoundEngine {
   treeCrash(distance: number): void {
     if (!this.ctx) return;
     const v = clamp(1 - distance / 60, 0.15, 1);
+    // Far away: quieter, duller (air takes the highs) and wetter in the forest echo.
+    if (this.play('crash', { gain: 0.95 * v, toEcho: 0.25 + 0.25 * (1 - v), lowpass: 18000 * Math.exp(-distance / 35) + 600 })) {
+      // A low thump under the recording so it carries weight on small speakers.
+      this.tone({ f0: 70, f1: 32, gain: 0.35 * v, decay: 0.5 });
+      return;
+    }
     this.burst({ type: 'lowpass', freq: 900, endFreq: 120, gain: 0.9 * v, decay: 1.1, toEcho: 0.35 });
     this.tone({ f0: 70, f1: 32, gain: 0.8 * v, decay: 0.6 });
     for (let i = 0; i < 6; i++) this.burst({ type: 'highpass', freq: 2200 + Math.random() * 2000, gain: 0.12 * v, decay: 0.12, when: 0.04 + Math.random() * 0.5 });
@@ -314,6 +460,9 @@ export class SoundEngine {
 
   arrowHit(surface: 'flesh' | 'wood' | 'ground' | 'water'): void {
     if (!this.ctx) return;
+    if (surface === 'flesh' && this.play('hit', { gain: 0.5, rate: 1.1 })) return;
+    if (surface === 'wood' && this.play('knock', { gain: 0.75 })) return;
+    if (surface === 'ground' && this.play('thud', { gain: 0.35, rate: 1.3 })) return;
     if (surface === 'flesh') {
       this.tone({ f0: 160, f1: 70, gain: 0.35, decay: 0.08 });
       this.burst({ type: 'lowpass', freq: 800, gain: 0.25, decay: 0.08 });
@@ -410,6 +559,10 @@ export class SoundEngine {
   /** A heavy blow landing on the player from a monster. */
   monsterHit(): void {
     if (!this.ctx) return;
+    if (this.play('hit', { gain: 0.9, rate: 0.85 })) {
+      this.play('thud', { gain: 0.55 });
+      return;
+    }
     this.tone({ f0: 90, f1: 40, gain: 0.6, decay: 0.25 });
     this.burst({ type: 'lowpass', freq: 900, gain: 0.45, decay: 0.2 });
   }
@@ -458,7 +611,7 @@ export class SoundEngine {
     } else if (surface === 'water') {
       this.burst({ type: 'bandpass', freq: 900, endFreq: 300, q: 1, gain: 0.25, decay: 0.25 });
     } else if (surface === 'wood') {
-      this.burst({ type: 'bandpass', freq: 1300, q: 2, gain: 0.3, decay: 0.06 });
+      if (!this.play('knock', { gain: 0.55 })) this.burst({ type: 'bandpass', freq: 1300, q: 2, gain: 0.3, decay: 0.06 });
     } else {
       this.burst({ type: 'lowpass', freq: 1500, gain: 0.25, decay: 0.12 });
     }
@@ -523,6 +676,9 @@ export class SoundEngine {
     if (!this.ctx) return;
     const v = sprint ? 1.25 : 1;
     const j = 0.9 + Math.random() * 0.2;
+    // Recorded steps per surface (quiet: the player's body stays under the action).
+    const fam = surface === 'grass' ? 'step_grass' : surface === 'wood' ? 'step_wood' : surface === 'rock' ? 'step_stone' : surface === 'sand' ? 'step_sand' : '';
+    if (fam && this.play(fam, { gain: (surface === 'wood' ? 0.42 : 0.5) * v, toEcho: indoor && surface === 'rock' ? 0.45 : 0 })) return;
     switch (surface) {
       case 'sand':
         // Soft thud plus a short crunch of grains.

@@ -154,6 +154,39 @@ if (isMain) {
     if (problems.length) failed++;
     console.log(`${problems.length ? 'FAIL' : 'ok  '} ${path.basename(f)}: ${w}x${h}${problems.length ? ' — ' + problems.join('; ') : ''}`);
   }
+  // Audio: real Ogg files, small, licensed, and measured. The manifest written by
+  // scripts/master_audio.py must list exactly the shipped files, each mono with a
+  // decoded peak at or under -1 dBFS.
+  const audio = all.filter((x) => /\.(ogg|mp3)$/i.test(x));
+  if (audio.length) {
+    const manPath = audio.map((f) => path.join(path.dirname(f), 'manifest.json')).find((m) => fs.existsSync(m));
+    const man = manPath ? JSON.parse(fs.readFileSync(manPath, 'utf8')).files : [];
+    const byName = new Map(man.map((m) => [m.file, m]));
+    for (const f of audio) {
+      const buf = fs.readFileSync(f);
+      const problems = [];
+      const name = path.basename(f);
+      if (f.endsWith('.ogg') && buf.subarray(0, 4).toString('latin1') !== 'OggS') problems.push('not an Ogg file');
+      if (buf.length > 150 * 1024) problems.push(`${(buf.length / 1024).toFixed(0)} KB > 150 KB`);
+      if (!licence.includes(name)) problems.push('missing from ASSETS_LICENSE.md');
+      const m = byName.get(name);
+      if (!m) problems.push('not in the audio manifest');
+      else {
+        if (m.peakDb > -1) problems.push(`peak ${m.peakDb} dBFS > -1`);
+        if (m.channels !== 1) problems.push('not mono');
+      }
+      if (problems.length) failed++;
+      console.log(`${problems.length ? 'FAIL' : 'ok  '} ${name}: ${(buf.length / 1024).toFixed(0)} KB${m ? `, peak ${m.peakDb} dBFS, ${m.seconds}s` : ''}${problems.length ? ' — ' + problems.join('; ') : ''}`);
+    }
+    const shipped = new Set(audio.map((f) => path.basename(f)));
+    for (const m of man) {
+      if (!shipped.has(m.file)) {
+        failed++;
+        console.log(`FAIL manifest lists ${m.file}, which is not shipped`);
+      }
+    }
+    console.log(`${audio.length} audio files, manifest covers ${man.length}`);
+  }
   console.log(`${files.length + fbx.length} models, ${failed} failing`);
   process.exit(failed ? 1 : 0);
 }

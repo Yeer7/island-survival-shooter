@@ -62,6 +62,8 @@ Run `npm run lint:assets` to check every `.glb`/`.gltf`/`.fbx` and texture (pars
 | `enemies/tribal_human.glb` | Animated Human (Idle/Walk/Run/Punch/Death) — night cannibals, village guards and the Tribal Chief (skin tint, mask, club, skirt and headdress added in code) | Quaternius | https://poly.pizza/m/c3Ibh9I3udk | CC0 1.0 | None |
 | `enemies/cave_skeleton.glb` | Skeleton (Idle/Running/Attack/Death) — Cave Guardian, scaled to 3.6 m, tinted, glowing eyes added in code | Quaternius | https://poly.pizza/m/wODZYCgX5Z | CC0 1.0 | None |
 | `enemies/alpha_wolf.glb` | Wolf (Idle/Walk/Gallop/Attack/Death) — Alpha Beast, scaled, darkened, red eyes added in code | Quaternius | https://poly.pizza/m/P1gU3Qkr9r | CC0 1.0 | None |
+| `enemies/cave_spider.glb` | Spider (Idle/Walk/Attack/Death) — giant cave spiders in the first chamber, darkened and with glowing eyes in code | Quaternius | https://poly.pizza/m/yRYJiAJyiM | CC0 1.0 | Embedded textures capped at 512 px (`scripts/repack_glb.py`) |
+| `enemies/deep_lord.glb` | Giant (Idle/Walk/Run/Attack/Death) — the Lord of the Depths: stone-grey skin, purple crystal pauldrons and a crystal-studded stone maul added in code | Quaternius | https://poly.pizza/m/BldaiPtyJa | CC0 1.0 | Embedded textures capped at 512 px (`scripts/repack_glb.py`) |
 | `animals/deer.glb` | Deer (animated) | Quaternius | https://poly.pizza/m/T6Cs7tmMHJ | CC0 1.0 | None |
 | `animals/stag.glb` | Stag (animated) | Quaternius | https://poly.pizza/m/tQdzbZ1Cmw | CC0 1.0 | None |
 | `tools/bow.glb` | Wooden Bow | Quaternius | https://poly.pizza/m/QnpqjLSKFU | CC0 1.0 | None |

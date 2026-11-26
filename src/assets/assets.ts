@@ -55,6 +55,8 @@ export const ASSET_FILES = {
   enemyHuman: 'assets/enemies/tribal_human.glb',
   enemySkeleton: 'assets/enemies/cave_skeleton.glb',
   enemyWolf: 'assets/enemies/alpha_wolf.glb',
+  enemySpider: 'assets/enemies/cave_spider.glb',
+  enemyDeepLord: 'assets/enemies/deep_lord.glb',
   stag: 'assets/animals/stag.glb',
   bow: 'assets/tools/bow.glb',
   arrow: 'assets/tools/arrow.glb',

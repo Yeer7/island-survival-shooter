@@ -43,6 +43,8 @@ interface RoleCfg {
 
 const HUMAN_CLIPS: Record<ClipKey, RegExp> = { idle: /\|Idle$/, walk: /\|Walk$/, run: /\|Run$/, attack: /\|Punch$/, death: /\|Death$/ };
 const SKELETON_CLIPS: Record<ClipKey, RegExp> = { idle: /Skeleton_Idle$/, walk: /Skeleton_Running$/, run: /Skeleton_Running$/, attack: /Skeleton_Attack$/, death: /Skeleton_Death$/ };
+const SPIDER_CLIPS: Record<ClipKey, RegExp> = { idle: /Spider_Idle$/, walk: /Spider_Walk$/, run: /Spider_Walk$/, attack: /Spider_Attack$/, death: /Spider_Death$/ };
+const GIANT_CLIPS: Record<ClipKey, RegExp> = { idle: /\|Idle$/, walk: /\|Walk$/, run: /\|Run$/, attack: /\|Attack$/, death: /\|Death$/ };
 const WOLF_CLIPS: Record<ClipKey, RegExp> = { idle: /^(AnimalArmature\|)?Idle$/, walk: /^(AnimalArmature\|)?Walk$/, run: /^(AnimalArmature\|)?Gallop$/, attack: /^(AnimalArmature\|)?Attack$/, death: /^(AnimalArmature\|)?Death$/ };
 
 // The player sprints at 10 m/s: every enemy is slower, so running away always works.
@@ -53,9 +55,9 @@ const ROLE: Record<Role, RoleCfg> = {
   guard: { asset: 'enemyHuman', height: 1.85, hp: 80, walk: 1.6, run: 4.8, damage: 14, reach: 2.1, radius: 0.38, windup: 0.5, attackTime: 1, aggro: 22, leash: 40, name: 'Guarda', clips: HUMAN_CLIPS },
   boss: { asset: 'enemyHuman', height: 2.45, hp: 280, walk: 1.5, run: 4.2, damage: 24, reach: 2.8, radius: 0.5, windup: 0.7, attackTime: 1.3, aggro: 18, leash: 40, name: 'Chefe Tribal', clips: HUMAN_CLIPS },
   guardian: { asset: 'enemySkeleton', height: 3.6, hp: 450, walk: 1.4, run: 3.8, damage: 30, reach: 3.2, radius: 0.9, windup: 0.8, attackTime: 1.5, aggro: 22, leash: 36, name: 'Guardião da Caverna', clips: SKELETON_CLIPS },
-  skeleton: { asset: 'enemySkeleton', height: 1.75, hp: 110, walk: 1.3, run: 4.0, damage: 14, reach: 1.9, radius: 0.38, windup: 0.55, attackTime: 1.1, aggro: 15, leash: 28, name: 'Esqueleto da Caverna', clips: SKELETON_CLIPS },
+  skeleton: { asset: 'enemySpider', height: 1.0, hp: 110, walk: 1.8, run: 4.6, damage: 14, reach: 2.3, radius: 0.85, windup: 0.45, attackTime: 1.0, aggro: 15, leash: 28, name: 'Aranha Gigante', clips: SPIDER_CLIPS },
   skelGuard: { asset: 'enemySkeleton', height: 1.95, hp: 130, walk: 1.3, run: 4.0, damage: 16, reach: 2.0, radius: 0.42, windup: 0.55, attackTime: 1.1, aggro: 16, leash: 26, name: 'Esqueleto Guarda', clips: SKELETON_CLIPS },
-  deepLord: { asset: 'enemySkeleton', height: 2.8, hp: 340, walk: 1.4, run: 3.8, damage: 28, reach: 2.7, radius: 0.7, windup: 0.75, attackTime: 1.4, aggro: 18, leash: 26, name: 'Senhor das Profundezas', clips: SKELETON_CLIPS },
+  deepLord: { asset: 'enemyDeepLord', height: 3.3, hp: 340, walk: 1.4, run: 3.8, damage: 28, reach: 3.0, radius: 0.9, windup: 0.75, attackTime: 1.4, aggro: 18, leash: 26, name: 'Senhor das Profundezas', clips: GIANT_CLIPS },
   alpha: { asset: 'enemyWolf', height: 2.3, hp: 650, walk: 1.8, run: 6.5, damage: 34, reach: 3.0, radius: 0.9, windup: 0.6, attackTime: 1.2, aggro: 26, leash: 45, name: 'Fera Alfa', clips: WOLF_CLIPS },
 };
 
@@ -294,6 +296,62 @@ function chiefCrown(): THREE.Group {
   return crown;
 }
 
+let stoneMaps: { map: THREE.Texture; normal: THREE.Texture } | null = null;
+/** The Poly Haven rock scan used in the cave, shared for the stone giant's skin. */
+function stoneSkin(): { map: THREE.Texture; normal: THREE.Texture } {
+  if (!stoneMaps) {
+    const L = new THREE.TextureLoader();
+    const map = L.load('assets/textures/rock_face_diff_512.jpg');
+    map.colorSpace = THREE.SRGBColorSpace;
+    map.wrapS = map.wrapT = THREE.RepeatWrapping;
+    map.repeat.set(3, 3);
+    const normal = L.load('assets/textures/rock_face_nor_gl_512.jpg');
+    normal.wrapS = normal.wrapT = THREE.RepeatWrapping;
+    normal.repeat.set(3, 3);
+    stoneMaps = { map, normal };
+  }
+  return stoneMaps;
+}
+
+/** The Lord of the Depths' gear: violet crystal pauldrons and a stone maul studded with crystals. */
+function deepLordProps(): { pauldronL: THREE.Object3D; pauldronR: THREE.Object3D; maul: THREE.Object3D } {
+  const stone = new THREE.MeshStandardMaterial({ color: 0x55525a, roughness: 0.95, flatShading: true });
+  const crystal = new THREE.MeshStandardMaterial({ color: 0xc89cff, emissive: 0x8a3cff, emissiveIntensity: 1.6, roughness: 0.2, flatShading: true });
+  const wood = new THREE.MeshStandardMaterial({ color: 0x3e2c1e, roughness: 0.9 });
+  const pauldron = (side: number) => {
+    const g = new THREE.Group();
+    g.scale.setScalar(1.7);
+    const plate = new THREE.Mesh(new THREE.DodecahedronGeometry(0.42, 0), stone);
+    plate.scale.set(1.2, 0.75, 1.1);
+    g.add(plate);
+    for (let k = 0; k < 5; k++) {
+      const h = 0.35 + (k % 3) * 0.18;
+      const c = new THREE.Mesh(new THREE.ConeGeometry(0.09 + (k % 2) * 0.04, h, 5), crystal);
+      const a = (k / 5) * Math.PI * 2;
+      c.position.set(Math.cos(a) * 0.22, 0.25 + h * 0.4, Math.sin(a) * 0.2);
+      c.rotation.set(Math.sin(a) * 0.5, 0, -Math.cos(a) * 0.5 - side * 0.3);
+      g.add(c);
+    }
+    return g;
+  };
+  const maul = new THREE.Group();
+  // The arm bone points down: the haft runs on down from the fist to a heavy head near the ground.
+  maul.rotation.x = 0.5;
+  const haft = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 2.0, 7), wood);
+  haft.position.y = 0.6;
+  const head = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.75, 1.15), stone);
+  head.position.y = 1.55;
+  maul.add(haft, head);
+  for (let k = 0; k < 6; k++) {
+    const c = new THREE.Mesh(new THREE.ConeGeometry(0.09, 0.4, 5), crystal);
+    c.position.set((k % 2 ? 1 : -1) * 0.33, 1.55 + ((k % 3) - 1) * 0.22, ((k % 3) - 1) * 0.36);
+    c.rotation.z = (k % 2 ? -1 : 1) * Math.PI / 2;
+    maul.add(c);
+  }
+  for (const o of [maul]) o.traverse((m) => ((m as THREE.Mesh).isMesh ? ((m as THREE.Mesh).castShadow = true) : null));
+  return { pauldronL: pauldron(-1), pauldronR: pauldron(1), maul };
+}
+
 function tribalProps(role: Role): { mask: THREE.Object3D; weapon: THREE.Object3D; skirt: THREE.Object3D; crown: THREE.Object3D | null } {
   const wood = new THREE.MeshStandardMaterial({ color: 0x5d3f26, roughness: 0.9 });
   const bone = new THREE.MeshStandardMaterial({ color: 0xe6dcc6, roughness: 0.6 });
@@ -411,6 +469,18 @@ export class Tribe {
         } else if (cfg.asset === 'enemyWolf') {
           c.color.multiplyScalar(0.42);
           c.roughness = 0.9;
+        } else if (cfg.asset === 'enemySpider') {
+          // Near-black carapace with a dull red mark.
+          c.color.multiplyScalar(0.55);
+          c.roughness = 0.6;
+        } else if (cfg.asset === 'enemyDeepLord') {
+          // Living rock: the cave's scanned stone over its body, cold grey with a violet cast.
+          const rock = stoneSkin();
+          c.map = rock.map;
+          c.normalMap = rock.normal;
+          c.color.setHex(0x9c98a8);
+          c.roughness = 0.95;
+          c.metalness = 0;
         } else {
           c.color.lerp(new THREE.Color(role === 'deepLord' ? 0x4e4366 : 0x9fb1c4), role === 'deepLord' ? 0.55 : 0.35);
         }
@@ -440,7 +510,40 @@ export class Tribe {
         e.position.set(x, 0, 0);
         eyes.add(e);
       }
-      attach(head, eyes, cfg.height / (cfg.asset === 'enemyWolf' ? 1.6 : 1.8), cfg.asset === 'enemyWolf' ? [0, 0.12, 0.22] : [0, 0.14, 0.12]);
+      if (cfg.asset === 'enemySpider') {
+        // A cluster of small red eyes on the front of the head.
+        const red = new THREE.MeshStandardMaterial({ color: 0x000000, emissive: 0xff2a10, emissiveIntensity: 3 });
+        const spiderEyes = new THREE.Group();
+        for (const [x, y, r] of [
+          [-0.08, 0.05, 0.035],
+          [0.08, 0.05, 0.035],
+          [-0.15, 0.02, 0.022],
+          [0.15, 0.02, 0.022],
+          [-0.04, 0.1, 0.018],
+          [0.04, 0.1, 0.018],
+        ]) {
+          const e = new THREE.Mesh(new THREE.SphereGeometry(r, 8, 6), red);
+          e.position.set(x, y, 0);
+          spiderEyes.add(e);
+        }
+        attach(head, spiderEyes, cfg.height / 1.95, [0, 0.12, 0.45]);
+      } else if (cfg.asset === 'enemyDeepLord') {
+        // Big violet eyes burning in the stone face.
+        const lordEyes = new THREE.Group();
+        for (const x of [-0.2, 0.2]) {
+          const e = new THREE.Mesh(new THREE.SphereGeometry(0.085, 10, 8), glow);
+          e.position.set(x, 0, 0);
+          e.scale.set(1.3, 0.8, 0.6);
+          lordEyes.add(e);
+        }
+        attach(head, lordEyes, cfg.height / 3.92, [0, 0.62, 0.62]);
+        const lord = deepLordProps();
+        attach(model.getObjectByName('ArmL'), lord.pauldronL, cfg.height / 3.92, [0, 0.1, 0]);
+        attach(model.getObjectByName('ArmR'), lord.pauldronR, cfg.height / 3.92, [0, 0.1, 0]);
+        attach(model.getObjectByName('ArmR_end') ?? model.getObjectByName('ArmR'), lord.maul, cfg.height / 3.92, [0, 0, 0]);
+      } else {
+        attach(head, eyes, cfg.height / (cfg.asset === 'enemyWolf' ? 1.6 : 1.8), cfg.asset === 'enemyWolf' ? [0, 0.12, 0.22] : [0, 0.14, 0.12]);
+      }
     }
 
     const mixer = new THREE.AnimationMixer(model.children[0] ?? model);

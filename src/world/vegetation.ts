@@ -956,12 +956,15 @@ export class Props {
   readonly group = new THREE.Group();
   readonly smallRocks: { x: number; y: number; z: number; active: boolean }[] = [];
   readonly smallSticks: { x: number; y: number; z: number; active: boolean }[] = [];
+  /** Every shrub: where it stands, its size, which instanced set and slot draws it. */
+  readonly bushes: { x: number; y: number; z: number; scale: number; variant: number; slot: number; active: boolean }[] = [];
+  readonly bushSets: InstancedSet[];
   private pebbles: InstancedSet;
   private stickMesh: THREE.InstancedMesh;
   private dummy = new THREE.Object3D();
   private zero = new THREE.Matrix4().makeScale(0, 0, 0);
 
-  constructor(terrain: Terrain, colliders: ColliderGrid, exclusions: Exclusion[], tree: Forest, lib: AssetLibrary) {
+  constructor(terrain: Terrain, colliders: ColliderGrid, exclusions: Exclusion[], tree: Forest, lib: AssetLibrary, blocked: (x: number, z: number) => boolean = () => false, grove?: { x: number; z: number; r0: number; r1: number }) {
     const rand = mulberry32(99);
     const d = this.dummy;
     const color = new THREE.Color();
@@ -1061,7 +1064,9 @@ export class Props {
 
     // Shrubs built in code (dark twigs, alpha-cut moss/olive leaf sprays, two shapes) and
     // CC0 ferns under the trees; swaying, no cast shadows to keep the shadow pass light.
-    const bushSets = buildBushVariants().map((parts) => new InstancedSet(parts, 130, false));
+    const BUSHES_PER_VARIANT = 270;
+    const bushSets = buildBushVariants().map((parts) => new InstancedSet(parts, BUSHES_PER_VARIANT, false));
+    this.bushSets = bushSets;
     const fernSet = new InstancedSet(lib.parts('fern', { by: 'height', value: 0.8 }), 260, false);
     for (const set of [...bushSets, fernSet]) for (const m of set.meshes) addWind(m.material as THREE.Material, 0.1, 0.06);
     {
@@ -1076,15 +1081,22 @@ export class Props {
     }
     const bushCount = () => bushSets.reduce((s2, b2) => s2 + b2.count, 0);
     tries = 0;
-    while ((bushCount() < 240 || fernSet.count < 260) && tries < 30000) {
+    while ((bushCount() < BUSHES_PER_VARIANT * 2 || fernSet.count < 260) && tries < 60000) {
       tries++;
-      const x = (rand() - 0.5) * 500;
-      const z = (rand() - 0.5) * 500;
-      if (terrain.surfaceAt(x, z) !== 'grass' || excluded(x, z)) continue;
+      // Some shrubs crowd the edge of the wreck's clearing; the rest spread over the island.
+      const inGrove = grove && rand() < 0.12;
+      const ga = rand() * Math.PI * 2;
+      const gr = grove ? grove.r0 + rand() * (grove.r1 - grove.r0) : 0;
+      const x = inGrove ? grove.x + Math.cos(ga) * gr : (rand() - 0.5) * 500;
+      const z = inGrove ? grove.z + Math.sin(ga) * gr : (rand() - 0.5) * 500;
+      if (terrain.surfaceAt(x, z) !== 'grass' || (!inGrove && excluded(x, z))) continue;
       const h = terrain.height(x, z);
-      const fern = nearTree(x, z, 5) ? rand() < 0.7 : rand() < 0.3;
-      const set = fern ? fernSet : bushSets[rand() < 0.55 ? 0 : 1];
-      if (set.count >= (fern ? 260 : 120)) continue;
+      const fern = inGrove ? false : nearTree(x, z, 5) ? rand() < 0.5 : rand() < 0.2;
+      // Shrubs keep off the wreck's dirt, the luggage and the ramp, and out of tree trunks.
+      if (!fern && (blocked(x, z) || nearTree(x, z, 1.2))) continue;
+      const variant = rand() < 0.5 ? 0 : 1;
+      const set = fern ? fernSet : bushSets[variant];
+      if (set.count >= (fern ? 260 : BUSHES_PER_VARIANT)) continue;
       const s = fern ? 0.7 + rand() * 0.7 : 0.95 + rand() * 0.6;
       d.position.set(x, h - 0.05, z);
       d.rotation.set(0, rand() * 6, 0);
@@ -1093,7 +1105,8 @@ export class Props {
       // Ferns keep their green tint; shrubs only vary in brightness (their leaves carry the colour).
       if (fern) color.setHSL(0.25 + (rand() - 0.5) * 0.06, 0.25, 0.55 + rand() * 0.1).multiplyScalar(1.75);
       else color.setScalar(0.85 + rand() * 0.3);
-      set.push(d.matrix, color);
+      const slot = set.push(d.matrix, color);
+      if (!fern) this.bushes.push({ x, y: h - 0.05, z, scale: s, variant, slot, active: true });
     }
     for (const b2 of bushSets) b2.finish(this.group);
     fernSet.finish(this.group);
@@ -1154,6 +1167,41 @@ export class Props {
     this.stickMesh.count = nst;
     this.stickMesh.castShadow = true;
     this.group.add(this.stickMesh);
+  }
+
+  /** Ray vs shrubs (a sphere over each one's leafy mass). */
+  raycastBush(o: THREE.Vector3, d: THREE.Vector3, maxDist: number, inflate = 0): { t: number; index: number } | null {
+    let best = maxDist;
+    let idx = -1;
+    for (let i = 0; i < this.bushes.length; i++) {
+      const b = this.bushes[i];
+      if (!b.active) continue;
+      const r = 0.55 * b.scale + inflate;
+      const cy = b.y + 0.55 * b.scale;
+      const ox = o.x - b.x;
+      const oy = o.y - cy;
+      const oz = o.z - b.z;
+      if (ox * ox + oz * oz > (best + r + 1) * (best + r + 1)) continue;
+      const bb = ox * d.x + oy * d.y + oz * d.z;
+      const c = ox * ox + oy * oy + oz * oz - r * r;
+      const disc = bb * bb - c;
+      if (disc < 0) continue;
+      let t = -bb - Math.sqrt(disc);
+      if (t < 0) t = c < 0 ? 0 : -1;
+      if (t >= 0 && t < best) {
+        best = t;
+        idx = i;
+      }
+    }
+    return idx >= 0 ? { t: best, index: idx } : null;
+  }
+
+  /** Cut a shrub down: its instance disappears. */
+  breakBush(i: number): void {
+    const b = this.bushes[i];
+    if (!b || !b.active) return;
+    b.active = false;
+    this.bushSets[b.variant].set(b.slot, this.zero);
   }
 
   hideSmallStick(i: number): void {

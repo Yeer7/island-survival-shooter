@@ -32,7 +32,7 @@ import { Effigies, trailSpots } from './world/effigies';
 import { GrassField } from './world/grass';
 import { Water } from './world/water';
 
-type HitKind = 'tree' | 'case' | 'effigy' | 'animal' | 'enemy' | 'terrain' | 'water' | 'hard';
+type HitKind = 'tree' | 'bush' | 'case' | 'effigy' | 'animal' | 'enemy' | 'terrain' | 'water' | 'hard';
 interface RayHit {
   kind: HitKind;
   t: number;
@@ -230,7 +230,7 @@ export class Game implements CombatWorld {
       onSettled: (t, d, a) => this.onTreeSettled(t, d, a),
     }, lib, 330, [{ x: this.crash.center.x, z: this.crash.center.z, r0: 26, r1: 58, count: 70 }]);
     this.scene.add(this.forest.group);
-    this.props = new Props(this.terrain, this.colliders, exclusions, this.forest, lib);
+    this.props = new Props(this.terrain, this.colliders, exclusions, this.forest, lib, (x, z) => this.crash.grassBlocked(x, z), { x: this.crash.center.x, z: this.crash.center.z, r0: 9, r1: 34 });
     this.scene.add(this.props.group);
     // Breakable effigies: round the village and along the trails between landmarks.
     const crashC = this.crash.center;
@@ -1220,6 +1220,11 @@ export class Game implements CombatWorld {
     let best: RayHit | null = null;
     const tree = this.forest.raycast(o, d, maxDist, inflate);
     if (tree) best = { kind: 'tree', t: tree.t, index: tree.tree, metal: false };
+    // Shrubs only stop close blows (a swing or stab at arm's reach), never arrows or shots.
+    if (maxDist <= 4) {
+      const bu = this.props.raycastBush(o, d, best ? best.t : maxDist, inflate * 0.5);
+      if (bu) best = { kind: 'bush', t: bu.t, index: bu.index, metal: false };
+    }
     const c = this.crash.raycastCases(o, d, best ? best.t : maxDist, inflate * 0.6);
     if (c) best = { kind: 'case', t: c.t, index: c.index, metal: false };
     const ef = this.effigies.raycast(o, d, best ? best.t : maxDist, inflate * 0.5);
@@ -1344,6 +1349,11 @@ export class Game implements CombatWorld {
         this.player.addTrauma(felled ? 0.25 : spec.kind === 'stab' ? 0.06 : 0.14);
         break;
       }
+      case 'bush':
+        this.hitBush(hit.index, p, n, spec.kind === 'swing' && (this.inv.selected === 'axe' || this.inv.selected === 'flameAxe'));
+        this.hud.hitMarker('white');
+        this.player.addTrauma(0.06);
+        break;
       case 'case':
         this.hitCase(hit.index, spec.luggage, p, n);
         this.hud.hitMarker('white');
@@ -1475,6 +1485,35 @@ export class Game implements CombatWorld {
       this.pickups.add('hide', this.v4.set(hx, this.terrain.height(hx, hz), hz));
     }
     this.debris.burst(this.v4.copy(a.pos).setY(a.pos.y + 0.3), this.v3.set(0, 1, 0), 10, a.species === 'deer' ? 0x8b5a32 : 0x8a7258, { speed: 1.5, size: 0.06, floor: a.pos.y });
+  }
+
+  /**
+   * A blow into a shrub. An axe cuts it down in one stroke: it vanishes in a puff of leaves
+   * and fine twig splinters and leaves two sticks on the ground. Anything else just rustles
+   * a few leaves loose.
+   */
+  private hitBush(i: number, p: THREE.Vector3, n: THREE.Vector3, cuts: boolean): void {
+    const b = this.props.bushes[i];
+    if (!b || !b.active) return;
+    const floor = b.y + 0.04;
+    const mid = this.v4.set(b.x, b.y + 0.5 * b.scale, b.z);
+    if (!cuts) {
+      this.debris.burst(p, n, 5, 0x4f6b32, { speed: 1.2, size: 0.03, life: 1.6, gravity: 3, flat: true, floor });
+      this.sound.hitSoft();
+      return;
+    }
+    this.props.breakBush(i);
+    this.debris.burst(mid, this.v5.set(0, 1, 0), 18, 0x56733a, { speed: 1.8, size: 0.035, life: 2.2, gravity: 2.6, flat: true, floor, spread: 1.1 });
+    this.debris.burst(mid, this.v5.set(0, 1, 0), 9, 0x5a4030, { speed: 2.4, size: 0.028, life: 1.1, floor });
+    this.sound.effigyHit();
+    this.vm.onImpact(false);
+    for (let k = 0; k < 2; k++) {
+      const a = Math.random() * Math.PI * 2;
+      const x = b.x + Math.cos(a) * 0.3;
+      const z = b.z + Math.sin(a) * 0.3;
+      this.pickups.add('stick', this.v1.set(x, this.terrain.height(x, z), z), 1);
+    }
+    this.hud.toast(tr('🌿 Arbusto cortado: +2 gravetos no chão', '🌿 Bush cut: 2 sticks on the ground'));
   }
 
   /** A blow shakes a few needles or leaf bits loose from the crown; they flutter down. */
@@ -1744,8 +1783,10 @@ export class Game implements CombatWorld {
     } else {
       const treeHit = this.forest.raycast(eye, fwd, 3.0, 0.3);
       const cs = this.crash.raycastCases(eye, fwd, 3.0, 0.15);
+      const bush = this.props.raycastBush(eye, fwd, 2.8, 0.1);
       const chopper = sel === 'axe' || sel === 'flameAxe';
-      if (cs && (!treeHit || cs.t < treeHit.t)) prompts.push(chopper ? { key: tr('Clique', 'Click'), text: tr('Quebrar mala', 'Break suitcase') } : { key: '1', text: tr('Machado para abrir a mala', 'Axe to open the suitcase') });
+      if (bush && (!treeHit || bush.t < treeHit.t) && (!cs || bush.t < cs.t)) prompts.push(chopper ? { key: tr('Clique', 'Click'), text: tr('Cortar arbusto', 'Cut bush') } : { key: '1', text: tr('Machado para cortar', 'Axe to cut') });
+      else if (cs && (!treeHit || cs.t < treeHit.t)) prompts.push(chopper ? { key: tr('Clique', 'Click'), text: tr('Quebrar mala', 'Break suitcase') } : { key: '1', text: tr('Machado para abrir a mala', 'Axe to open the suitcase') });
       else if (treeHit) prompts.push(chopper ? { key: tr('Clique', 'Click'), text: tr('Cortar árvore', 'Chop tree') } : { key: '1', text: tr('Machado para cortar', 'Axe to chop') });
     }
     if (this.inv.logs > 0 && !this.placing) prompts.push({ key: 'G', text: tr('Soltar Tora', 'Drop Log') });

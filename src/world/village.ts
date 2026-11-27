@@ -225,6 +225,74 @@ function earthTexture(R: number, paths: { a: number; len: number; w: number }[])
   return finish(c);
 }
 
+/** A dried palm frond: a curved rib with drooping leaflets, green going to straw. Alpha-cut. */
+function frondTexture(): THREE.CanvasTexture {
+  const W = 128;
+  const H = 256;
+  const { c, g } = canvas(W, H);
+  const r = mulberry32(41);
+  for (let f = 0; f < 3; f++) {
+    // Three fronds side by side on one card, so a card reads as a bundle.
+    const x0 = 22 + f * 42 + (r() - 0.5) * 8;
+    const lean = (r() - 0.5) * 14;
+    const rib = (t: number) => [x0 + lean * t * t, H - 4 - t * (H - 14)];
+    // One hue per frond (some still olive, most dried to straw or brown), leaflets vary in light.
+    const hue = [
+      [98, 102, 60],
+      [138, 116, 76],
+      [112, 88, 58],
+    ][Math.floor(r() * 3)];
+    for (let i = 0; i < 34; i++) {
+      const t = 0.04 + (i / 34) * 0.92;
+      const [x, y] = rib(t);
+      const len = 24 * (1 - t * 0.5) + r() * 6;
+      const l = 0.8 + r() * 0.35;
+      g.strokeStyle = `rgb(${Math.round(hue[0] * l)},${Math.round(hue[1] * l)},${Math.round(hue[2] * l)})`;
+      for (const s of [-1, 1]) {
+        if (r() < 0.12) continue; // torn leaflets
+        g.lineWidth = 3 + r() * 1.5;
+        g.beginPath();
+        g.moveTo(x, y);
+        g.quadraticCurveTo(x + s * len * 0.6, y - 2, x + s * len, y + 10 + r() * 8);
+        g.stroke();
+      }
+    }
+    g.strokeStyle = 'rgba(92,70,40,1)';
+    g.lineWidth = 3;
+    g.beginPath();
+    for (let i = 0; i <= 20; i++) {
+      const [x, y] = rib(i / 20);
+      if (i) g.lineTo(x, y);
+      else g.moveTo(x, y);
+    }
+    g.stroke();
+  }
+  return finish(c);
+}
+
+/** Ragged strips of stained cloth hung from the skull poles. */
+function stripTexture(): THREE.CanvasTexture {
+  const { c, g } = canvas(32, 128);
+  const r = mulberry32(23);
+  for (let s = 0; s < 3; s++) {
+    const x = 3 + s * 10;
+    const len = 80 + r() * 44;
+    g.fillStyle = s === 1 ? 'rgb(122,34,24)' : s === 0 ? 'rgb(150,128,96)' : 'rgb(96,30,22)';
+    g.beginPath();
+    g.moveTo(x, 0);
+    g.lineTo(x + 7, 0);
+    for (let y = 8; y < len; y += 8) g.lineTo(x + 7 + (r() - 0.5) * 2, y);
+    g.lineTo(x + 3 + r() * 3, len);
+    g.lineTo(x + 1, len - 6);
+    for (let y = len - 8; y > 0; y -= 8) g.lineTo(x + (r() - 0.5) * 2, y);
+    g.closePath();
+    g.fill();
+    g.fillStyle = 'rgba(30,14,10,0.35)';
+    for (let k = 0; k < 20; k++) g.fillRect(x + r() * 7, r() * len, 1 + r() * 3, 1 + r() * 4);
+  }
+  return finish(c);
+}
+
 /** Uniform texel density: stretch a geometry's UVs so one material tiles evenly everywhere. */
 function scaleUV(geo: THREE.BufferGeometry, su: number, sv: number): THREE.BufferGeometry {
   const uv = geo.attributes.uv as THREE.BufferAttribute;
@@ -291,8 +359,8 @@ export class Village {
     const root = new THREE.Group();
 
     // Shared materials (one draw per material after baking).
-    const thatch = new THREE.MeshStandardMaterial({ map: thatchTexture(), roughness: 1, color: 0xe2cc98, side: THREE.DoubleSide });
-    const fringe = new THREE.MeshStandardMaterial({ map: fringeTexture(), roughness: 1, color: 0xe2cc98, side: THREE.DoubleSide, alphaTest: 0.45 });
+    const thatch = new THREE.MeshStandardMaterial({ map: thatchTexture(), roughness: 1, color: 0xc2ae86, side: THREE.DoubleSide });
+    const fringe = new THREE.MeshStandardMaterial({ map: fringeTexture(), roughness: 1, color: 0xc2ae86, side: THREE.DoubleSide, alphaTest: 0.45 });
     const wattle = new THREE.MeshStandardMaterial({ map: wattleTexture(), roughness: 0.95, color: 0xd8c2a4, side: THREE.DoubleSide });
     const hide = new THREE.MeshStandardMaterial({ map: hideTexture(), roughness: 0.85, side: THREE.DoubleSide, alphaTest: 0.5 });
     const dark = new THREE.MeshStandardMaterial({ color: 0x24190f, roughness: 1, side: THREE.BackSide });
@@ -325,17 +393,7 @@ export class Village {
       { a: Math.atan2(small.x, small.z), len: 11, w: 1.6 },
       { a: Math.atan2(aframe.x, aframe.z), len: 10, w: 1.8 },
     ];
-    const R = 24;
-    const earthGeo = new THREE.PlaneGeometry(R * 2, R * 2, 48, 48);
-    earthGeo.rotateX(-Math.PI / 2);
-    const ep = earthGeo.attributes.position;
-    for (let i = 0; i < ep.count; i++) ep.setY(i, terrain.height(C.x + ep.getX(i), C.z + ep.getZ(i)) - C.y + 0.05);
-    earthGeo.computeVertexNormals();
-    const earth = new THREE.Mesh(earthGeo, new THREE.MeshStandardMaterial({ map: earthTexture(R, paths), transparent: true, depthWrite: false, roughness: 1, polygonOffset: true, polygonOffsetFactor: -2 }));
-    earth.position.copy(C);
-    earth.receiveShadow = true;
-    earth.userData.keep = true;
-    this.group.add(earth);
+    // (the ground itself is laid at the end, once the fire pits are placed)
 
     // ---- central fire: stone ring, logs, flames, benches and the cauldron
     const fp = this.at(0, 0);
@@ -542,6 +600,46 @@ export class Village {
       this.occupied.push({ x, z, r: 0.9 });
     });
 
+    // ---- lean-to shelters, a log tipi, skull poles, cold fire pits and bone heaps
+    const frond = new THREE.MeshStandardMaterial({ map: frondTexture(), roughness: 0.95, side: THREE.DoubleSide, alphaTest: 0.5 });
+    const bark = logMaterials()[0];
+    const strip = new THREE.MeshStandardMaterial({ map: stripTexture(), roughness: 0.9, side: THREE.DoubleSide, alphaTest: 0.5 });
+    const charMat = new THREE.MeshStandardMaterial({ color: 0x1b1714, roughness: 1 });
+    const gateClear = (a: number, w: number) => gates.every((g) => Math.abs(Math.atan2(Math.sin(a - g), Math.cos(a - g))) > w);
+    const findSpot = (rr: number, d0: number, d1: number, seed: number, gw = 0.32) => {
+      for (let k = 0; k < 240; k++) {
+        const a = (k + seed) * 2.399 + seed * 0.7;
+        const d = d0 + (((k + seed) * 0.37) % 1) * (d1 - d0);
+        const x = Math.sin(a) * d;
+        const z = Math.cos(a) * d;
+        if (!gateClear(a, gw) || this.blocked(x, z, rr)) continue;
+        return { x, z };
+      }
+      return null;
+    };
+    for (let i = 0; i < 3; i++) {
+      const s = findSpot(2.3, 12.5, 16, i * 11 + 1);
+      if (s) this.leanTo(root, s.x, s.z, Math.atan2(-s.x, -s.z), { frond, bark, hide, rope });
+    }
+    const tp = findSpot(2.5, 11.5, 16, 5);
+    if (tp) this.logTipi(root, tp.x, tp.z, Math.atan2(-tp.x, -tp.z), { bark, rope, frond });
+    for (let i = 0; i < 3; i++) {
+      const s = findSpot(0.9, 6, 15, i * 7 + 3, 0.2);
+      if (s) this.skullPole(root, s.x, s.z, Math.atan2(-s.x, -s.z), { rope, strip });
+    }
+    const ashSpots: { x: number; z: number; r: number }[] = [];
+    for (let i = 0; i < 2; i++) {
+      const s = findSpot(1.3, 7, 14, i * 13 + 2);
+      if (!s) continue;
+      this.ashPit(root, s.x, s.z, { stone, char: charMat });
+      ashSpots.push({ x: s.x, z: s.z, r: 2.3 });
+    }
+    for (let i = 0; i < 4; i++) {
+      const s = findSpot(0.8, 4, 16, i * 5 + 9, 0.15);
+      if (s) this.bonePile(root, s.x, s.z);
+    }
+    this.ground(24, paths, ashSpots);
+
     // ---- spots for the breakable effigies on a ring between the buildings
     for (let k = 0; k < 120 && this.effigySpots.length < 5; k++) {
       const a = k * 2.399 + 0.4;
@@ -560,6 +658,437 @@ export class Village {
       if ((o as THREE.Mesh).isMesh) (o as THREE.Mesh).receiveShadow = true;
     });
     for (const m of bakeStatic(root)) this.group.add(m);
+  }
+
+  // ---------------------------------------------------------------- 4B: shelters, totems, ground
+
+  /** Local frame helper: a point at (lx, ly, lz) in a frame at local (dx, dz) turned by yaw. */
+  private frame(dx: number, dz: number, yaw: number) {
+    const c = this.at(dx, dz);
+    const cs = Math.cos(yaw);
+    const sn = Math.sin(yaw);
+    const rot = (x: number, y: number, z: number) => new THREE.Vector3(x * cs + z * sn, y, -x * sn + z * cs);
+    const P = (x: number, y: number, z: number) => rot(x, 0, z).add(c).setY(c.y + y);
+    // Ground under a local point (so poles always reach the earth on a slope).
+    const G = (x: number, z: number, lift = 0) => {
+      const p = P(x, 0, z);
+      p.y = this.terrain.height(p.x, p.z) + lift;
+      return p;
+    };
+    return { c, rot, P, G };
+  }
+
+  /** A flat card from a basis: x along `ax`, y along `ay`, centred at `at`. */
+  private card(parent: THREE.Object3D, mat: THREE.Material, at: THREE.Vector3, ax: THREE.Vector3, ay: THREE.Vector3, w: number, h: number): void {
+    const g = new THREE.PlaneGeometry(w, h);
+    const nz = new THREE.Vector3().crossVectors(ax, ay).normalize();
+    const m = new THREE.Matrix4().makeBasis(ax.clone().normalize(), ay.clone().normalize(), nz);
+    g.applyMatrix4(m);
+    const mesh = new THREE.Mesh(g, mat);
+    mesh.position.copy(at);
+    mesh.castShadow = true;
+    parent.add(mesh);
+  }
+
+  /**
+   * A lean-to: two forked posts and a ridge pole, a row of poles leaning from the ground
+   * behind onto the ridge, thatched with dry palm fronds and a few bark slabs; a hide and
+   * bones on the floor under it. Open side faces local +Z.
+   */
+  private leanTo(parent: THREE.Object3D, dx: number, dz: number, yaw: number, m: { frond: THREE.Material; bark: THREE.Material; hide: THREE.Material; rope: THREE.Material }): void {
+    const r = mulberry32(Math.round(dx * 31 + dz * 17) + 99);
+    const { P, G, rot } = this.frame(dx, dz, yaw);
+    const W = 3.4 + r() * 0.6;
+    const H = 1.85 + r() * 0.3;
+    const D = 2.3;
+    // Forked posts and the ridge.
+    for (const s of [-1, 1]) {
+      const base = G(s * W * 0.5, 0, -0.25);
+      const top = P(s * W * 0.5, H + 0.12, 0);
+      parent.add(this.logBetween(base, top, 0.07));
+      parent.add(this.logBetween(top.clone().setY(top.y - 0.25), top.clone().add(rot(s * 0.22, 0.25, 0)), 0.035));
+      this.colliders.add({ x: base.x, z: base.z, r: 0.14, y0: base.y - 1, y1: base.y + H, kind: 'plane', ref: 1 });
+    }
+    parent.add(this.logBetween(P(-W * 0.5 - 0.35, H + 0.02, 0), P(W * 0.5 + 0.35, H - 0.06, 0.02), 0.06));
+    // Leaning poles from the ground behind onto the ridge, sticking out above it.
+    const n = 8;
+    for (let k = 0; k < n; k++) {
+      const x = -W * 0.5 + 0.15 + (k / (n - 1)) * (W - 0.3) + (r() - 0.5) * 0.12;
+      const foot = G(x + (r() - 0.5) * 0.2, -D - r() * 0.25, -0.12);
+      const top = P(x + (r() - 0.5) * 0.15, H + 0.3 + r() * 0.25, 0.28);
+      parent.add(this.logBetween(foot, top, 0.04 + r() * 0.02));
+    }
+    // Frond thatch in overlapping rows down the slope (lowest row first, the next laid over it).
+    const span = Math.hypot(H, D);
+    const along = rot(1, 0, 0);
+    const up = rot(0, H, D).normalize();
+    const out = rot(0, D, -H).normalize();
+    const rows = 3;
+    for (let row = 0; row < rows; row++) {
+      const t = (row + 0.5) / rows;
+      const cols = 4;
+      for (let k = 0; k < cols; k++) {
+        const x = -W * 0.5 + ((k + 0.5) / cols) * W + (r() - 0.5) * 0.3;
+        const at = P(x, H * t - 0.05, -D * (1 - t)).addScaledVector(out, 0.05 + row * 0.025);
+        const tilt = (r() - 0.5) * 0.35;
+        const ay = up.clone().applyAxisAngle(out, tilt);
+        this.card(parent, m.frond, at, along.clone().applyAxisAngle(out, tilt), ay, W / cols + 0.55, span / rows + 0.6);
+      }
+    }
+    // A couple of bark slabs pinned over the thatch, and fronds draped over the ridge.
+    for (let k = 0; k < 2; k++) {
+      const x = (k ? 1 : -1) * W * (0.18 + r() * 0.15);
+      const at = P(x, H * 0.55, -D * 0.45).addScaledVector(out, 0.14);
+      const slab = new THREE.Mesh(new THREE.BoxGeometry(0.42, span * 0.7, 0.04), m.bark);
+      slab.position.copy(at);
+      slab.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(along, up, out));
+      slab.rotateZ((r() - 0.5) * 0.3);
+      slab.castShadow = true;
+      parent.add(slab);
+    }
+    // Inside: a sleeping hide, a bone and a skull.
+    const floor = G(0, -0.8, 0.03);
+    const mat = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 1.1), m.hide);
+    mat.rotation.set(-Math.PI / 2, 0, yaw + 0.2);
+    mat.position.copy(floor);
+    parent.add(mat);
+    const bp = rot(0.9, 0, -0.5);
+    const b = this.put('bone', { by: 'max', value: 0.42 }, dx + bp.x, dz + bp.z, r() * 6, 0, parent);
+    if (b) b.rotation.z = Math.PI / 2;
+    const sp = rot(-1.1, 0, -1.1);
+    this.put('skull', { by: 'height', value: 0.24 }, dx + sp.x, dz + sp.z, yaw + 0.4, 0.02, parent);
+    // Colliders along the sloping back; the open front stays walkable.
+    for (let k = 0; k < 5; k++) {
+      const p = G(-W * 0.5 + (k / 4) * W, -D * 0.6);
+      this.colliders.add({ x: p.x, z: p.z, r: 0.55, y0: p.y - 1, y1: p.y + H, kind: 'plane', ref: 1 });
+    }
+    const mid = rot(0, 0, -D * 0.4);
+    this.aiBlockers.push({ x: this.center.x + dx + mid.x, z: this.center.z + dz + mid.z, r: W * 0.5 });
+    this.occupied.push({ x: dx + mid.x, z: dz + mid.z, r: W * 0.5 + 0.6 });
+  }
+
+  /**
+   * A conical shelter of leaning logs lashed at the top, walled with bark slabs
+   * except at the door, with a skull hung over it.
+   */
+  private logTipi(parent: THREE.Object3D, dx: number, dz: number, yaw: number, m: { bark: THREE.Material; rope: THREE.Material; frond: THREE.Material }): void {
+    const r = mulberry32(Math.round(dx * 13 - dz * 7) + 5);
+    const { P, G, rot } = this.frame(dx, dz, yaw);
+    const R = 1.75;
+    const H = 3.5;
+    const apex = P(0, H, 0);
+    const n = 14;
+    const door = 0; // the door faces local +Z
+    for (let k = 0; k < n; k++) {
+      const a = (k / n) * Math.PI * 2 + (r() - 0.5) * 0.15;
+      const foot = G(Math.sin(a) * R, Math.cos(a) * R, -0.15);
+      const dir = new THREE.Vector3().subVectors(apex, foot);
+      const top = foot.clone().addScaledVector(dir, 1.18 + r() * 0.12);
+      parent.add(this.logBetween(foot, top, 0.05 + r() * 0.02));
+    }
+    // Bark slabs between the poles, two courses, leaving the doorway.
+    for (let k = 0; k < n; k++) {
+      const a = ((k + 0.5) / n) * Math.PI * 2;
+      if (Math.abs(Math.atan2(Math.sin(a - door), Math.cos(a - door))) < 0.45) continue;
+      for (const [t0, t1] of [
+        [0, 0.48],
+        [0.42, 0.82],
+      ]) {
+        const f = G(Math.sin(a) * R * 1.03, Math.cos(a) * R * 1.03, -0.05);
+        const p0 = f.clone().lerp(apex, t0);
+        const p1 = f.clone().lerp(apex, t1);
+        const len = p0.distanceTo(p1);
+        const w = (2 * Math.PI * R * (1 - (t0 + t1) / 2)) / n + 0.12;
+        const slab = new THREE.Mesh(new THREE.BoxGeometry(w, len, 0.035), m.bark);
+        const ay = new THREE.Vector3().subVectors(p1, p0).normalize();
+        const ax = rot(Math.cos(a), 0, -Math.sin(a));
+        const az = new THREE.Vector3().crossVectors(ax, ay).normalize();
+        slab.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(ax, ay, az));
+        slab.position.copy(p0).lerp(p1, 0.5);
+        slab.rotateZ((r() - 0.5) * 0.12);
+        slab.castShadow = true;
+        parent.add(slab);
+      }
+    }
+    // Fronds tucked round the top where the poles cross.
+    for (let k = 0; k < 4; k++) {
+      const a = (k / 4) * Math.PI * 2 + 0.4;
+      const at = P(Math.sin(a) * 0.35, H - 0.35, Math.cos(a) * 0.35);
+      this.card(parent, m.frond, at, rot(Math.cos(a), 0, -Math.sin(a)), rot(Math.sin(a) * 0.5, 1, Math.cos(a) * 0.5).normalize(), 0.9, 1.1);
+    }
+    // Lashing and the skull over the door.
+    const lash = new THREE.Mesh(new THREE.TorusGeometry(0.16, 0.035, 5, 10), m.rope);
+    lash.position.copy(apex).y -= 0.1;
+    lash.rotation.x = Math.PI / 2;
+    parent.add(lash);
+    const sp = rot(0, 0, R * 0.42);
+    const sk = this.put('skull', { by: 'height', value: 0.26 }, dx + sp.x, dz + sp.z, yaw, -2.05, parent);
+    if (sk) sk.rotation.x = 0.35;
+    for (let k = 0; k < 10; k++) {
+      const a = (k / 10) * Math.PI * 2;
+      if (Math.abs(Math.atan2(Math.sin(a - door), Math.cos(a - door))) < 0.5) continue;
+      const p = G(Math.sin(a) * R * 0.95, Math.cos(a) * R * 0.95);
+      this.colliders.add({ x: p.x, z: p.z, r: 0.35, y0: p.y - 1, y1: p.y + 2.5, kind: 'plane', ref: 1 });
+    }
+    this.aiBlockers.push({ x: this.center.x + dx, z: this.center.z + dz, r: R + 0.2 });
+    this.occupied.push({ x: dx, z: dz, r: R + 0.9 });
+  }
+
+  /** A tall pole hung with skulls: a crossbar, a skull on each end and one on top, bones and strips. */
+  private skullPole(parent: THREE.Object3D, dx: number, dz: number, yaw: number, m: { rope: THREE.Material; strip: THREE.Material }): void {
+    const r = mulberry32(Math.round(dx * 7 + dz * 29) + 3);
+    const { P, G, rot } = this.frame(dx, dz, yaw);
+    const H = 3 + r() * 0.5;
+    const lean = (r() - 0.5) * 0.12;
+    const top = P(lean, H, lean * 0.5);
+    const base = G(0, 0, -0.35);
+    parent.add(this.logBetween(base, top, 0.085));
+    const barY = H - 0.75;
+    const b0 = P(-0.75, barY, 0);
+    const b1 = P(0.75, barY - 0.05, 0);
+    parent.add(this.logBetween(b0, b1, 0.045));
+    for (const [p, h] of [
+      [top, 0.3],
+      [b0, 0.24],
+      [b1, 0.24],
+    ] as const) {
+      const sk = this.lib?.has('skull') ? this.lib.instance('skull', { by: 'height', value: h }) : null;
+      if (!sk) continue;
+      sk.position.copy(p);
+      sk.rotation.set((r() - 0.5) * 0.3, yaw + (r() - 0.5) * 0.5, (r() - 0.5) * 0.3);
+      sk.traverse((o) => ((o as THREE.Mesh).isMesh ? (o.castShadow = true) : null));
+      parent.add(sk);
+    }
+    // Bones and cloth strips hanging from the bar.
+    for (let k = 0; k < 3; k++) {
+      const p = b0.clone().lerp(b1, 0.22 + k * 0.28);
+      const drop = 0.3 + r() * 0.3;
+      const str = new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.006, drop, 3), m.rope);
+      str.position.copy(p).y -= drop / 2;
+      parent.add(str);
+      if (k === 1 || !this.lib?.has('bone')) {
+        this.card(parent, m.strip, p.clone().setY(p.y - drop * 0.5 - 0.2), rot(1, 0, 0), new THREE.Vector3(0, 1, 0), 0.12, 0.65);
+      } else {
+        const b = this.lib.instance('bone', { by: 'max', value: 0.38 });
+        b.position.copy(p).y -= drop + 0.18;
+        b.rotation.set(0, yaw, Math.PI / 2 + (r() - 0.5) * 0.3, 'YXZ');
+        parent.add(b);
+      }
+    }
+    // Lashing where the bar crosses the pole.
+    const lash = new THREE.Mesh(new THREE.TorusGeometry(0.1, 0.025, 4, 8), m.rope);
+    lash.position.copy(P(0, barY, 0));
+    lash.rotation.x = Math.PI / 2;
+    parent.add(lash);
+    this.colliders.add({ x: base.x, z: base.z, r: 0.15, y0: base.y - 1, y1: base.y + H, kind: 'plane', ref: 1 });
+    this.occupied.push({ x: dx, z: dz, r: 1.0 });
+  }
+
+  /** A cold fire pit: a ring of stones round charred log ends (its ash is in the ground layer). */
+  private ashPit(parent: THREE.Object3D, dx: number, dz: number, m: { stone: THREE.Material; char: THREE.Material }): void {
+    const r = mulberry32(Math.round(dx * 5 + dz * 11) + 1);
+    const { G } = this.frame(dx, dz, 0);
+    for (let k = 0; k < 8; k++) {
+      const a = (k / 8) * Math.PI * 2 + r() * 0.3;
+      const st = new THREE.Mesh(new THREE.DodecahedronGeometry(0.16 + r() * 0.06, 0), m.stone);
+      st.position.copy(G(Math.sin(a) * 0.62, Math.cos(a) * 0.62, 0.04));
+      st.scale.set(1, 0.6, 1);
+      st.rotation.set(r() * 3, r() * 3, r() * 3);
+      st.castShadow = true;
+      parent.add(st);
+    }
+    for (let k = 0; k < 3; k++) {
+      const a = (k / 3) * Math.PI * 2 + r();
+      const p0 = G(Math.sin(a) * 0.45, Math.cos(a) * 0.45, 0.06);
+      const p1 = G(-Math.sin(a) * 0.1, -Math.cos(a) * 0.1, 0.1);
+      const log = this.logBetween(p0, p1, 0.045 + r() * 0.02);
+      log.traverse((o) => ((o as THREE.Mesh).isMesh ? ((o as THREE.Mesh).material = m.char) : null));
+      parent.add(log);
+    }
+    this.colliders.add({ ...{ x: this.center.x + dx, z: this.center.z + dz }, r: 0.7, y0: this.at(dx, dz).y - 1, y1: this.at(dx, dz).y + 0.3, kind: 'rock', ref: 0 });
+    this.occupied.push({ x: dx, z: dz, r: 1.1 });
+  }
+
+  /** A heap of bones and a skull or two. */
+  private bonePile(parent: THREE.Object3D, dx: number, dz: number): void {
+    const r = mulberry32(Math.round(dx * 3 + dz * 19) + 8);
+    for (let k = 0; k < 7; k++) {
+      const a = r() * Math.PI * 2;
+      const d = r() * 0.45;
+      const b = this.put('bone', { by: 'max', value: 0.3 + r() * 0.2 }, dx + Math.sin(a) * d, dz + Math.cos(a) * d, r() * 6, -0.03 * (k % 3), parent);
+      if (b) b.rotation.set((r() - 0.5) * 0.5, r() * 6, Math.PI / 2 + (r() - 0.5) * 0.6);
+    }
+    for (let k = 0; k < 1 + (r() < 0.6 ? 1 : 0); k++) {
+      const s = this.put('skull', { by: 'height', value: 0.22 }, dx + (r() - 0.5) * 0.5, dz + (r() - 0.5) * 0.5, r() * 6, -0.04, parent);
+      if (s) s.rotation.x = (r() - 0.5) * 0.6;
+    }
+    this.occupied.push({ x: dx, z: dz, r: 0.7 });
+  }
+
+  /**
+   * The clearing floor, laid like the wreck's churned earth: a fine tiling trampled-dirt
+   * texture (also its bump), the layout (paths, ash round the fires, mottling) in vertex
+   * colours, and a ragged edge mask that frays into the grass along the paths out.
+   */
+  private ground(R: number, paths: { a: number; len: number; w: number }[], ash: { x: number; z: number; r: number }[]): void {
+    const C = this.center;
+    const layout = earthTexture(R, paths).image as HTMLCanvasElement;
+    const LS = layout.width;
+    const ld = layout.getContext('2d')!.getImageData(0, 0, LS, LS).data;
+    const r = mulberry32(611);
+    // Edge mask (alphaMap, green channel): a solid core, ragged blobs round the rim and
+    // tongues of earth running out along the paths.
+    const MS = 512;
+    const { c: mc, g: mg } = canvas(MS, MS);
+    const mp = (m: number) => MS / 2 + (m / R) * (MS / 2);
+    mg.fillStyle = '#000';
+    mg.fillRect(0, 0, MS, MS);
+    const blob = (x: number, z: number, rad: number, a = 1) => {
+      const grd = mg.createRadialGradient(mp(x), mp(z), 0, mp(x), mp(z), (rad / R) * (MS / 2));
+      grd.addColorStop(0, `rgba(255,255,255,${a})`);
+      grd.addColorStop(0.5, `rgba(255,255,255,${a})`);
+      grd.addColorStop(1, 'rgba(255,255,255,0)');
+      mg.fillStyle = grd;
+      mg.fillRect(0, 0, MS, MS);
+    };
+    blob(0, 0, R * 0.86);
+    for (let k = 0; k < 70; k++) {
+      const a = r() * Math.PI * 2;
+      const d = R * (0.55 + r() * 0.28);
+      blob(Math.sin(a) * d, Math.cos(a) * d, 1.8 + r() * 3.2, 0.8 + r() * 0.2);
+    }
+    for (const p of paths) {
+      for (let d = 8; d < Math.min(p.len, R - 1.5); d += 1.3) blob(Math.sin(p.a) * d + (r() - 0.5) * 0.8, Math.cos(p.a) * d + (r() - 0.5) * 0.8, p.w * 0.9);
+    }
+    // Patchy grass growing back into the earth near the rim.
+    for (let k = 0; k < 140; k++) {
+      const a = r() * Math.PI * 2;
+      const d = R * (0.45 + r() * 0.4);
+      const x = mp(Math.sin(a) * d);
+      const y = mp(Math.cos(a) * d);
+      const rad = 3 + r() * 9;
+      const grd = mg.createRadialGradient(x, y, 0, x, y, rad);
+      grd.addColorStop(0, `rgba(0,0,0,${0.5 + r() * 0.4})`);
+      grd.addColorStop(1, 'rgba(0,0,0,0)');
+      mg.fillStyle = grd;
+      mg.fillRect(x - rad, y - rad, rad * 2, rad * 2);
+    }
+    const mask = new THREE.CanvasTexture(mc);
+    // Trampled earth: clods lit on top and shadowed below, dust, grit, bits of charcoal
+    // and the odd footprint scuff. One tile is 2 m.
+    const T = 256;
+    const { c: tc, g: tg } = canvas(T, T);
+    tg.fillStyle = 'rgb(96,76,54)';
+    tg.fillRect(0, 0, T, T);
+    const wrap = (f: (x: number, y: number) => void, x: number, y: number) => {
+      for (const ox of [-T, 0, T]) for (const oy of [-T, 0, T]) f(x + ox, y + oy);
+    };
+    for (let i = 0; i < 260; i++) {
+      const x = r() * T;
+      const y = r() * T;
+      const rad = 10 + r() * 26;
+      const k = r();
+      const col = k < 0.5 ? '70,54,36' : '128,104,76';
+      wrap((xx, yy) => {
+        const grd = tg.createRadialGradient(xx, yy, 0, xx, yy, rad);
+        grd.addColorStop(0, `rgba(${col},${0.25 + r() * 0.2})`);
+        grd.addColorStop(1, `rgba(${col},0)`);
+        tg.fillStyle = grd;
+        tg.fillRect(xx - rad, yy - rad, rad * 2, rad * 2);
+      }, x, y);
+    }
+    for (let i = 0; i < 520; i++) {
+      const x = r() * T;
+      const y = r() * T;
+      const rad = 1.5 + r() * 4;
+      const rot = r() * 3;
+      const lit = `rgba(${120 + r() * 30},${96 + r() * 22},${68 + r() * 16},${0.6 + r() * 0.3})`;
+      wrap((xx, yy) => {
+        tg.fillStyle = 'rgba(30,22,14,0.6)';
+        tg.beginPath();
+        tg.ellipse(xx + 1, yy + 1.3, rad, rad * 0.7, rot, 0, Math.PI * 2);
+        tg.fill();
+        tg.fillStyle = lit;
+        tg.beginPath();
+        tg.ellipse(xx, yy, rad * 0.85, rad * 0.6, rot, 0, Math.PI * 2);
+        tg.fill();
+      }, x, y);
+    }
+    for (let i = 0; i < 3000; i++) {
+      const k = r();
+      tg.fillStyle = k < 0.18 ? `rgba(14,12,10,${0.5 + r() * 0.4})` : k < 0.6 ? `rgba(160,150,134,${0.35 + r() * 0.3})` : `rgba(80,62,42,${0.5 + r() * 0.4})`;
+      tg.fillRect(r() * T, r() * T, 1 + r() * 2, 1 + r() * 2);
+    }
+    // Twigs and straw trodden into the dirt.
+    for (let i = 0; i < 40; i++) {
+      const x = r() * T;
+      const y = r() * T;
+      const a = r() * Math.PI;
+      const l = 6 + r() * 14;
+      wrap((xx, yy) => {
+        tg.strokeStyle = r() < 0.5 ? 'rgba(150,120,74,0.7)' : 'rgba(60,44,28,0.7)';
+        tg.lineWidth = 1 + r();
+        tg.beginPath();
+        tg.moveTo(xx, yy);
+        tg.lineTo(xx + Math.cos(a) * l, yy + Math.sin(a) * l);
+        tg.stroke();
+      }, x, y);
+    }
+    const tex = finish(tc);
+    tex.repeat.set(R, R);
+    const bump = finish(tc, false);
+    bump.repeat.set(R, R);
+    // Geometry draped on the terrain, layout in vertex colours.
+    const N = 110;
+    const geo = new THREE.PlaneGeometry(R * 2, R * 2, N, N);
+    geo.rotateX(-Math.PI / 2);
+    const pos = geo.attributes.position;
+    const col = new Float32Array(pos.count * 3);
+    const base = [98, 76, 52];
+    const lin = (v: number) => Math.pow(Math.min(1.7, Math.max(0.05, v)), 2.2);
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i);
+      const z = pos.getZ(i);
+      pos.setY(i, this.terrain.height(C.x + x, C.z + z) - C.y + 0.05);
+      const u = Math.min(LS - 1, Math.max(0, Math.round((x / R) * (LS / 2) + LS / 2)));
+      const v = Math.min(LS - 1, Math.max(0, Math.round((z / R) * (LS / 2) + LS / 2)));
+      const o = (v * LS + u) * 4;
+      const a = ld[o + 3] / 255;
+      let k = [0, 1, 2].map((j) => (a > 0.05 ? ld[o + j] / base[j] : 1));
+      // Ash round the smaller fire pits.
+      for (const s of ash) {
+        const d = Math.hypot(x - s.x, z - s.z) / s.r;
+        if (d < 1) {
+          const w = (1 - d) * (1 - d);
+          k = k.map((c) => c * (1 - w) + 0.45 * w);
+        }
+      }
+      // Broad, gentle variation: darker damp hollows and drier dusty ground.
+      const n = 0.5 + 0.5 * Math.sin(x * 0.29 + Math.sin(z * 0.21) * 2) * Math.sin(z * 0.25 - x * 0.13);
+      const f = 0.82 + 0.3 * n;
+      col[i * 3] = lin(k[0] * f);
+      col[i * 3 + 1] = lin(k[1] * f);
+      col[i * 3 + 2] = lin(k[2] * f);
+    }
+    geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    geo.computeVertexNormals();
+    const mat = new THREE.MeshStandardMaterial({
+      map: tex,
+      bumpMap: bump,
+      bumpScale: 1.6,
+      alphaMap: mask,
+      vertexColors: true,
+      transparent: true,
+      depthWrite: false,
+      roughness: 1,
+      polygonOffset: true,
+      polygonOffsetFactor: -2,
+    });
+    const earth = new THREE.Mesh(geo, mat);
+    earth.position.copy(C);
+    earth.receiveShadow = true;
+    earth.userData.keep = true;
+    this.group.add(earth);
   }
 
   // ---------------------------------------------------------------- helpers

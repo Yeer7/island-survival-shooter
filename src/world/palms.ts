@@ -10,7 +10,7 @@ import { detailTextures } from './textures';
  * trunk rises straight for the first 0.7 m before it curves (toward model +X), so a cut
  * at PALM_CUT is a clean horizontal circle that lines up with the stump.
  */
-export const PALM_CUT = 0.55;
+export const PALM_CUT = 0.85;
 const STRAIGHT = 0.7;
 
 export interface PalmVariant {

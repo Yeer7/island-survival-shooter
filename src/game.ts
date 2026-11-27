@@ -549,7 +549,7 @@ export class Game implements CombatWorld {
     windUniform.value = this.time;
     this.grass.update(this.player.pos.x, this.player.pos.z);
     this.forest.update(dt);
-    this.debris.update(dt);
+    this.debris.update(dt, this.camera.position);
     this.arrows.update(dt);
     this.sparks.update(dt);
     this.updateBurning(dt);
@@ -1331,11 +1331,13 @@ export class Game implements CombatWorld {
       case 'tree': {
         const tree = this.forest.trees[hit.index];
         const felled = this.forest.damage(hit.index, spec.tree, this.player.pos);
-        this.debris.burst(p, n, spec.kind === 'stab' ? 5 : 12, 0xdcb98a, { speed: 3.2, size: 0.07, floor });
-        if (spec.kind === 'swing') this.debris.burst(p, n, heavy ? 7 : 4, 0x5a3d26, { speed: heavy ? 3.2 : 2.5, size: 0.09, floor, life: 1.2 });
-        if (spec.kind === 'swing') this.sound.chopWood();
-        else this.sound.impact('wood');
-        this.hud.showTargetHealth(tree.hp / tree.maxHp);
+        // Fine pale chips from the notch and a few bark flakes, sized for the lens.
+        this.debris.burst(p, n, spec.kind === 'stab' ? 5 : 11, 0xe2c294, { speed: 3, size: 0.03, floor, flat: true });
+        if (spec.kind === 'swing') this.debris.burst(p, n, heavy ? 6 : 4, 0x4e3422, { speed: heavy ? 3 : 2.4, size: 0.034, floor, life: 1.2, flat: true });
+        if (spec.kind === 'swing') {
+          this.sound.chopWood();
+          this.dropLeaves(tree, heavy ? 9 : 6);
+        } else this.sound.impact('wood');
         this.hud.hitMarker('white');
         this.sound.hitConfirm(false);
         this.player.addTrauma(felled ? 0.25 : spec.kind === 'stab' ? 0.06 : 0.14);
@@ -1441,7 +1443,6 @@ export class Game implements CombatWorld {
         if (kind === 'tree' && hit) {
           const tree = this.forest.trees[hit.index];
           this.forest.damage(hit.index, 4, this.player.pos);
-          this.hud.showTargetHealth(tree.hp / tree.maxHp);
           this.hud.hitMarker('white');
           this.sound.hitConfirm(false);
         }
@@ -1475,12 +1476,34 @@ export class Game implements CombatWorld {
     this.debris.burst(this.v4.copy(a.pos).setY(a.pos.y + 0.3), this.v3.set(0, 1, 0), 10, a.species === 'deer' ? 0x8b5a32 : 0x8a7258, { speed: 1.5, size: 0.06, floor: a.pos.y });
   }
 
+  /** A blow shakes a few needles or leaf bits loose from the crown; they flutter down. */
+  private dropLeaves(tree: { x: number; y: number; z: number; scale: number; kind: 'pine' | 'palm' }, count: number): void {
+    const top = tree.y + (tree.kind === 'palm' ? 6.5 : 5) * tree.scale;
+    for (let k = 0; k < count; k++) {
+      const a = Math.random() * Math.PI * 2;
+      const r = 0.4 + Math.random() * (tree.kind === 'palm' ? 1.8 : 1.4);
+      const x = tree.x + Math.cos(a) * r;
+      const z = tree.z + Math.sin(a) * r;
+      this.debris.burst(this.v4.set(x, top - Math.random() * 1.5, z), this.v5.set(Math.cos(a), 0, Math.sin(a)), 1, tree.kind === 'palm' ? 0x5f8f3a : 0x46703a, {
+        speed: 0.5,
+        size: 0.03,
+        life: 3.2,
+        gravity: 2.2,
+        flat: true,
+        floor: this.terrain.height(x, z) + 0.02,
+      });
+    }
+  }
+
   private hitCase(i: number, dmg: number, p: THREE.Vector3, n: THREE.Vector3): void {
     const s = this.crash.suitcases[i];
     if (s.broken) return;
-    s.hp -= dmg;
-    this.debris.burst(p, n, 6, s.color, { speed: 2.5, size: 0.06, floor: s.pos.y - 0.1 });
-    this.hud.showTargetHealth(s.hp / 50);
+    // Crash-site luggage springs open on the first blow; crates and barrels take a few.
+    if (s.lid) s.hp = 0;
+    else {
+      s.hp -= dmg;
+      this.debris.burst(p, n, 6, s.color, { speed: 2.5, size: 0.04, floor: s.pos.y - 0.1, flat: true });
+    }
     if (s.hp > 0) {
       this.sound.hitSoft();
       s.mesh.rotation.y += (Math.random() - 0.5) * 0.3;
@@ -1492,8 +1515,14 @@ export class Game implements CombatWorld {
     if (s.lid) s.openT = 0;
     else this.scene.remove(s.mesh);
     this.sound.breakCase();
-    this.debris.burst(s.pos, this.v3.set(0, 1, 0), 22, s.color, { speed: 3.5, size: 0.1, floor: s.pos.y - 0.1 });
-    this.debris.burst(s.pos, this.v3.set(0, 1, 0), 10, 0xe8e2d2, { speed: 2.5, size: 0.08, floor: s.pos.y - 0.1 });
+    if (s.lid) {
+      // Only a few tiny shards off the burst latch.
+      const latch = s.mesh.localToWorld(this.v4.set(0.2, 0.155, 0.24));
+      this.debris.burst(latch, n, 5, 0x2a2a2a, { speed: 1.6, size: 0.02, floor: s.pos.y - 0.12, life: 0.9 });
+    } else {
+      this.debris.burst(s.pos, this.v3.set(0, 1, 0), 22, s.color, { speed: 3.5, size: 0.07, floor: s.pos.y - 0.1 });
+      this.debris.burst(s.pos, this.v3.set(0, 1, 0), 10, 0xe8e2d2, { speed: 2.5, size: 0.05, floor: s.pos.y - 0.1 });
+    }
     s.contents.forEach((type: ItemType, k) => {
       if (s.lid) {
         // Nested on the clothes inside the open base, lying along the case.
@@ -1558,7 +1587,7 @@ export class Game implements CombatWorld {
     const dist = Math.hypot(t.x - this.player.pos.x, t.z - this.player.pos.z);
     this.sound.treeCrash(dist);
     this.player.addTrauma(0.45 * (1 - smoothstep(4, 30, dist)));
-    this.debris.burst(tip, this.v3.set(0, 1, 0), 26, t.kind === 'palm' ? 0x4f8a3a : 0x3f6e34, { speed: 4, size: 0.12, floor: tip.y - 0.4, life: 1.4 });
+    this.debris.burst(tip, this.v3.set(0, 1, 0), 26, t.kind === 'palm' ? 0x4f8a3a : 0x3f6e34, { speed: 4, size: 0.07, floor: tip.y - 0.4, life: 1.4, flat: true });
     // Palms come down on the beach: a puff of sand where the crown hits.
     if (t.kind === 'palm') this.debris.burst(tip, this.v3.set(0, 1, 0), 18, 0xd8c08a, { speed: 3, size: 0.07, floor: tip.y - 0.4, life: 1.1 });
   }

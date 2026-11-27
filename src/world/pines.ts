@@ -12,7 +12,7 @@ import { detailTextures } from './textures';
  * between them. The foot of the trunk is exactly (0, 0, 0); PINE_CUT is where the axe
  * cuts and the stump ends.
  */
-export const PINE_CUT = 0.55;
+export const PINE_CUT = 0.85;
 
 let bark: THREE.MeshStandardMaterial | null = null;
 

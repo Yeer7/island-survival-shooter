@@ -11,6 +11,9 @@ export class Debris {
   private life: Float32Array;
   private size: Float32Array;
   private floorY: Float32Array;
+  /** Per-particle proportions (width, thickness, length) and gravity. */
+  private aspect: Float32Array;
+  private grav: Float32Array;
   private next = 0;
   private dummy = new THREE.Object3D();
   private color = new THREE.Color();
@@ -18,8 +21,8 @@ export class Debris {
 
   constructor(max = 260) {
     this.max = max;
-    const geo = new THREE.BoxGeometry(1, 1, 1);
-    const mat = new THREE.MeshStandardMaterial({ roughness: 0.9 });
+    const geo = chipGeometry();
+    const mat = new THREE.MeshStandardMaterial({ roughness: 0.9, side: THREE.DoubleSide });
     this.mesh = new THREE.InstancedMesh(geo, mat, max);
     this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     this.mesh.frustumCulled = false;
@@ -31,6 +34,8 @@ export class Debris {
     this.life = new Float32Array(max);
     this.size = new Float32Array(max);
     this.floorY = new Float32Array(max);
+    this.aspect = new Float32Array(max * 3);
+    this.grav = new Float32Array(max);
     this.dummy.scale.setScalar(0);
     this.dummy.updateMatrix();
     for (let i = 0; i < max; i++) {
@@ -44,7 +49,7 @@ export class Debris {
     normal: THREE.Vector3,
     count: number,
     hex: number,
-    opts: { speed?: number; size?: number; life?: number; floor?: number; spread?: number } = {},
+    opts: { speed?: number; size?: number; life?: number; floor?: number; spread?: number; gravity?: number; flat?: boolean } = {},
   ): void {
     const speed = opts.speed ?? 4;
     const size = opts.size ?? 0.06;
@@ -67,6 +72,15 @@ export class Debris {
       this.life[i] = life * (0.7 + Math.random() * 0.6);
       this.size[i] = size * (0.6 + Math.random() * 0.8);
       this.floorY[i] = opts.floor ?? -100;
+      // Every chip its own proportions: a thin splinter, a wider flake or a stubby shard.
+      this.aspect[i * 3] = 0.45 + Math.random() * 0.7;
+      this.aspect[i * 3 + 1] = (opts.flat ? 0.12 : 0.22) + Math.random() * 0.25;
+      this.aspect[i * 3 + 2] = 0.9 + Math.random() * 0.6;
+      this.grav[i] = opts.gravity ?? 14;
+      if (opts.gravity !== undefined && opts.gravity < 6) {
+        // Leaves and needles flutter down: slow spin.
+        for (let k = 0; k < 3; k++) this.spin[i * 3 + k] *= 0.3;
+      }
       this.color.setHex(hex).multiplyScalar(0.8 + Math.random() * 0.35);
       this.mesh.setColorAt(i, this.color);
     }
@@ -74,7 +88,8 @@ export class Debris {
     this.anyAlive = true;
   }
 
-  update(dt: number): void {
+  /** `eye`: camera position; chips that fly close to the lens shrink, so none fills the view. */
+  update(dt: number, eye?: THREE.Vector3): void {
     if (!this.anyAlive) return;
     let alive = false;
     const d = this.dummy;
@@ -89,7 +104,14 @@ export class Debris {
       }
       alive = true;
       const j = i * 3;
-      this.vel[j + 1] -= 14 * dt;
+      this.vel[j + 1] -= this.grav[i] * dt;
+      if (this.grav[i] < 6) {
+        // Air drag and a sideways drift for falling leaves.
+        this.vel[j] *= 1 - dt * 1.5;
+        this.vel[j + 2] *= 1 - dt * 1.5;
+        this.vel[j + 1] = Math.max(this.vel[j + 1], -1.2);
+        this.pos[j] += Math.sin(this.life[i] * 5 + i) * 0.4 * dt;
+      }
       this.pos[j] += this.vel[j] * dt;
       this.pos[j + 1] += this.vel[j + 1] * dt;
       this.pos[j + 2] += this.vel[j + 2] * dt;
@@ -103,10 +125,14 @@ export class Debris {
         this.spin[j + 2] *= 0.5;
       }
       for (let k = 0; k < 3; k++) this.rot[j + k] += this.spin[j + k] * dt;
-      const s = this.size[i] * Math.min(1, this.life[i] * 3);
+      let s = this.size[i] * Math.min(1, this.life[i] * 3);
+      if (eye) {
+        const dc = Math.hypot(this.pos[j] - eye.x, this.pos[j + 1] - eye.y, this.pos[j + 2] - eye.z);
+        s *= Math.min(1, Math.max(0.15, (dc - 0.25) / 0.9));
+      }
       d.position.set(this.pos[j], this.pos[j + 1], this.pos[j + 2]);
       d.rotation.set(this.rot[j], this.rot[j + 1], this.rot[j + 2]);
-      d.scale.set(s, s * 0.5, s * 1.4);
+      d.scale.set(s * this.aspect[j], s * this.aspect[j + 1], s * this.aspect[j + 2]);
       d.updateMatrix();
       this.mesh.setMatrixAt(i, d.matrix);
     }
@@ -232,4 +258,32 @@ export class PuffEmitter {
     g.attributes.aSize.needsUpdate = true;
     g.attributes.aAlpha.needsUpdate = true;
   }
+}
+
+/**
+ * A wood chip / shard: a flattened, asymmetric splinter tapering to two uneven points
+ * (one long, one short), with a slight twist, never a box. Flat-shaded facets.
+ */
+function chipGeometry(): THREE.BufferGeometry {
+  const v = [
+    [0, 0, 0.62], // long tip
+    [0.03, 0.01, -0.42], // short tip, off-centre
+    [-0.5, 0.06, 0.08],
+    [0.46, -0.04, 0.12],
+    [-0.18, 0.5, -0.06],
+    [0.2, -0.5, 0.0],
+    [0.28, 0.32, -0.22],
+    [-0.3, -0.3, 0.3],
+  ];
+  const f = [
+    [0, 2, 4], [0, 4, 3], [0, 3, 5], [0, 5, 7], [0, 7, 2],
+    [1, 4, 2], [1, 6, 4], [1, 3, 6], [1, 5, 3], [1, 2, 7], [1, 7, 5],
+    [4, 6, 3],
+  ];
+  const pos: number[] = [];
+  for (const tri of f) for (const k of tri) pos.push(...v[k]);
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.computeVertexNormals();
+  return g;
 }

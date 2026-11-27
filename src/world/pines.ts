@@ -76,8 +76,8 @@ function needleTexture(): THREE.CanvasTexture {
       g.stroke();
     }
   }
-  // Tufts of needles.
-  for (let k = 0; k < 230; k++) {
+  // Tufts of fine needles, with gaps between them so a spray never reads as a plate.
+  for (let k = 0; k < 200; k++) {
     const x = Math.pow(r(), 0.8) * (W - 12) + 4;
     const half = (H / 2 - 8) * (1 - (x / W) * 0.72);
     const y = H / 2 + (r() * 2 - 1) * half;
@@ -85,10 +85,10 @@ function needleTexture(): THREE.CanvasTexture {
     const base = r() * 0.6 - 0.3;
     for (let i = 0; i < n; i++) {
       const a = base + (i / n) * Math.PI * 2 * 0.5 - Math.PI * 0.25 + (r() - 0.5) * 0.4;
-      const len = 5 + r() * 7;
+      const len = 6 + r() * 8;
       const s = 0.5 + r() * 0.5;
-      g.strokeStyle = `rgb(${Math.round(34 + 28 * s)},${Math.round(56 + 44 * s)},${Math.round(28 + 16 * s)})`;
-      g.lineWidth = 1.1 + r() * 0.6;
+      g.strokeStyle = `rgb(${Math.round(48 + 34 * s)},${Math.round(74 + 50 * s)},${Math.round(36 + 20 * s)})`;
+      g.lineWidth = 0.7 + r() * 0.5;
       g.beginPath();
       g.moveTo(x, y);
       g.lineTo(x + Math.cos(a) * len, y + Math.sin(a) * len * 0.9);
@@ -220,7 +220,7 @@ export function buildPineVariants(): PineVariant[] {
           const tt = tilt + (r() - 0.5) * 0.25;
           const s2 = side.clone().multiplyScalar(Math.cos(tt)).addScaledVector(norm, Math.sin(tt));
           const seg = len / rowsAlong.length;
-          quads.push({ c: from.clone().addScaledVector(dir, len * along), a: dir.clone(), s: s2, len: seg * 1.05 + 0.5, w: 0.9 + len * 0.28 });
+          quads.push({ c: from.clone().addScaledVector(dir, len * along), a: dir.clone(), s: s2, len: seg * 1.05 + 0.5, w: 0.75 + len * 0.22 });
         }
       }
     }

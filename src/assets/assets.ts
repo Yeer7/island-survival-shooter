@@ -17,7 +17,6 @@ export const ASSET_FILES = {
   rockSmall: 'assets/nature/rock_small.glb',
   pebble: 'assets/nature/pebble.glb',
   grass: 'assets/ultimate/Grass_Small.gltf',
-  fern: 'assets/nature/fern.glb',
   can: 'assets/survivalpack/Can_Red.fbx',
   backpack: 'assets/survivalpack/Backpack.fbx',
   tent: 'assets/survivalpack/Tent.fbx',

@@ -20,6 +20,7 @@ import { ITEM_LABEL, ItemType, Pickup, PickupManager } from './world/pickups';
 import { DayNight } from './world/sky';
 import { LAKE_CENTER, LAKE_LEVEL, LAKE_RADIUS, SEA_LEVEL, Terrain } from './world/terrain';
 import { Forest, Props, Tree, leafLight, windUniform } from './world/vegetation';
+import { BUSH_CENTER, BUSH_STICKS } from './world/bushes';
 import { BossRole, Cannibal, SafeZone, Tribe } from './world/cannibals';
 import { Beach } from './world/beach';
 import { BOAT_COST, Sailboat } from './world/boat';
@@ -1499,7 +1500,7 @@ export class Game implements CombatWorld {
     const b = this.props.bushes[i];
     if (!b || !b.active) return;
     const floor = b.y + 0.04;
-    const mid = this.v4.set(b.x, b.y + 0.5 * b.scale, b.z);
+    const mid = this.v4.set(b.x, b.y + Math.max(0.4, BUSH_CENTER[b.variant]) * b.scale, b.z);
     if (!cuts) {
       this.debris.burst(p, n, 5, 0x4f6b32, { speed: 1.2, size: 0.03, life: 1.6, gravity: 3, flat: true, floor });
       this.sound.hitSoft();
@@ -1510,13 +1511,14 @@ export class Game implements CombatWorld {
     this.debris.burst(mid, this.v5.set(0, 1, 0), 9, 0x5a4030, { speed: 2.4, size: 0.028, life: 1.1, floor });
     this.sound.effigyHit();
     this.vm.onImpact(false);
-    for (let k = 0; k < 2; k++) {
+    const sticks = BUSH_STICKS[b.variant] ?? 2;
+    for (let k = 0; k < sticks; k++) {
       const a = Math.random() * Math.PI * 2;
       const x = b.x + Math.cos(a) * 0.3;
       const z = b.z + Math.sin(a) * 0.3;
       this.pickups.add('stick', this.v1.set(x, this.terrain.height(x, z), z), 1);
     }
-    this.hud.toast(tr('🌿 Arbusto cortado: +2 gravetos no chão', '🌿 Bush cut: 2 sticks on the ground'));
+    this.hud.toast(tr(`🌿 Arbusto cortado: +${sticks} gravetos no chão`, `🌿 Bush cut: ${sticks} sticks on the ground`));
   }
 
   /** A blow shakes a few needles or leaf bits loose from the crown; they flutter down. */

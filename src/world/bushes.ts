@@ -73,14 +73,45 @@ export function bushMaterials(): { twig: THREE.MeshStandardMaterial; leaf: THREE
   return mats;
 }
 
-/** Two shrub variants: a low spreading one and a taller upright one. */
+/** One shrub shape: stems from the base, forks, and leaf sprays where the shape wants them. */
+interface BushSpec {
+  seed: number;
+  stems: number;
+  height: number;
+  spread: number;
+  /** Leaf sprays at the stem tip, at the fork tip, and along the stem. */
+  tip: number;
+  fork: number;
+  mid: number;
+  /** Low leafy skirt cards round the base. */
+  skirt: number;
+  /** Extra cards bunched in a small crown at the top (the sapling). */
+  crown: number;
+  stemRadius: number;
+  /** How unevenly the stems are spaced and sized (0 = even). */
+  ragged: number;
+}
+
+/** Sticks a cut shrub of each variant leaves behind. */
+export const BUSH_STICKS = [2, 2, 3, 2];
+/** Height (m, before scale) of each variant's leafy mass centre, for aiming at it. */
+export const BUSH_CENTER = [0.35, 0.6, 1.1, 0.5];
+
+/**
+ * Four shrub variants: 0 low and spreading; 1 medium and full; 2 a tall, open sapling
+ * (2-3 thin stems, light foliage at the top, ~2.3 m); 3 a sparse, irregular one with few
+ * open branches.
+ */
 export function buildBushVariants(): InstancePart[][] {
   const m = bushMaterials();
   const up = new THREE.Vector3(0, 1, 0);
-  return [
-    { seed: 3, stems: 9, height: 1.2, spread: 0.75 },
-    { seed: 9, stems: 8, height: 1.6, spread: 0.5 },
-  ].map((v) => {
+  const specs: BushSpec[] = [
+    { seed: 3, stems: 11, height: 0.85, spread: 1.15, tip: 1, fork: 1, mid: 1, skirt: 6, crown: 0, stemRadius: 0.022, ragged: 0.4 },
+    { seed: 9, stems: 9, height: 1.45, spread: 0.65, tip: 1, fork: 1, mid: 2, skirt: 5, crown: 0, stemRadius: 0.028, ragged: 0.3 },
+    { seed: 17, stems: 3, height: 2.35, spread: 0.22, tip: 2, fork: 1, mid: 0, skirt: 0, crown: 9, stemRadius: 0.032, ragged: 0.5 },
+    { seed: 27, stems: 5, height: 1.25, spread: 1.0, tip: 1, fork: 1, mid: 0, skirt: 1, crown: 0, stemRadius: 0.02, ragged: 0.9 },
+  ];
+  return specs.map((v) => {
     const r = mulberry32(v.seed);
     const twigs: THREE.BufferGeometry[] = [];
     const pos: number[] = [];
@@ -88,7 +119,7 @@ export function buildBushVariants(): InstancePart[][] {
     const uv: number[] = [];
     const idx: number[] = [];
     const twig = (from: THREE.Vector3, dir: THREE.Vector3, len: number, rad: number) => {
-      const g = new THREE.CylinderGeometry(rad * 0.35, rad, len, 4, 1);
+      const g = new THREE.CylinderGeometry(rad * 0.35, rad, len, 4, 1, true);
       g.translate(0, len / 2, 0);
       g.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(up, dir));
       g.translate(from.x, from.y, from.z);
@@ -119,28 +150,35 @@ export function buildBushVariants(): InstancePart[][] {
         idx.push(b, b + 1, b + 2, b, b + 2, b + 3);
       }
     };
+    const tops: THREE.Vector3[] = [];
     for (let s = 0; s < v.stems; s++) {
-      const az = (s / v.stems) * Math.PI * 2 + (r() - 0.5) * 0.6;
-      const outward = v.spread * (0.6 + r() * 0.5);
+      const az = (s / v.stems) * Math.PI * 2 + (r() - 0.5) * (0.6 + v.ragged * 1.2);
+      const outward = v.spread * (0.6 + r() * 0.5) * (1 + (r() - 0.5) * v.ragged);
       const dir = new THREE.Vector3(Math.cos(az) * outward, 1, Math.sin(az) * outward).normalize();
-      const len = v.height * (0.55 + r() * 0.35);
+      const len = v.height * (0.55 + r() * 0.35) * (1 + (r() - 0.5) * v.ragged * 0.8);
       const base = new THREE.Vector3(Math.cos(az) * 0.05, 0, Math.sin(az) * 0.05);
-      twig(base, dir, len, 0.028);
-      // A fork two thirds up.
-      const fork = base.clone().addScaledVector(dir, len * 0.6);
+      twig(base, dir, len, v.stemRadius);
+      // A fork part way up.
+      const fork = base.clone().addScaledVector(dir, len * (0.5 + r() * 0.2));
       const d2 = dir.clone().applyAxisAngle(up, (r() - 0.5) * 1.6).add(new THREE.Vector3(Math.cos(az) * 0.4, 0.1, Math.sin(az) * 0.4)).normalize();
-      twig(fork, d2, len * 0.5, 0.016);
-      // Leaf sprays along the upper half and at the tips, uneven layers.
+      twig(fork, d2, len * 0.5, v.stemRadius * 0.6);
       const tip = base.clone().addScaledVector(dir, len);
       const tip2 = fork.clone().addScaledVector(d2, len * 0.5);
-      card(tip, 0.55 + r() * 0.25);
-      card(tip2, 0.45 + r() * 0.2);
-      card(base.clone().addScaledVector(dir, len * (0.45 + r() * 0.2)), 0.4 + r() * 0.2);
+      tops.push(tip);
+      for (let k = 0; k < v.tip; k++) card(tip.clone().add(new THREE.Vector3((r() - 0.5) * 0.25, (r() - 0.5) * 0.2, (r() - 0.5) * 0.25)), 0.55 + r() * 0.25);
+      for (let k = 0; k < v.fork; k++) card(tip2, 0.45 + r() * 0.2);
+      for (let k = 0; k < v.mid; k++) card(base.clone().addScaledVector(dir, len * (0.4 + r() * 0.3)), 0.4 + r() * 0.2);
+    }
+    // The sapling's light crown: a loose bunch of sprays round the stem tops.
+    for (let k = 0; k < v.crown; k++) {
+      const t = tops[k % tops.length];
+      card(t.clone().add(new THREE.Vector3((r() - 0.5) * 0.9, (r() - 0.6) * 0.6, (r() - 0.5) * 0.9)), 0.6 + r() * 0.3);
     }
     // A low skirt of leaves near the ground so the base is not bare.
-    for (let k = 0; k < 4; k++) {
+    for (let k = 0; k < v.skirt; k++) {
       const a = r() * Math.PI * 2;
-      card(new THREE.Vector3(Math.cos(a) * 0.3, 0.25 + r() * 0.15, Math.sin(a) * 0.3), 0.5);
+      const d = 0.2 + r() * v.spread * 0.4;
+      card(new THREE.Vector3(Math.cos(a) * d, 0.2 + r() * 0.15, Math.sin(a) * d), 0.5);
     }
     const leaves = new THREE.BufferGeometry();
     leaves.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));

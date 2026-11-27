@@ -5,7 +5,7 @@ import { mulberry32, smoothstep } from '../core/math';
 import { ColliderGrid, Circle } from './colliders';
 import { LAKE_CENTER, LAKE_LEVEL, LAKE_RADIUS, Terrain } from './terrain';
 import { detailTextures } from './textures';
-import { buildBushVariants, bushMaterials } from './bushes';
+import { BUSH_CENTER, BUSH_STICKS, buildBushVariants, bushMaterials } from './bushes';
 import { buildBroadleafVariants, broadleafLeafMaterial } from './broadleaf';
 import { PALM_CUT, buildPalmVariants, palmMaterials, palmStumpGeometry } from './palms';
 import { PINE_CUT, TrunkSpec, barkMaterial, buildPineVariants, needleMaterial, pineCutMaterial, pineStumpGeometry } from './pines';
@@ -341,8 +341,10 @@ export class Forest {
     const CELL = 64;
     const plan = placed.map((p) => {
       const palm = p.kind === 'palm';
-      const broadPatch = terrain.noise.noise(p.x * 0.006 - 11, p.z * 0.006 + 37) + (rand() - 0.5) * 0.5 > 0;
-      const variant = palm ? TALL + Math.floor(rand() * 3) : (broadPatch ? 2 : 0) + (rand() < 0.5 ? 0 : 1);
+      // Mixed tree by tree, about two broadleaves to every pine, the share drifting only
+      // gently from place to place (never a hard border between stands).
+      const pBroad = 0.67 + 0.12 * terrain.noise.noise(p.x * 0.01 - 11, p.z * 0.01 + 37);
+      const variant = palm ? TALL + Math.floor(rand() * 3) : (rand() < pBroad ? 2 : 0) + (rand() < 0.5 ? 0 : 1);
       return { ...p, variant, cell: `${variant}:${Math.floor(p.x / CELL)}:${Math.floor(p.z / CELL)}` };
     });
     const counts = new Map<string, number>();
@@ -1143,14 +1145,12 @@ export class Props {
     }
     for (const s of rockSets) s.finish(this.group);
 
-    // Shrubs built in code (dark twigs, alpha-cut moss/olive leaf sprays, two shapes) and
-    // CC0 ferns under the trees; swaying, no cast shadows to keep the shadow pass light.
-    const BUSHES_PER_VARIANT = 270;
+    // Shrubs built in code (dark twigs, alpha-cut moss/olive leaf sprays, four shapes from a
+    // low spreading bush to a tall open sapling); swaying, no cast shadows.
+    const BUSHES_PER_VARIANT = 150;
     const bushSets = buildBushVariants().map((parts) => new InstancedSet(parts, BUSHES_PER_VARIANT, false));
     this.bushSets = bushSets;
-    const FERNS = 500;
-    const fernSet = new InstancedSet(lib.parts('fern', { by: 'height', value: 0.8 }), FERNS, false);
-    for (const set of [...bushSets, fernSet]) for (const m of set.meshes) addWind(m.material as THREE.Material, 0.1, 0.06);
+    for (const set of bushSets) for (const m of set.meshes) addWind(m.material as THREE.Material, 0.1, 0.06);
     {
       // Leaf sprays are double-sided cards: keep their up-leaning normal on both faces.
       const lm = bushMaterials().leaf;
@@ -1164,7 +1164,7 @@ export class Props {
     }
     const bushCount = () => bushSets.reduce((s2, b2) => s2 + b2.count, 0);
     tries = 0;
-    while ((bushCount() < BUSHES_PER_VARIANT * 2 || fernSet.count < FERNS) && tries < 90000) {
+    while (bushCount() < BUSHES_PER_VARIANT * bushSets.length && tries < 90000) {
       tries++;
       // Some shrubs crowd the edge of the wreck's clearing; the rest spread over the island.
       const inGrove = grove && rand() < 0.12;
@@ -1174,25 +1174,24 @@ export class Props {
       const z = inGrove ? grove.z + Math.sin(ga) * gr : (rand() - 0.5) * 500;
       if (terrain.surfaceAt(x, z) !== 'grass' || (!inGrove && excluded(x, z))) continue;
       const h = terrain.height(x, z);
-      const fern = inGrove ? false : nearTree(x, z, 4) ? rand() < 0.65 : rand() < 0.12;
-      // Shrubs keep off the wreck's dirt, the luggage and the ramp, and out of tree trunks.
-      if (!fern && (blocked(x, z) || nearTree(x, z, 1.2))) continue;
-      const variant = rand() < 0.5 ? 0 : 1;
-      const set = fern ? fernSet : bushSets[variant];
-      if (set.count >= (fern ? FERNS : BUSHES_PER_VARIANT)) continue;
-      const s = fern ? 0.7 + rand() * 0.7 : 0.95 + rand() * 0.6;
+      // Shrubs keep off the wreck's dirt, the luggage and the ramp, and out of tree trunks;
+      // they gather under the trees more than in the open.
+      if (blocked(x, z) || nearTree(x, z, 1.2)) continue;
+      if (!inGrove && !nearTree(x, z, 6) && rand() < 0.5) continue;
+      const variant = Math.floor(rand() * bushSets.length);
+      const set = bushSets[variant];
+      if (set.count >= BUSHES_PER_VARIANT) continue;
+      const s = variant === 2 ? 0.9 + rand() * 0.25 : 0.95 + rand() * 0.6;
       d.position.set(x, h - 0.05, z);
       d.rotation.set(0, rand() * 6, 0);
       d.scale.setScalar(s);
       d.updateMatrix();
-      // Ferns keep their green tint; shrubs only vary in brightness (their leaves carry the colour).
-      if (fern) color.setHSL(0.25 + (rand() - 0.5) * 0.06, 0.25, 0.55 + rand() * 0.1).multiplyScalar(1.75);
-      else color.setScalar(0.85 + rand() * 0.3);
+      // Shrubs only vary in brightness (their leaves carry the colour).
+      color.setScalar(0.85 + rand() * 0.3);
       const slot = set.push(d.matrix, color);
-      if (!fern) this.bushes.push({ x, y: h - 0.05, z, scale: s, variant, slot, active: true });
+      this.bushes.push({ x, y: h - 0.05, z, scale: s, variant, slot, active: true });
     }
     for (const b2 of bushSets) b2.finish(this.group);
-    fernSet.finish(this.group);
 
     // Wildflowers: low clumps of purple-blue lupin spikes, sparse in the forest and thicker
     // along the lake's margin. One instanced draw, no shadows.
@@ -1347,8 +1346,8 @@ export class Props {
     for (let i = 0; i < this.bushes.length; i++) {
       const b = this.bushes[i];
       if (!b.active) continue;
-      const r = 0.55 * b.scale + inflate;
-      const cy = b.y + 0.55 * b.scale;
+      const r = (b.variant === 2 ? 0.45 : 0.55) * b.scale + inflate;
+      const cy = b.y + Math.max(0.45, BUSH_CENTER[b.variant]) * b.scale;
       const ox = o.x - b.x;
       const oy = o.y - cy;
       const oz = o.z - b.z;

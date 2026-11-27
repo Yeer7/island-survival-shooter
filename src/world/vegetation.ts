@@ -532,8 +532,10 @@ export class Forest {
       for (let m = 0; m < M; m++) {
         const a = ringStart + m;
         const b = ringStart + m + 1;
-        if (top) idx.push(a, b, ci);
-        else idx.push(a, ci, b);
+        // Wound so the stump's tip faces up and the butt's faces down (ring order runs
+        // counter-clockwise seen from above), or the cap is culled and shows a hole.
+        if (top) idx.push(a, ci, b);
+        else idx.push(a, b, ci);
         // The rim where it parted is split wood too.
         wood[a] = 1;
       }

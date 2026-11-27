@@ -18,8 +18,6 @@ export const ASSET_FILES = {
   pebble: 'assets/nature/pebble.glb',
   grass: 'assets/ultimate/Grass_Small.gltf',
   fern: 'assets/nature/fern.glb',
-  firstAid: 'assets/survivalpack/FirstAidKit.fbx',
-  bandages: 'assets/survivalpack/Bandages.fbx',
   can: 'assets/survivalpack/Can_Red.fbx',
   backpack: 'assets/survivalpack/Backpack.fbx',
   tent: 'assets/survivalpack/Tent.fbx',
@@ -70,10 +68,8 @@ const FBX_TEXTURES: Record<string, { leaves: string; bark: string }> = {
 
 /** Flat-coloured SurvivalPack props regraded so they read on the ground (by material name). */
 const FBX_RECOLOR: Partial<Record<AssetName, Record<string, { color: number; metalness?: number; roughness?: number }>>> = {
-  // Food tin: red body, yellow label band, bright tin rims.
+  // Tin can (a cave prop): red body, yellow label band, bright tin rims.
   can: { Grey: { color: 0xc8362a, roughness: 0.55 }, Red: { color: 0xf2c230, roughness: 0.6 }, LightGrey: { color: 0xc9ccd0, metalness: 0.6, roughness: 0.35 } },
-  // Cloth: light linen rolls tied with a red band.
-  bandages: { White: { color: 0xf1ebdc, roughness: 0.95 }, Red: { color: 0xc0392b, roughness: 0.85 } },
   // Village: the camping tent becomes a tanned-hide shelter on wooden poles.
   tent: { Green: { color: 0x8a6442, roughness: 0.9 }, LightGreen: { color: 0xa98058, roughness: 0.9 }, DarkWood: { color: 0x5a3d26, roughness: 0.9 }, Black: { color: 0x2e2419, roughness: 0.95 } },
   pot: { Black: { color: 0x26221e, roughness: 0.7 }, Grey: { color: 0x4d4741, roughness: 0.6 } },

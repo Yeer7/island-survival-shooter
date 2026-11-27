@@ -15,7 +15,7 @@ import { ViewModel } from './weapons/viewmodel';
 import { Animal, Wildlife } from './world/animals';
 import { BaseSite, BuildKind, CABIN_COST, CABIN_D, Cabin, Cost, LEVEL_UP, Placed, Recipe, buildModel, setGhost } from './world/base';
 import { ColliderGrid } from './world/colliders';
-import { CrashSite, Dock } from './world/landmarks';
+import { CrashSite, Dock, suitcaseSlot } from './world/landmarks';
 import { ITEM_LABEL, ItemType, Pickup, PickupManager } from './world/pickups';
 import { DayNight } from './world/sky';
 import { LAKE_CENTER, LAKE_LEVEL, LAKE_RADIUS, SEA_LEVEL, Terrain } from './world/terrain';
@@ -1495,6 +1495,13 @@ export class Game implements CombatWorld {
     this.debris.burst(s.pos, this.v3.set(0, 1, 0), 22, s.color, { speed: 3.5, size: 0.1, floor: s.pos.y - 0.1 });
     this.debris.burst(s.pos, this.v3.set(0, 1, 0), 10, 0xe8e2d2, { speed: 2.5, size: 0.08, floor: s.pos.y - 0.1 });
     s.contents.forEach((type: ItemType, k) => {
+      if (s.lid) {
+        // Nested on the clothes inside the open base, lying along the case.
+        s.mesh.updateMatrixWorld(true);
+        const at = s.mesh.localToWorld(suitcaseSlot(k, s.contents.length));
+        this.pickups.add(type, at, 1, s.mesh.rotation.y + (k === 0 ? 0.12 : -0.1));
+        return;
+      }
       const a = (k / s.contents.length) * Math.PI * 2 + Math.random();
       const x = s.pos.x + Math.cos(a) * 0.45;
       const z = s.pos.z + Math.sin(a) * 0.45;

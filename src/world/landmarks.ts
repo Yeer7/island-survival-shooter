@@ -24,6 +24,7 @@ import {
 import { PuffEmitter } from '../fx/particles';
 import { ColliderGrid } from './colliders';
 import { ItemType } from './pickups';
+import { crumple, weave } from './supplies';
 import { LAKE_CENTER, LAKE_LEVEL, Terrain } from './terrain';
 
 /** Flat rounded rectangle centred on the origin (window panes and rims). */
@@ -901,7 +902,7 @@ export class CrashSite {
    */
   grassBlocked(x: number, z: number): boolean {
     const l = new THREE.Vector3(x - this.center.x, 0, z - this.center.z).applyAxisAngle(new THREE.Vector3(0, 1, 0), -this.yaw);
-    for (const sc of this.suitcases) if (Math.hypot(x - sc.pos.x, z - sc.pos.z) < 0.9) return true;
+    for (const sc of this.suitcases) if (Math.hypot(x - sc.pos.x, z - sc.pos.z) < 1.2) return true;
     const d = this.dirtDistance(l.x, l.z);
     if (d > 2) return false;
     const n = Math.sin(l.x * 1.7 + l.z * 0.6) * Math.sin(l.z * 2.3 - l.x * 0.4) * 0.6 + Math.sin(l.x * 5.1 + 1.3) * Math.sin(l.z * 4.7) * 0.3;
@@ -1539,10 +1540,121 @@ function buildSuitcase(i: number, rand: () => number): { group: THREE.Group; lid
     }
   }
 
+  // Packed clothes in the base, strapped down, and a zipped mesh pocket in the lid.
+  packClothes(group, i);
+  const pocket = add(lid, new THREE.PlaneGeometry(L - 0.2, 0.17), pocketMat(), 0, HL - 0.014, D / 2 + 0.1, false);
+  pocket.rotation.x = Math.PI / 2;
+
   // Luggage tag on the lid: a small plate on a short strap.
   const tag = add(lid, new RoundedBoxGeometry(0.075, 0.006, 0.05, 2, 0.003), sh.tag, 0.18, HL + 0.003, D / 2 - 0.08, false);
   tag.rotation.y = 0.3 + rand() * 0.4;
   add(lid, new THREE.BoxGeometry(0.012, 0.004, 0.06), sh.dark, 0.14, HL + 0.002, D / 2 - 0.05, false);
 
   return { group, lid };
+}
+
+/** Height (case-local) of the top of the packed clothes, where found items rest. */
+export const CASE_PACK_TOP = 0.106;
+
+/** Case-local resting spot of found item k of n, nested on the clothes inside the base. */
+export function suitcaseSlot(k: number, n: number): THREE.Vector3 {
+  const x = n === 1 ? 0.04 : k === 0 ? -0.16 : 0.16;
+  return new THREE.Vector3(x, CASE_PACK_TOP, n === 1 ? 0.03 : k === 0 ? 0.04 : -0.02);
+}
+
+const CLOTH_COLORS = ['#3a5f8f', '#c9c2b2', '#8a3b3b', '#4f6b45', '#d8d2c4', '#2e2e33', '#b88a4a', '#6a5a8a', '#9fb5c9', '#c98a8a'];
+const clothMats = new Map<string, THREE.MeshStandardMaterial>();
+function fabric(color: string, seed: number): THREE.MeshStandardMaterial {
+  const key = color + seed;
+  let m = clothMats.get(key);
+  if (!m) {
+    m = new THREE.MeshStandardMaterial({ map: weave(color, seed, 0.3), roughness: 0.95 });
+    clothMats.set(key, m);
+  }
+  return m;
+}
+let strapMats: { band: THREE.MeshStandardMaterial; buckle: THREE.MeshStandardMaterial } | null = null;
+
+/**
+ * Two or three folded garments filling the base (soft, rounded and a little crumpled), held
+ * by two crossed black elastic straps with a buckle in the middle. They also fill the
+ * bottom of the open case, so no grass blade shows through it.
+ */
+function packClothes(group: THREE.Group, i: number): void {
+  const r = mulberry32(400 + i * 13);
+  const pick = () => CLOTH_COLORS[Math.floor(r() * CLOTH_COLORS.length)];
+  const y0 = 0.035;
+  const garments: [number, number, number, number, number][] = [
+    // [x, z, width, height, depth]
+    [-0.158, 0, 0.3, 0.06, 0.37],
+    [0.158, 0, 0.31, 0.065, 0.38],
+  ];
+  garments.forEach(([x, z, w, h, d], k) => {
+    const geo = crumple(new RoundedBoxGeometry(w, h, d, 4, 0.024), 0.004, 50 + i * 7 + k);
+    const m = new THREE.Mesh(geo, fabric(pick(), 60 + k));
+    m.position.set(x + (r() - 0.5) * 0.01, y0 + h / 2, z + (r() - 0.5) * 0.02);
+    m.rotation.y = (r() - 0.5) * 0.08;
+    m.receiveShadow = true;
+    group.add(m);
+  });
+  // A third, smaller crumpled piece (a scarf or shirt) tucked along the front in some cases.
+  if (i % 2 === 0) {
+    const geo = crumple(new RoundedBoxGeometry(0.5, 0.022, 0.09, 3, 0.01), 0.005, 90 + i);
+    const m = new THREE.Mesh(geo, fabric(pick(), 71));
+    m.position.set(0, 0.096, 0.15);
+    m.rotation.set(0, 0.05, 0.02);
+    group.add(m);
+  }
+  strapMats ??= {
+    band: new THREE.MeshStandardMaterial({ color: 0x141414, roughness: 0.7 }),
+    buckle: new THREE.MeshStandardMaterial({ color: 0x2a2a2a, roughness: 0.45, metalness: 0.3 }),
+  };
+  const ang = Math.atan2(0.36, 0.58);
+  for (const s of [-1, 1]) {
+    const band = new THREE.Mesh(new THREE.BoxGeometry(0.69, 0.003, 0.028), strapMats.band);
+    band.position.set(0, 0.1035, 0);
+    band.rotation.y = s * ang;
+    group.add(band);
+  }
+  const buckle = new THREE.Mesh(new RoundedBoxGeometry(0.045, 0.01, 0.036, 2, 0.003), strapMats.buckle);
+  buckle.position.set(0, 0.108, 0);
+  group.add(buckle);
+}
+
+let pocketTex: THREE.MeshStandardMaterial | null = null;
+/** Lid lining detail: a mesh pocket with a zip along its top edge. */
+function pocketMat(): THREE.MeshStandardMaterial {
+  if (pocketTex) return pocketTex;
+  const cv = document.createElement('canvas');
+  cv.width = 256;
+  cv.height = 64;
+  const c = cv.getContext('2d')!;
+  c.fillStyle = '#6a6274';
+  c.fillRect(0, 0, 256, 64);
+  c.strokeStyle = 'rgba(25,20,30,0.75)';
+  c.lineWidth = 1;
+  for (let k = -64; k < 320; k += 6) {
+    c.beginPath();
+    c.moveTo(k, 8);
+    c.lineTo(k + 56, 64);
+    c.moveTo(k + 56, 8);
+    c.lineTo(k, 64);
+    c.stroke();
+  }
+  // Zip with teeth and a puller along the top edge, piping round the sides.
+  c.fillStyle = '#121014';
+  c.fillRect(0, 2, 256, 6);
+  c.fillStyle = '#6a6870';
+  for (let x = 2; x < 256; x += 4) c.fillRect(x, 4, 2, 2);
+  c.fillStyle = '#a8aab0';
+  c.fillRect(196, 1, 10, 9);
+  c.fillStyle = '#121014';
+  c.fillRect(0, 0, 3, 64);
+  c.fillRect(253, 0, 3, 64);
+  c.fillRect(0, 61, 256, 3);
+  const t = new THREE.CanvasTexture(cv);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 4;
+  pocketTex = new THREE.MeshStandardMaterial({ map: t, roughness: 0.9 });
+  return pocketTex;
 }

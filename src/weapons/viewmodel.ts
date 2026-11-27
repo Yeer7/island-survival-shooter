@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { clamp, damp, easeOutCubic, lerp } from '../core/math';
 import { HotbarId } from '../player/inventory';
+import { buildChocolateBar, buildFirstAidPouch } from '../world/supplies';
 import { armMaterials, buildArm, buildArrow, buildAxe, buildBow, buildFish, buildLog, buildTacticalAxe, buildMeat, buildRod, buildSpear, buildTorch } from './models';
 
 type Action = 'none' | 'swing' | 'stab' | 'cast' | 'release' | 'use' | 'draw';
@@ -161,15 +162,19 @@ export class ViewModel {
       o.scale.setScalar(0.6);
       return o;
     };
-    const bandage = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.06, 12), new THREE.MeshStandardMaterial({ color: 0xf4f1ea, roughness: 0.9 }));
-    bandage.rotation.z = Math.PI / 2;
-    const can = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.07, 12), new THREE.MeshStandardMaterial({ color: 0xc0392b, roughness: 0.5, metalness: 0.3 }));
+    // The same chocolate bar and first-aid pouch as the pickups, held in the palm.
+    const pouch = buildFirstAidPouch();
+    pouch.scale.setScalar(0.7);
+    pouch.rotation.set(0.5, 0.35, 0.15);
     const bandG = new THREE.Group();
-    bandG.add(bandage);
+    bandG.add(pouch);
+    const bar = buildChocolateBar();
+    bar.scale.setScalar(0.66);
+    bar.rotation.set(0.45, 0.55, 0.2);
     const canG = new THREE.Group();
-    canG.add(can);
-    bandG.position.set(-0.02, 0.05, -0.04);
-    canG.position.set(-0.02, 0.05, -0.04);
+    canG.add(bar);
+    bandG.position.set(-0.03, 0.03, -0.05);
+    canG.position.set(-0.045, 0.045, -0.05);
 
     // Tactical flashlight held forward, lens toward -Z.
     const flashlight = new THREE.Group();

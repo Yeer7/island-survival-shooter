@@ -29,9 +29,7 @@ Run `npm run lint:assets` to check every `.glb`/`.gltf`/`.fbx` and texture (pars
 | `ultimate/PalmTree_1.fbx`, `PalmTree_2.fbx`, `PalmTree_3.fbx` | PalmTree_1–3 | Quaternius — Ultimate Stylized Nature Pack (May 2022) | https://quaternius.com/packs/ultimatenature.html | CC0 1.0 | None (materials rebuilt in code from the textures below) — no longer loaded: palms are built in code since 2026-11-26 |
 | `ultimate/PalmTree_Trunk.jpg` | PalmTree_Trunk texture | Quaternius — Ultimate Stylized Nature Pack (May 2022) | https://quaternius.com/packs/ultimatenature.html | CC0 1.0 | Resized 2048 → 512 px |
 | `ultimate/PalmTree_Leaves.png` | PalmTree_Leaves texture | Quaternius — Ultimate Stylized Nature Pack (May 2022) | https://quaternius.com/packs/ultimatenature.html | CC0 1.0 | Resized 1024 → 512 px |
-| `survivalpack/FirstAidKit.fbx` | FirstAidKit (Curativo drop) | Quaternius — Survival Pack (Sept 2020) | https://quaternius.com/packs/survival.html | CC0 1.0 | None (flat colours converted to PBR in code) |
-| `survivalpack/Bandages.fbx` | Bandages (Pano drop) | Quaternius — Survival Pack (Sept 2020) | https://quaternius.com/packs/survival.html | CC0 1.0 | None |
-| `survivalpack/Can_Red.fbx` | Can_Red (Comida drop, red label) | Quaternius — Survival Pack (Sept 2020) | https://quaternius.com/packs/survival.html | CC0 1.0 | None |
+| `survivalpack/Can_Red.fbx` | Can_Red (tin on the cave floor, red label) | Quaternius — Survival Pack (Sept 2020) | https://quaternius.com/packs/survival.html | CC0 1.0 | None |
 | `survivalpack/Backpack.fbx` | Backpack (reserved for the backpack in phase 3C) | Quaternius — Survival Pack (Sept 2020) | https://quaternius.com/packs/survival.html | CC0 1.0 | None |
 | `survivalpack/Tent.fbx` | Tent (village hide tents) | Quaternius — Survival Pack (Sept 2020) | https://quaternius.com/packs/survival.html | CC0 1.0 | None (recoloured in code as tanned hide on wooden poles) |
 | `survivalpack/Pot.fbx` | Pot (village cooking pots) | Quaternius — Survival Pack (Sept 2020) | https://quaternius.com/packs/survival.html | CC0 1.0 | None (flat colours converted to PBR in code) |

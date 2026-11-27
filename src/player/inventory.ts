@@ -13,7 +13,7 @@ export const HOTBAR_INFO: Record<HotbarId, { label: string; icon: string }> = {
   torch: bilabel('Tocha', 'Torch', '🕯️'),
   rod: bilabel('Vara de Pesca', 'Fishing Rod', '🎣'),
   flashlight: bilabel('Lanterna Tática', 'Tactical Flashlight', '🔦'),
-  food: bilabel('Comida enlatada', 'Canned Food', '🥫'),
+  food: bilabel('Barra de Chocolate', 'Chocolate Bar', '🍫'),
   cookedMeat: bilabel('Carne Assada', 'Roast Meat', '🍖'),
   cookedFish: bilabel('Peixe Assado', 'Roast Fish', '🐟'),
   meat: bilabel('Carne Crua', 'Raw Meat', '🥩'),

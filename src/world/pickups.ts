@@ -2,11 +2,12 @@ import * as THREE from 'three';
 import { library } from '../assets/assets';
 import { getLang } from '../ui/i18n';
 import { buildArrow, buildHide, buildLog, buildMeat, buildSticks, buildTotem } from '../weapons/models';
+import { buildChocolateBar, buildCloth, buildFirstAidPouch } from './supplies';
 
 export type ItemType = 'food' | 'bandage' | 'cloth' | 'stick' | 'log' | 'rock' | 'meat' | 'hide' | 'arrow' | 'totem' | 'coconut' | 'relic' | 'heart' | 'flashlight' | 'backpack';
 
 const ITEM_PT: Record<ItemType, string> = {
-  food: 'Comida',
+  food: 'Barra de Chocolate',
   bandage: 'Curativo',
   cloth: 'Pano',
   stick: 'Gravetos',
@@ -23,7 +24,7 @@ const ITEM_PT: Record<ItemType, string> = {
   backpack: 'Mochila Tática',
 };
 const ITEM_EN: Record<ItemType, string> = {
-  food: 'Food',
+  food: 'Chocolate Bar',
   bandage: 'Bandage',
   cloth: 'Cloth',
   stick: 'Sticks',
@@ -111,51 +112,15 @@ function itemMesh(type: ItemType): THREE.Object3D {
       g.add(new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.5, 0.25), m(0x4a5a34, 0.9)));
       break;
     }
-    case 'food': {
-      const lib = library();
-      if (lib?.has('can')) {
-        // Red-label tin, big enough to read on dark crash-site soil.
-        g.add(lib.instance('can', { by: 'height', value: 0.32 }));
-        break;
-      }
-      const can = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.12, 14), m(0xc0392b, 0.5, 0.2, 0x3a0d08));
-      const lid = new THREE.Mesh(new THREE.CylinderGeometry(0.071, 0.071, 0.015, 14), m(0xbfc3c7, 0.3, 0.9));
-      lid.position.y = 0.065;
-      const label = new THREE.Mesh(new THREE.CylinderGeometry(0.0715, 0.0715, 0.05, 14), m(0xf2d16b, 0.6));
-      const bar = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.03, 0.07), m(0x8b5a2b, 0.7, 0, 0x1a0f05));
-      bar.position.set(0.12, -0.045, 0.02);
-      bar.rotation.y = 0.5;
-      g.add(can, lid, label, bar);
+    case 'food':
+      g.add(buildChocolateBar());
       break;
-    }
-    case 'bandage': {
-      const lib = library();
-      if (lib?.has('firstAid')) {
-        g.add(lib.instance('firstAid', { by: 'footprint', value: 0.3 }));
-        break;
-      }
-      const box = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.07, 0.14), m(0xf3f3f0, 0.6, 0, 0x202020));
-      const c1 = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.002, 0.03), m(0xd62828, 0.5));
-      c1.position.y = 0.036;
-      const c2 = c1.clone();
-      c2.rotation.y = Math.PI / 2;
-      g.add(box, c1, c2);
+    case 'bandage':
+      g.add(buildFirstAidPouch());
       break;
-    }
-    case 'cloth': {
-      const lib = library();
-      if (lib?.has('bandages')) {
-        // Rolled linen strips (SurvivalPack Bandages), lying on their side.
-        g.add(lib.instance('bandages', { by: 'footprint', value: 0.35 }));
-        break;
-      }
-      const a = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.05, 0.22), m(0x3b6ea5, 0.95, 0, 0x08131f));
-      const b = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.04, 0.2), m(0xd8cfb8, 0.95, 0, 0x1a1810));
-      b.position.y = 0.045;
-      b.rotation.y = 0.3;
-      g.add(a, b);
+    case 'cloth':
+      g.add(buildCloth());
       break;
-    }
     case 'stick':
       g.add(buildSticks());
       break;

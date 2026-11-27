@@ -50,6 +50,10 @@ export class SoundEngine {
   /** One gain per ambience bed; the beds start when their recording has decoded. */
   private loopGain = {} as Record<Loop, GainNode>;
   private fireLevel = 0;
+  /** Current bed levels, eased in JS each frame (no per-frame AudioParam automation). */
+  private bedLevel: Record<Loop, number> = { sea: 0, forest_day: 0, forest_night: 0, campfire: 0, cave: 0 };
+  /** Player volume 0..1 from the menu slider; scales the master gain (0 = silent). */
+  private volume = 0.8;
   /** Decoded takes per family; a family is absent until all its takes decoded. */
   private bank = new Map<string, AudioBuffer[]>();
   /** Last take played per family, so the same take never plays twice in a row. */
@@ -81,7 +85,7 @@ export class SoundEngine {
     limiter.attack.value = 0.001;
     limiter.release.value = 0.12;
     this.master = ctx.createGain();
-    this.master.gain.value = 0.8;
+    this.master.gain.value = this.volume;
     // Soft clip for the transient the limiter's 1 ms attack lets through: unity for
     // normal levels, approaching a -1 dBFS ceiling (0.891) and never above it.
     const clip = ctx.createWaveShaper();
@@ -235,19 +239,44 @@ export class SoundEngine {
    * sand, so the sea bed is silent in the forest. The forest beds (day/night with the
    * light) dip on open sand and vanish in the cave; `cave` (0..1) brings in the cave bed.
    */
-  updateAmbience(sea: number, fireProximity: number, night: number, altitude: number, cave = 0): void {
+  updateAmbience(dt: number, sea: number, fireProximity: number, night: number, altitude: number, cave = 0): void {
     if (!this.ctx) return;
-    const t = this.ctx.currentTime;
-    const g = this.loopGain;
     const outside = 1 - cave;
-    g.sea.gain.setTargetAtTime(sea * 0.55 * outside, t, 0.7);
     const forest = (1 - sea * 0.7) * outside;
     const breeze = 1 + clamp(altitude / 40, 0, 1) * 0.4;
-    g.forest_day.gain.setTargetAtTime((1 - night) * 0.34 * forest * breeze, t, 1.0);
-    g.forest_night.gain.setTargetAtTime(night * 0.36 * forest, t, 1.0);
-    g.cave.gain.setTargetAtTime(cave * 0.5, t, 0.8);
     this.fireLevel = fireProximity;
-    g.campfire.gain.setTargetAtTime(fireProximity * 0.55, t, 0.3);
+    // Targets eased here in JS and written straight to gain.value: scheduling
+    // setTargetAtTime 60 times a second piles up events on the Web Audio timeline and
+    // can leave a bed stuck or dragging (heard as the sea staying on in the forest).
+    const target: Record<Loop, number> = {
+      sea: sea * 0.55 * outside,
+      forest_day: (1 - night) * 0.34 * forest * breeze,
+      forest_night: night * 0.36 * forest,
+      cave: cave * 0.5,
+      campfire: fireProximity * 0.55,
+    };
+    for (const name of LOOPS) {
+      const speed = name === 'campfire' ? 4 : 3;
+      let v = damp(this.bedLevel[name], target[name], speed, dt);
+      if (v < 0.002 && target[name] < 0.002) v = 0;
+      this.bedLevel[name] = v;
+      const g = this.loopGain[name];
+      if (g) g.gain.value = v;
+    }
+  }
+
+  /** Bed level as last written (0 is exact silence), for checks. */
+  bedGain(name: Loop): number {
+    return this.bedLevel[name];
+  }
+
+  /** Player volume 0..1; applies at once, also before the first press starts audio. */
+  setVolume(v01: number): void {
+    this.volume = clamp(v01, 0, 1);
+    if (this.ctx) {
+      this.master.gain.cancelScheduledValues(this.ctx.currentTime);
+      this.master.gain.value = this.volume;
+    }
   }
 
   private burst(opts: {
@@ -709,4 +738,9 @@ export class SoundEngine {
     this.burst({ type: 'bandpass', freq: 900, endFreq: 2600, q: 0.8, gain: 0.16, attack: 0.02, decay: 0.3 });
     for (let i = 0; i < 4; i++) this.burst({ type: 'highpass', freq: 3000 + Math.random() * 2500, gain: 0.06, decay: 0.02, when: 0.04 + i * 0.05 });
   }
+}
+
+/** Frame-rate independent exponential approach of `cur` to `target`. */
+function damp(cur: number, target: number, speed: number, dt: number): number {
+  return target + (cur - target) * Math.exp(-speed * dt);
 }

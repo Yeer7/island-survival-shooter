@@ -18,7 +18,7 @@ import { ColliderGrid } from './world/colliders';
 import { CrashSite, Dock } from './world/landmarks';
 import { ITEM_LABEL, ItemType, Pickup, PickupManager } from './world/pickups';
 import { DayNight } from './world/sky';
-import { LAKE_CENTER, LAKE_LEVEL, LAKE_RADIUS, Terrain } from './world/terrain';
+import { LAKE_CENTER, LAKE_LEVEL, LAKE_RADIUS, SEA_LEVEL, Terrain } from './world/terrain';
 import { Forest, Props, Tree, windUniform } from './world/vegetation';
 import { BossRole, Cannibal, SafeZone, Tribe } from './world/cannibals';
 import { Beach } from './world/beach';
@@ -337,6 +337,9 @@ export class Game implements CombatWorld {
     this.grass.update(this.player.pos.x, this.player.pos.z);
     const sens = Number(store.get('iss.sens'));
     if (sens > 0) this.player.sensitivity = sens;
+    const vol = store.get('iss.vol');
+    this.volume = vol !== null && vol !== '' && Number.isFinite(Number(vol)) ? clamp(Number(vol), 0, 100) : 80;
+    this.sound.setVolume(this.volume / 100);
 
     this.vm = new ViewModel(innerWidth / innerHeight);
     this.melee = new Melee(this.vm, this, this.sound);
@@ -420,6 +423,15 @@ export class Game implements CombatWorld {
       p.fire?.setViewportHeight(h * ratio);
       p.smoke?.setViewportHeight(h * ratio);
     }
+  }
+
+  /** Sound volume in percent (0-100) from the menu slider, saved like the sensitivity. */
+  volume = 80;
+
+  setVolume(pct: number): void {
+    this.volume = pct;
+    this.sound.setVolume(pct / 100);
+    store.set('iss.vol', String(pct));
   }
 
   setSensitivity(v: number): void {
@@ -560,7 +572,7 @@ export class Game implements CombatWorld {
     this.updateTargets();
     this.updateTutorial();
     this.updateQuest();
-    this.updateAudio();
+    this.updateAudio(dt);
     this.updateHud(dt);
     this.updateDeath(dt);
     this.updateSleep(dt);
@@ -1731,23 +1743,23 @@ export class Game implements CombatWorld {
     this.hud.setTutorial(this.tutorialStep + 1, TUTORIAL().length, TUTORIAL()[this.tutorialStep]);
   }
 
-  private updateAudio(): void {
+  private updateAudio(dt: number): void {
     const p = this.player.pos;
     const coast = this.terrain.coastDistance(p.x, p.z);
     // Biomes: the sea is heard only on the beach (sand or the water's edge near the
     // coast) and is exactly silent once the ground rises into the grass; inside the cave
     // only the cave bed plays.
     const cave = this.indoors || this.cave.isInside(p) ? 1 : 0;
-    const ground = this.terrain.height(p.x, p.z);
-    const top = this.terrain.beachTopAt(p.z);
-    const onSand = 1 - smoothstep(top - 0.35, top + 0.08, ground);
-    const nearSea = 1 - smoothstep(55, 80, coast);
-    const sea = cave ? 0 : onSand * nearSea;
+    const surface = this.terrain.surfaceAt(p.x, p.z);
+    const beach = surface === 'sand' || surface === 'water';
+    // Strict: on the sea's beach only. The moment the feet are on forest grass the target
+    // is 0 and the engine eases the bed out to exact silence.
+    const sea = cave === 0 && this.terrain.waterLevelAt(p.x, p.z) === SEA_LEVEL && coast < 35 && beach ? 1 : 0;
     let fire = 1 - smoothstep(3, 32, p.distanceTo(this.crash.firePos));
     fire = Math.max(fire, (1 - smoothstep(2, 20, p.distanceTo(this.village.fire.origin))) * 0.7);
     for (const pl of this.base.placed) if (pl.kind === 'campfire') fire = Math.max(fire, (1 - smoothstep(1, 14, pl.pos.distanceTo(p))) * 0.6);
     if (this.inv.selected === 'torch') fire = Math.max(fire, 0.25);
-    this.sound.updateAmbience(sea, fire, this.sky.night, p.y, cave);
+    this.sound.updateAmbience(dt, sea, fire, this.sky.night, p.y, cave);
   }
 
   private updateHud(dt: number): void {

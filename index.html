@@ -104,6 +104,9 @@
         font-size: 0.85rem;
         color: #c8d6d0;
       }
+      .sens > span:first-child {
+        min-width: 10.5em;
+      }
       .sens input {
         width: 160px;
         accent-color: #d97706;
@@ -231,6 +234,10 @@
         <label class="sens"><span data-i18n="sens" style="width: auto"></span>
           <input id="sens" type="range" min="0.3" max="2.5" step="0.05" value="1" />
           <span id="sens-val">1.00×</span>
+        </label>
+        <label class="sens"><span data-i18n="vol" style="width: auto"></span>
+          <input id="vol" type="range" min="0" max="100" step="5" value="80" />
+          <span id="vol-val">80%</span>
         </label>
         <div class="actions">
           <button id="play-btn"></button>

@@ -18,6 +18,7 @@ function menuText(): Record<string, string> {
       '<li><kbd>WASD</kbd> move · <kbd>Shift</kbd> sprint · <kbd>Space</kbd> jump</li><li><kbd>Click</kbd> use / hold to draw the bow · <kbd>1</kbd>–<kbd>9</kbd> / wheel: switch item</li><li><kbd>E</kbd> interact · <kbd>Tab</kbd>/<kbd>B</kbd> Survival Book · <kbd>G</kbd> drop log · <kbd>R</kbd> rotate · <kbd>Q</kbd> cancel</li>',
     ),
     sens: tr('Sensibilidade do mouse', 'Mouse sensitivity'),
+    vol: tr('Volume do som', 'Sound volume'),
     newgame: tr('Novo Jogo (Apagar Save)', 'New Game (Erase Save)'),
     credits: tr('Créditos CC0', 'CC0 Credits'),
     creditsBody: `<h2>${tr('Créditos', 'Credits')}</h2>
@@ -50,6 +51,8 @@ const playBtn = document.getElementById('play-btn') as HTMLButtonElement;
 const newGameBtn = document.getElementById('newgame-btn') as HTMLButtonElement;
 const sens = document.getElementById('sens') as HTMLInputElement;
 const sensVal = document.getElementById('sens-val') as HTMLSpanElement;
+const vol = document.getElementById('vol') as HTMLInputElement;
+const volVal = document.getElementById('vol-val') as HTMLSpanElement;
 const params = new URLSearchParams(location.search);
 const debug = params.has('debug');
 
@@ -110,6 +113,13 @@ async function boot(): Promise<void> {
     const v = Number(sens.value);
     game.setSensitivity(v);
     sensVal.textContent = `${v.toFixed(2)}×`;
+  });
+  vol.value = String(game.volume);
+  volVal.textContent = `${Math.round(game.volume)}%`;
+  vol.addEventListener('input', () => {
+    const v = Number(vol.value);
+    game.setVolume(v);
+    volVal.textContent = `${v}%`;
   });
 
   const show = (playing: boolean) => {

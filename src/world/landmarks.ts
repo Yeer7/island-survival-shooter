@@ -1531,11 +1531,15 @@ function buildSuitcase(i: number, rand: () => number): { group: THREE.Group; lid
     trolley.rotation.set((rand() - 0.5) * 0.5, (rand() - 0.5) * 0.5, -0.25 - rand() * 0.3);
   }
 
-  // Four spinner wheels at the +X end.
-  for (const y of [0.045, H - 0.045]) {
-    for (const z of [-(D / 2 - 0.06), D / 2 - 0.06]) {
-      add(group, new RoundedBoxGeometry(0.03, 0.05, 0.05, 2, 0.01), sh.dark, L / 2 + 0.008, y, z, false);
-      const w = add(group, new THREE.CylinderGeometry(0.024, 0.024, 0.022, 12), sh.dark, L / 2 + 0.03, y, z);
+  // Four spinner wheels at the +X end, all on the base half (never on the lid), each
+  // housing set into the lower shell where its rounding leaves the end face.
+  for (const y of [0.05, HB - 0.04]) {
+    const below = Math.max(0, R - y);
+    const inset = R - Math.sqrt(R * R - below * below);
+    for (const z of [-(D / 2 - R), D / 2 - R]) {
+      const hx = L / 2 - inset + 0.011;
+      add(group, new RoundedBoxGeometry(0.03, 0.05, 0.05, 2, 0.01), sh.dark, hx, y, z, false);
+      const w = add(group, new THREE.CylinderGeometry(0.024, 0.024, 0.022, 12), sh.dark, hx + 0.022, y, z);
       w.rotation.x = Math.PI / 2;
     }
   }
@@ -1554,7 +1558,7 @@ function buildSuitcase(i: number, rand: () => number): { group: THREE.Group; lid
 }
 
 /** Height (case-local) of the top of the packed clothes, where found items rest. */
-export const CASE_PACK_TOP = 0.106;
+export const CASE_PACK_TOP = 0.122;
 
 /** Case-local resting spot of found item k of n, nested on the clothes inside the base. */
 export function suitcaseSlot(k: number, n: number): THREE.Vector3 {
@@ -1568,57 +1572,168 @@ function fabric(color: string, seed: number): THREE.MeshStandardMaterial {
   const key = color + seed;
   let m = clothMats.get(key);
   if (!m) {
-    m = new THREE.MeshStandardMaterial({ map: weave(color, seed, 0.3), roughness: 0.95 });
+    m = new THREE.MeshStandardMaterial({ map: weave(color, seed, 0.3), roughness: 0.95, side: THREE.DoubleSide });
     clothMats.set(key, m);
   }
   return m;
 }
 let strapMats: { band: THREE.MeshStandardMaterial; buckle: THREE.MeshStandardMaterial } | null = null;
 
+/** Highest point (case-local) the tossed clothes reach; found items rest just above. */
+const PILE_TOP = 0.117;
+
+/** Keep a case-local point inside the base's lining (rounded corners included). */
+function insideBase(v: THREE.Vector3): void {
+  const hx = 0.312;
+  const hz = 0.198;
+  const cr = 0.072;
+  v.x = THREE.MathUtils.clamp(v.x, -hx, hx);
+  v.z = THREE.MathUtils.clamp(v.z, -hz, hz);
+  const cx = hx - cr;
+  const cz = hz - cr;
+  if (Math.abs(v.x) > cx && Math.abs(v.z) > cz) {
+    const dx = Math.abs(v.x) - cx;
+    const dz = Math.abs(v.z) - cz;
+    const l = Math.hypot(dx, dz);
+    if (l > cr) {
+      v.x = Math.sign(v.x) * (cx + (dx / l) * cr);
+      v.z = Math.sign(v.z) * (cz + (dz / l) * cr);
+    }
+  }
+}
+
 /**
- * Two or three folded garments filling the base (soft, rounded and a little crumpled), held
- * by two crossed black elastic straps with a buckle in the middle. They also fill the
- * bottom of the open case, so no grass blade shows through it.
+ * A crumpled piece of clothing: a subdivided sheet with an irregular outline, deep
+ * wrinkles and a dome, its edges slumping down, turned at an angle and kept inside the
+ * base so nothing pokes through the shell.
+ */
+function crumpledSheet(w: number, d: number, y: number, yaw: number, ox: number, oz: number, seed: number, droop = 0.03): THREE.BufferGeometry {
+  const r = mulberry32(seed);
+  const ph = Array.from({ length: 6 }, () => r() * 6.28);
+  const g = new THREE.PlaneGeometry(w, d, 22, 16);
+  g.rotateX(-Math.PI / 2);
+  const p = g.attributes.position;
+  const v = new THREE.Vector3();
+  const c = Math.cos(yaw);
+  const sn = Math.sin(yaw);
+  for (let i = 0; i < p.count; i++) {
+    const u = p.getX(i) / (w / 2);
+    const t = p.getZ(i) / (d / 2);
+    // Ragged outline: push the border in and out.
+    const ang = Math.atan2(t, u);
+    const ragged = 1 + 0.12 * Math.sin(ang * 3 + ph[0]) + 0.07 * Math.sin(ang * 7 + ph[1]);
+    const x = p.getX(i) * ragged;
+    const z = p.getZ(i) * ragged;
+    const edge = Math.max(Math.abs(u), Math.abs(t));
+    const wr =
+      Math.sin(x * 31 + z * 9 + ph[2]) * 0.008 +
+      Math.sin(z * 43 - x * 17 + ph[3]) * 0.006 +
+      Math.sin((x + z) * 71 + ph[4]) * 0.003 +
+      Math.abs(Math.sin(x * 19 + ph[5])) * 0.007;
+    const dome = (1 - Math.min(1, edge * edge)) * 0.012;
+    const yy = y + wr + dome - Math.pow(Math.max(0, edge - 0.7) / 0.3, 2) * droop;
+    v.set(ox + x * c - z * sn, Math.min(PILE_TOP, Math.max(0.03, yy)), oz + x * sn + z * c);
+    insideBase(v);
+    p.setXYZ(i, v.x, v.y, v.z);
+  }
+  g.computeVertexNormals();
+  return g;
+}
+
+/** A crumpled sleeve or trouser leg: a squashed, wavy tube draped across the pile. */
+function sleeve(len: number, rad: number, from: THREE.Vector3, yaw: number, seed: number): THREE.BufferGeometry {
+  const r = mulberry32(seed);
+  const ph = r() * 6.28;
+  const g = new THREE.CylinderGeometry(rad, rad * 0.85, len, 12, 14, true);
+  g.rotateZ(Math.PI / 2);
+  const p = g.attributes.position;
+  const v = new THREE.Vector3();
+  for (let i = 0; i < p.count; i++) {
+    const x = p.getX(i);
+    const t = x / len + 0.5;
+    v.set(x, p.getY(i) * 0.45, p.getZ(i));
+    v.y += Math.sin(t * 9 + ph) * 0.006 + Math.sin(v.z * 120 + x * 40) * 0.002;
+    v.z += Math.sin(t * 5 + ph) * 0.025;
+    v.applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw).add(from);
+    v.y = Math.min(PILE_TOP, v.y);
+    insideBase(v);
+    p.setXYZ(i, v.x, v.y, v.z);
+  }
+  g.computeVertexNormals();
+  return g;
+}
+
+/** A flat strip following a curve (an elastic strap), lying face up. */
+function strip(points: THREE.Vector3[], width: number): THREE.BufferGeometry {
+  const curve = new THREE.CatmullRomCurve3(points);
+  const N = 24;
+  const pos: number[] = [];
+  const idx: number[] = [];
+  const up = new THREE.Vector3(0, 1, 0);
+  const side = new THREE.Vector3();
+  for (let k = 0; k <= N; k++) {
+    const t = k / N;
+    const at = curve.getPointAt(t);
+    side.crossVectors(curve.getTangentAt(t), up).normalize().multiplyScalar(width / 2);
+    pos.push(at.x + side.x, at.y, at.z + side.z, at.x - side.x, at.y, at.z - side.z);
+    if (k < N) idx.push(k * 2, k * 2 + 2, k * 2 + 1, k * 2 + 1, k * 2 + 2, k * 2 + 3);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setIndex(idx);
+  g.computeVertexNormals();
+  return g;
+}
+
+/**
+ * Clothes tossed about by the crash and the axe: a crumpled sheet covering the floor of
+ * the base, two or three more pieces at odd angles over it and a sleeve flopped across,
+ * all wrinkled per vertex and kept inside the shell. The two elastic straps came unhooked
+ * and lie slack along the inside edges, clear of where the found items rest.
  */
 function packClothes(group: THREE.Group, i: number): void {
   const r = mulberry32(400 + i * 13);
   const pick = () => CLOTH_COLORS[Math.floor(r() * CLOTH_COLORS.length)];
-  const y0 = 0.035;
-  const garments: [number, number, number, number, number][] = [
-    // [x, z, width, height, depth]
-    [-0.158, 0, 0.3, 0.06, 0.37],
-    [0.158, 0, 0.31, 0.065, 0.38],
-  ];
-  garments.forEach(([x, z, w, h, d], k) => {
-    const geo = crumple(new RoundedBoxGeometry(w, h, d, 4, 0.024), 0.004, 50 + i * 7 + k);
-    const m = new THREE.Mesh(geo, fabric(pick(), 60 + k));
-    m.position.set(x + (r() - 0.5) * 0.01, y0 + h / 2, z + (r() - 0.5) * 0.02);
-    m.rotation.y = (r() - 0.5) * 0.08;
+  const add = (geo: THREE.BufferGeometry, color: string, k: number) => {
+    const m = new THREE.Mesh(geo, fabric(color, 60 + k));
     m.receiveShadow = true;
     group.add(m);
-  });
-  // A third, smaller crumpled piece (a scarf or shirt) tucked along the front in some cases.
-  if (i % 2 === 0) {
-    const geo = crumple(new RoundedBoxGeometry(0.5, 0.022, 0.09, 3, 0.01), 0.005, 90 + i);
-    const m = new THREE.Mesh(geo, fabric(pick(), 71));
-    m.position.set(0, 0.096, 0.15);
-    m.rotation.set(0, 0.05, 0.02);
-    group.add(m);
+  };
+  // Floor layer: covers the whole bottom so no grass blade can show through.
+  add(crumpledSheet(0.82, 0.56, 0.05, (r() - 0.5) * 0.2, 0, 0, 900 + i, 0.01), ['#c9c2b2', '#9fb5c9', '#b88a4a', '#c98a8a', '#d8d2c4'][i % 5], 0);
+  const pieces = 2 + (i % 2);
+  for (let k = 0; k < pieces; k++) {
+    const w = 0.28 + r() * 0.14;
+    const d = 0.2 + r() * 0.12;
+    const ox = (k - (pieces - 1) / 2) * 0.2 + (r() - 0.5) * 0.06;
+    const oz = (r() - 0.5) * 0.1;
+    add(crumpledSheet(w, d, 0.072 + k * 0.012, (r() - 0.5) * 1.4, ox, oz, 910 + i * 5 + k), pick(), k + 1);
   }
+  // A sleeve flopped over the others.
+  add(sleeve(0.3, 0.028, new THREE.Vector3((r() - 0.5) * 0.15, 0.098, (r() - 0.5) * 0.08), (r() - 0.5) * 2.2, 950 + i), pick(), 7);
+
   strapMats ??= {
-    band: new THREE.MeshStandardMaterial({ color: 0x141414, roughness: 0.7 }),
+    band: new THREE.MeshStandardMaterial({ color: 0x141414, roughness: 0.7, side: THREE.DoubleSide }),
     buckle: new THREE.MeshStandardMaterial({ color: 0x2a2a2a, roughness: 0.45, metalness: 0.3 }),
   };
-  const ang = Math.atan2(0.36, 0.58);
-  for (const s of [-1, 1]) {
-    const band = new THREE.Mesh(new THREE.BoxGeometry(0.69, 0.003, 0.028), strapMats.band);
-    band.position.set(0, 0.1035, 0);
-    band.rotation.y = s * ang;
-    group.add(band);
+  const y = PILE_TOP + 0.003;
+  const v = (x: number, yy: number, z: number) => new THREE.Vector3(x, yy, z);
+  // Left strap: from its anchor high on the left wall, slack along that edge.
+  const left = [v(-0.305, 0.135, -0.1), v(-0.29, y, -0.04), v(-0.28, y, 0.05), v(-0.295, y, 0.13)];
+  // Front strap: unhooked, lying along the inside of the front wall, buckle at its end.
+  const front = [v(0.3, 0.135, 0.17), v(0.22, y, 0.182), v(0.12, y, 0.175), v(0.04, y, 0.185)];
+  for (const pts of [left, front]) {
+    const m = new THREE.Mesh(strip(pts, 0.024), strapMats.band);
+    group.add(m);
   }
-  const buckle = new THREE.Mesh(new RoundedBoxGeometry(0.045, 0.01, 0.036, 2, 0.003), strapMats.buckle);
-  buckle.position.set(0, 0.108, 0);
+  const buckle = new THREE.Mesh(new RoundedBoxGeometry(0.036, 0.009, 0.03, 2, 0.003), strapMats.buckle);
+  buckle.position.set(0.025, y + 0.003, 0.184);
+  buckle.rotation.y = 0.1;
   group.add(buckle);
+  const clip = new THREE.Mesh(new RoundedBoxGeometry(0.03, 0.009, 0.026, 2, 0.003), strapMats.buckle);
+  clip.position.set(-0.296, y + 0.003, 0.145);
+  clip.rotation.y = 1.3;
+  group.add(clip);
 }
 
 let pocketTex: THREE.MeshStandardMaterial | null = null;

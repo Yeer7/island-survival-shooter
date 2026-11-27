@@ -112,11 +112,7 @@ export function buildCloth(): THREE.Group {
   fold.rotation.z = Math.PI / 2;
   fold.position.set(0.002, T * 1.5, -D / 2 + 0.008);
   fold.castShadow = true;
-  // A frayed corner flap.
-  const flap = new THREE.Mesh(crumple(new THREE.BoxGeometry(0.06, 0.004, 0.05, 4, 1, 4), 0.002, 9), clothMat);
-  flap.position.set(W / 2 - 0.02, T * 3 + 0.002, D / 2 - 0.03);
-  flap.rotation.set(0.15, 0.6, -0.1);
-  g.add(fold, flap);
+  g.add(fold);
   return g;
 }
 

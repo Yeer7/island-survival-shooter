@@ -1498,7 +1498,7 @@ export class Game implements CombatWorld {
       if (s.lid) {
         // Nested on the clothes inside the open base, lying along the case.
         s.mesh.updateMatrixWorld(true);
-        const at = s.mesh.localToWorld(suitcaseSlot(k, s.contents.length));
+        const at = s.mesh.localToWorld(suitcaseSlot(s.mesh, k, s.contents.length));
         this.pickups.add(type, at, 1, s.mesh.rotation.y + (k === 0 ? 0.12 : -0.1));
         return;
       }

@@ -32,7 +32,7 @@ export function barkMaterial(): THREE.MeshStandardMaterial {
     normalMap: load('pine_bark_nor_gl_512.jpg', false),
     roughnessMap: load('pine_bark_rough_512.jpg', false),
     normalScale: new THREE.Vector2(1.2, 1.2),
-    color: 0xcfc4b8,
+    color: 0xe2d8cc,
     roughness: 1,
     metalness: 0,
   });
@@ -87,7 +87,7 @@ function needleTexture(): THREE.CanvasTexture {
       const a = base + (i / n) * Math.PI * 2 * 0.5 - Math.PI * 0.25 + (r() - 0.5) * 0.4;
       const len = 5 + r() * 7;
       const s = 0.5 + r() * 0.5;
-      g.strokeStyle = `rgb(${Math.round(22 + 24 * s)},${Math.round(52 + 52 * s)},${Math.round(24 + 18 * s)})`;
+      g.strokeStyle = `rgb(${Math.round(34 + 28 * s)},${Math.round(56 + 44 * s)},${Math.round(28 + 16 * s)})`;
       g.lineWidth = 1.1 + r() * 0.6;
       g.beginPath();
       g.moveTo(x, y);

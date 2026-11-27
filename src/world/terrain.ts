@@ -36,8 +36,8 @@ export class Terrain {
     this.colorCache = {
       sand: new THREE.Color(0xe3cf9a),
       wet: new THREE.Color(0xb59f6c),
-      grass: new THREE.Color(0x7ea24a),
-      forest: new THREE.Color(0x4c7434),
+      grass: new THREE.Color(0x80924e),
+      forest: new THREE.Color(0x5c6238),
       rock: new THREE.Color(0x8a8781),
       dark: new THREE.Color(0x5f5c58),
       mud: new THREE.Color(0x6e6142),

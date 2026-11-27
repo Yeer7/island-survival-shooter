@@ -19,7 +19,7 @@ import { CrashSite, Dock, suitcaseSlot } from './world/landmarks';
 import { ITEM_LABEL, ItemType, Pickup, PickupManager } from './world/pickups';
 import { DayNight } from './world/sky';
 import { LAKE_CENTER, LAKE_LEVEL, LAKE_RADIUS, SEA_LEVEL, Terrain } from './world/terrain';
-import { Forest, Props, Tree, windUniform } from './world/vegetation';
+import { Forest, Props, Tree, leafLight, windUniform } from './world/vegetation';
 import { BossRole, Cannibal, SafeZone, Tribe } from './world/cannibals';
 import { Beach } from './world/beach';
 import { BOAT_COST, Sailboat } from './world/boat';
@@ -544,6 +544,9 @@ export class Game implements CombatWorld {
 
     this.sky.indoor = this.indoors;
     this.sky.update(dt, this.time, this.camera, this.player.pos);
+    // Leaves glow through when the sun is behind them (shared by every leaf material).
+    leafLight.uSunView.value.copy(this.sky.sunDir).transformDirection(this.camera.matrixWorldInverse);
+    leafLight.uLeafSun.value.copy(this.sky.sunColor).multiplyScalar(0.55 * this.sky.daylight * (this.sky.indoor ? 0 : 1));
     this.boat.update(dt, this.time);
     this.updateCave(dt);
     windUniform.value = this.time;

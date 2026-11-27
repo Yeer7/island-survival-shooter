@@ -17,7 +17,8 @@ let greyBark: THREE.MeshStandardMaterial | null = null;
 export function broadleafBarkMaterial(): THREE.MeshStandardMaterial {
   if (greyBark) return greyBark;
   greyBark = barkMaterial().clone();
-  greyBark.color.setHex(0xe2ddd5);
+  // Grey-brown, like alder or oak: readable even in the canopy's shade.
+  greyBark.color.setHex(0xd8ccbd);
   greyBark.normalScale.set(0.8, 0.8);
   return greyBark;
 }
@@ -56,7 +57,7 @@ function leafTexture(): THREE.CanvasTexture {
     g.save();
     g.translate(x, y);
     g.rotate(rot);
-    g.fillStyle = `rgb(${Math.round(58 + 60 * t)},${Math.round(96 + 70 * t)},${Math.round(34 + 30 * t)})`;
+    g.fillStyle = `rgb(${Math.round(74 + 58 * t)},${Math.round(98 + 58 * t)},${Math.round(42 + 26 * t)})`;
     g.beginPath();
     g.moveTo(0, -len / 2);
     g.quadraticCurveTo(w, 0, 0, len / 2);

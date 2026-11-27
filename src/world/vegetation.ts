@@ -17,6 +17,36 @@ export interface Exclusion {
   r: number;
 }
 
+/**
+ * Sun seen through leaves: the view-space sun direction and the light it carries, shared by
+ * every leaf material (updated once per frame).
+ */
+export const leafLight = { uSunView: { value: new THREE.Vector3(0, 1, 0) }, uLeafSun: { value: new THREE.Color(0, 0, 0) } };
+
+/**
+ * Fake translucency for leaf cards: when the sun is behind the leaves (looking toward it),
+ * they glow a warm green-gold through, so a crown lights up against the sky. Chained after
+ * any existing onBeforeCompile (wind, normals).
+ */
+export function addLeafTranslucency(mat: THREE.Material): void {
+  const prev = mat.onBeforeCompile;
+  const key = mat.customProgramCacheKey();
+  mat.onBeforeCompile = (sh, r) => {
+    prev.call(mat, sh, r);
+    sh.uniforms.uSunView = leafLight.uSunView;
+    sh.uniforms.uLeafSun = leafLight.uLeafSun;
+    sh.fragmentShader = 'uniform vec3 uSunView;\nuniform vec3 uLeafSun;\n' + sh.fragmentShader.replace(
+      '#include <opaque_fragment>',
+      `{
+    float back = pow(max(dot(-normalize(vViewPosition), uSunView), 0.0), 5.0);
+    outgoingLight += diffuseColor.rgb * vec3(1.15, 1.1, 0.7) * uLeafSun * (0.15 + 1.6 * back);
+  }
+  #include <opaque_fragment>`,
+    );
+  };
+  mat.customProgramCacheKey = () => key + '-sss';
+}
+
 /** Shared wind clock for every swaying material. */
 export const windUniform = { value: 0 };
 
@@ -225,6 +255,9 @@ export class Forest {
       };
       lm.customProgramCacheKey = () => 'broadleaf-wind';
     }
+    addLeafTranslucency(needleMaterial());
+    addLeafTranslucency(broadleafLeafMaterial());
+    addLeafTranslucency(palmMaterials().frond);
     // Needle sprays are double-sided cards: keep their up-leaning normal on both faces so
     // the underside of a spray never turns black.
     {
@@ -1127,6 +1160,7 @@ export class Props {
         shader.fragmentShader = shader.fragmentShader.replace('#include <normal_fragment_begin>', THREE.ShaderChunk.normal_fragment_begin.replace('normal *= faceDirection;', ''));
       };
       lm.customProgramCacheKey = () => 'bush-leaves-wind';
+      addLeafTranslucency(lm);
     }
     const bushCount = () => bushSets.reduce((s2, b2) => s2 + b2.count, 0);
     tries = 0;
@@ -1159,6 +1193,94 @@ export class Props {
     }
     for (const b2 of bushSets) b2.finish(this.group);
     fernSet.finish(this.group);
+
+    // Wildflowers: low clumps of purple-blue lupin spikes, sparse in the forest and thicker
+    // along the lake's margin. One instanced draw, no shadows.
+    {
+      const parts: THREE.BufferGeometry[] = [];
+      const paint = (g: THREE.BufferGeometry, c: THREE.Color) => {
+        const n = g.toNonIndexed();
+        n.deleteAttribute('uv');
+        const a = new Float32Array(n.attributes.position.count * 3);
+        for (let i = 0; i < a.length; i += 3) c.toArray(a, i);
+        n.setAttribute('color', new THREE.BufferAttribute(a, 3));
+        parts.push(n);
+      };
+      const fr = mulberry32(808);
+      for (let k = 0; k < 4; k++) {
+        const ox = (fr() - 0.5) * 0.35;
+        const oz = (fr() - 0.5) * 0.35;
+        const h = 0.32 + fr() * 0.22;
+        const stem = new THREE.CylinderGeometry(0.008, 0.012, h, 4, 1, true);
+        stem.translate(ox, h / 2, oz);
+        paint(stem, new THREE.Color(0x4d6a2e));
+        const spike = new THREE.ConeGeometry(0.035, h * 0.55, 6, 3);
+        const sp = spike.attributes.position;
+        for (let i = 0; i < sp.count; i++) {
+          const t = sp.getY(i) / (h * 0.55) + 0.5;
+          const bump = 1 + 0.25 * Math.sin(t * 30 + i);
+          sp.setX(i, sp.getX(i) * bump);
+          sp.setZ(i, sp.getZ(i) * bump);
+        }
+        spike.computeVertexNormals();
+        spike.translate(ox, h + h * 0.22, oz);
+        paint(spike, new THREE.Color().setHSL(0.72 + fr() * 0.06, 0.45, 0.55 + fr() * 0.1));
+        const leaf = new THREE.PlaneGeometry(0.16, 0.05);
+        leaf.rotateX(-Math.PI / 2 + 0.4);
+        leaf.rotateY(fr() * Math.PI);
+        leaf.translate(ox, 0.05, oz);
+        paint(leaf, new THREE.Color(0x50703a));
+      }
+      const flowerGeo = mergeGeometries(parts, false)!;
+      const flowerMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8, side: THREE.DoubleSide });
+      const flowers = new InstancedSet([{ geometry: flowerGeo, material: flowerMat }], 420, false);
+      let ft = 0;
+      while (flowers.count < 420 && ft < 40000) {
+        ft++;
+        const lakeSide = rand() < 0.45;
+        const a = rand() * Math.PI * 2;
+        const x = lakeSide ? LAKE_CENTER.x + Math.cos(a) * (LAKE_RADIUS * (1.0 + rand() * 0.45)) : (rand() - 0.5) * 500;
+        const z = lakeSide ? LAKE_CENTER.z + Math.sin(a) * (LAKE_RADIUS * (1.0 + rand() * 0.45)) : (rand() - 0.5) * 500;
+        if (terrain.surfaceAt(x, z) !== 'grass' || excluded(x, z) || blocked(x, z) || terrain.isInLake(x, z)) continue;
+        if (!lakeSide && rand() < 0.5) continue;
+        d.position.set(x, terrain.height(x, z) - 0.02, z);
+        d.rotation.set(0, rand() * 6, 0);
+        d.scale.setScalar(0.8 + rand() * 0.5);
+        d.updateMatrix();
+        color.setHSL(0.7 + rand() * 0.08, 0.5, 0.55 + rand() * 0.2).multiplyScalar(1.6);
+        flowers.push(d.matrix, color);
+      }
+      flowers.finish(this.group);
+    }
+
+    // Lily pads: round, notched leaves resting on the calm water near the lake's edge,
+    // a few with a pale flower. One instanced draw.
+    {
+      const pad = new THREE.CircleGeometry(0.3, 14, 0.25, Math.PI * 2 - 0.5);
+      pad.rotateX(-Math.PI / 2);
+      const pc = new Float32Array(pad.attributes.position.count * 3);
+      for (let i = 0; i < pc.length; i += 3) new THREE.Color(0x4e6e30).toArray(pc, i);
+      pad.setAttribute('color', new THREE.BufferAttribute(pc, 3));
+      pad.deleteAttribute('uv');
+      const padMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2 });
+      const pads = new InstancedSet([{ geometry: pad, material: padMat }], 90, false);
+      let pt = 0;
+      while (pads.count < 90 && pt < 20000) {
+        pt++;
+        const a = rand() * Math.PI * 2;
+        const rr = LAKE_RADIUS * (0.55 + rand() * 0.45);
+        const x = LAKE_CENTER.x + Math.cos(a) * rr;
+        const z = LAKE_CENTER.z + Math.sin(a) * rr;
+        if (!terrain.isInLake(x, z) || terrain.height(x, z) > LAKE_LEVEL - 0.15) continue;
+        d.position.set(x, LAKE_LEVEL + 0.02, z);
+        d.rotation.set(0, rand() * 6, 0);
+        d.scale.setScalar(0.7 + rand() * 0.8);
+        d.updateMatrix();
+        color.setHSL(0.24 + rand() * 0.05, 0.4, 0.3 + rand() * 0.12).multiplyScalar(2.2);
+        pads.push(d.matrix, color);
+      }
+      pads.finish(this.group);
+    }
 
     // Palms are part of the Forest now, so they can be chopped.
 

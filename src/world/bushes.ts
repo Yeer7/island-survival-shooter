@@ -34,9 +34,9 @@ function leafTexture(): THREE.CanvasTexture {
     const wid = len * (0.38 + r() * 0.12);
     const shade = 0.72 + r() * 0.35 - (1 - rad / (S * 0.44)) * 0.15;
     const hueMix = r();
-    const R = Math.round((78 + 38 * hueMix) * shade);
-    const G = Math.round((118 + 30 * hueMix) * shade);
-    const B = Math.round((44 + 12 * hueMix) * shade);
+    const R = Math.round((84 + 38 * hueMix) * shade);
+    const G = Math.round((106 + 26 * hueMix) * shade);
+    const B = Math.round((48 + 12 * hueMix) * shade);
     g.save();
     g.translate(x, y);
     g.rotate(r() * Math.PI * 2);

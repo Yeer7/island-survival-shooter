@@ -33,7 +33,8 @@ void main() {
   col = mix(col, uHorizon * 0.75, smoothstep(0.0, -0.3, h));
 
   float sd = max(dot(d, uSunDir), 0.0);
-  col += uSunColor * (pow(sd, 6.0) * 0.18 + pow(sd, 60.0) * 0.45);
+  // A wide, diffuse glow round the sun, as if filtered through haze and canopy.
+  col += uSunColor * (pow(sd, 3.0) * 0.12 + pow(sd, 6.0) * 0.22 + pow(sd, 60.0) * 0.45);
   col += uSunColor * smoothstep(0.99925, 0.9996, sd) * 6.0;
 
   float md = dot(d, uMoonDir);
@@ -60,8 +61,9 @@ void main() {
 export const DAY_SECONDS = 420;
 
 const C = (hex: number) => new THREE.Color(hex);
-const DAY_ZENITH = C(0x3d82c4);
-const DAY_HORIZON = C(0xb2d8ea);
+// A damp temperate-forest day: a soft grey-blue sky over a milky, faintly green haze.
+const DAY_ZENITH = C(0x6484a3);
+const DAY_HORIZON = C(0xd2dcd1);
 const DUSK_HORIZON = C(0xf0904e);
 const DAWN_HORIZON = C(0xf4c878);
 const DAWN_ZENITH = C(0x5a78b0);
@@ -71,8 +73,8 @@ const NIGHT_HORIZON = C(0x1c2a46);
 const SUN_LOW = C(0xff9a4a);
 const SUN_HIGH = C(0xfff1d6);
 const MOON_LIGHT = C(0xa9c0ec);
-const HEMI_DAY_SKY = C(0xcfe5ff);
-const HEMI_DAY_GROUND = C(0x5c6b45);
+const HEMI_DAY_SKY = C(0xd6e2dc);
+const HEMI_DAY_GROUND = C(0x6d7858);
 const HEMI_NIGHT_SKY = C(0x41588e);
 const HEMI_NIGHT_GROUND = C(0x141a26);
 
@@ -197,11 +199,11 @@ export class DayNight {
     }
     this.hemi.color.copy(HEMI_NIGHT_SKY).lerp(HEMI_DAY_SKY, this.daylight);
     this.hemi.groundColor.copy(HEMI_NIGHT_GROUND).lerp(HEMI_DAY_GROUND, this.daylight);
-    this.hemi.intensity = lerp(0.55, 0.85, this.daylight);
+    this.hemi.intensity = lerp(0.55, 1.2, this.daylight);
 
     this.fog.color.copy(this.horizon);
-    // Daytime haze gives depth between distant trunks without greying the forest.
-    this.fog.density = lerp(0.0036, 0.0031, this.daylight);
+    // Daytime haze: layers of milky air between the trunks, thinning nothing up close.
+    this.fog.density = lerp(0.0036, 0.0085, this.daylight);
     if (this.indoor) {
       // Inside the cave: dense blue-black fog, no sun or moon, a faint cold fill.
       this.fog.color.setHex(0x10161e);

@@ -164,9 +164,9 @@ export class GrassField {
       d.matrix.toArray(m, n * 16);
       // Take the hue of the ground underneath so the carpet blends with the terrain.
       this.terrain.colorAt(x, z, this.col);
-      colors[n * 3] = this.col.r * 1.25 * tint;
-      colors[n * 3 + 1] = this.col.g * 1.3 * tint;
-      colors[n * 3 + 2] = this.col.b * 1.15 * tint;
+      colors[n * 3] = this.col.r * 1.22 * tint;
+      colors[n * 3 + 1] = this.col.g * 1.24 * tint;
+      colors[n * 3 + 2] = this.col.b * 1.12 * tint;
       xs[n] = x;
       zs[n] = z;
       n++;

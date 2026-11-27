@@ -20,6 +20,8 @@ export interface PalmVariant {
   falling: InstancePart[];
   /** Spine samples (model space) with a clearance radius, root to crown: for resting on the ground. */
   spine: { p: THREE.Vector3; r: number }[];
+  /** Trunk axis point, radius and polygon side count at height h (model space). */
+  trunkAt(h: number): { c: THREE.Vector3; r: number; sides: number };
   height: number;
 }
 
@@ -220,6 +222,7 @@ export function buildPalmVariants(): PalmVariant[] {
       ],
       spine,
       height: H,
+      trunkAt: (h: number) => ({ c: spineAt(h).clone(), r: palmRadius(h), sides: 10 }),
     };
   });
 }

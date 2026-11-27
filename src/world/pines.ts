@@ -120,6 +120,8 @@ export interface PineVariant {
   standing: InstancePart[];
   falling: InstancePart[];
   height: number;
+  /** Trunk axis point, radius and polygon side count at height h (model space). */
+  trunkAt(h: number): { c: THREE.Vector3; r: number; sides: number };
 }
 
 /** Trunk radius at height h of a tree of height H. */
@@ -249,6 +251,7 @@ export function buildPineVariants(): PineVariant[] {
         { geometry: cutCap, material: cut },
       ],
       height: H,
+      trunkAt: (h: number) => ({ c: spine(h).clone(), r: radius(h), sides: 9 }),
     };
   });
 }

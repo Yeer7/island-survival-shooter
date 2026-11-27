@@ -1330,7 +1330,7 @@ export class Game implements CombatWorld {
     switch (hit.kind) {
       case 'tree': {
         const tree = this.forest.trees[hit.index];
-        const felled = this.forest.damage(hit.index, spec.tree, this.player.pos);
+        const felled = this.forest.damage(hit.index, spec.tree, this.player.pos, p.y);
         // Fine pale chips from the notch and a few bark flakes, sized for the lens.
         this.debris.burst(p, n, spec.kind === 'stab' ? 5 : 11, 0xe2c294, { speed: 3, size: 0.03, floor, flat: true });
         if (spec.kind === 'swing') this.debris.burst(p, n, heavy ? 6 : 4, 0x4e3422, { speed: heavy ? 3 : 2.4, size: 0.034, floor, life: 1.2, flat: true });
@@ -1442,7 +1442,7 @@ export class Game implements CombatWorld {
         this.pickups.addArrow(p, info.quat);
         if (kind === 'tree' && hit) {
           const tree = this.forest.trees[hit.index];
-          this.forest.damage(hit.index, 4, this.player.pos);
+          this.forest.damage(hit.index, 4, this.player.pos, tip.y);
           this.hud.hitMarker('white');
           this.sound.hitConfirm(false);
         }

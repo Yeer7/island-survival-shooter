@@ -185,6 +185,8 @@ export class Forest {
   private wounded = new Map<number, Wounded>();
   private trunkSpecs: TrunkSpec[] = [];
   private barkAboveCache = new Map<string, THREE.BufferGeometry>();
+  /** Axe-cut stumps (their own mesh, split-wood point on top), by tree index. */
+  private choppedStumps = new Map<number, THREE.Group>();
   private dummy = new THREE.Object3D();
   private q = new THREE.Quaternion();
   private zero = new THREE.Matrix4().makeScale(0, 0, 0);
@@ -354,7 +356,10 @@ export class Forest {
     const g = new THREE.Group();
     for (const v of [0, this.variants.length - 1]) {
       const bark = this.variants[v][0].material as THREE.Material;
-      g.add(new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.1), [bark, this.freshWood(v < 3 ? 'pine' : 'palm')]));
+      void bark;
+      const box = new THREE.BoxGeometry(0.1, 0.1, 0.1);
+      box.setAttribute('aWood', new THREE.Float32BufferAttribute(new Float32Array(box.attributes.position.count), 1));
+      g.add(new THREE.Mesh(box, this.footMaterial(v < 3 ? 'pine' : 'palm')));
       for (const p of this.variants[v]) g.add(new THREE.Mesh(p.geometry, p.material));
     }
     for (const m of [pineCutMaterial(), palmMaterials().cut]) g.add(new THREE.Mesh(new THREE.CircleGeometry(0.1, 6), m));
@@ -385,47 +390,74 @@ export class Forest {
     return out;
   }
 
+  /** Half the height (m, world) of the bite at the bark for a bite depth fraction D. */
+  private static biteHalfHeight(D: number): number {
+    const pts = [
+      [0, 0],
+      [0.25, 0.055],
+      [0.55, 0.085],
+      [0.8, 0.12],
+      [0.9, 0.13],
+    ];
+    for (let k = 1; k < pts.length; k++) {
+      if (D <= pts[k][0]) {
+        const [x0, y0] = pts[k - 1];
+        const [x1, y1] = pts[k];
+        return y0 + ((D - x0) / (x1 - x0)) * (y1 - y0);
+      }
+    }
+    return 0.13;
+  }
+
   /**
-   * Rebuild the foot of a tree being chopped as one closed tube of dense rings, matching
-   * the trunk ring for ring at the top so it joins seamlessly. Rings near the cut are
-   * pulled in toward the axis: a wedge bitten from the side facing the player, deepening
-   * with damage, then an hourglass down to a thin core; the edges are jagged, and the
-   * faces pulled in show pale split wood. Above the cut it bends with the tree's lean.
+   * Rebuild the foot of a tree being chopped as one closed tube of rings, matching the
+   * trunk ring for ring at the top so it joins seamlessly. Rings through the cut are very
+   * dense and pulled in toward the axis: a narrow wedge bitten from the side facing the
+   * player, deepening with damage, then an hourglass down to a thin core. The bite is only
+   * ~11 / 17 / 24 cm tall over three blows; its edge wavers around the trunk, and the faces
+   * pulled in show pale split wood. Optional: bend above the cut with the lean, and close
+   * the top (the stump) or the bottom (the falling butt) where it parts.
    */
-  private buildFoot(w: Wounded, from = 0, to = w.yTop, intact = false): THREE.BufferGeometry {
+  private buildFoot(w: Wounded, opt: { from?: number; to?: number; deform?: boolean; bend?: boolean; cap?: 'top' | 'bottom' } = {}): THREE.BufferGeometry {
+    const from = opt.from ?? 0;
+    const to = opt.to ?? w.yTop;
+    const deform = opt.deform ?? true;
+    const bendOn = opt.bend ?? true;
     const spec = w.spec;
-    const S = 6;
+    const S = 14;
     const M = spec.sides * S;
     const cutM = w.cutM;
-    // Rings: sparse at the foot, dense through the cut, then up to the trunk ring at yTop.
-    const hs: number[] = [];
-    const push = (h: number) => {
-      if (h >= from - 1e-6 && h <= to + 1e-6 && (!hs.length || h > hs[hs.length - 1] + 1e-4)) hs.push(h);
-    };
-    push(from);
-    for (let h = 0.25; h < cutM - 0.42; h += 0.25) push(h);
-    for (let h = cutM - 0.42; h <= cutM + 0.42 + 1e-6; h += 0.02) push(h);
-    for (let h = cutM + 0.6; h < to - 0.05; h += 0.2) push(h);
-    push(to);
-
     const frac = THREE.MathUtils.clamp(1 - Math.max(0, w.tree.hp) / w.tree.maxHp, 0, 1);
-    const D = intact ? 0 : Forest.depthFrac(frac);
+    const D = deform ? Forest.depthFrac(frac) : 0;
     const R = w.r;
     const depth = 2 * R * D;
-    const K = 0.62;
+    const hM = Math.max(1e-3, Forest.biteHalfHeight(D) / w.tree.scale);
+    const K = depth > 0 ? hM / depth : 1;
     const core = R * (1 - 0.74 * THREE.MathUtils.smoothstep(D, 0.6, 0.85));
+
+    // Rings: sparse at the foot and above, very dense through the bite.
+    const set = new Set<number>([from, to]);
+    for (let h = 0.25; h < to; h += 0.25) set.add(h);
+    const band = hM + 0.03;
+    for (let h = cutM - band; h <= cutM + band + 1e-6; h += 0.003) set.add(h);
+    set.add(cutM);
+    const hs = [...set].filter((h) => h >= from - 1e-6 && h <= to + 1e-6).sort((a, b) => a - b);
+    const clean: number[] = [];
+    for (const h of hs) if (!clean.length || h > clean[clean.length - 1] + 1e-4) clean.push(h);
+
     const axisM = w.axisModel;
     const pivot = new THREE.Vector3(0, cutM, 0);
     const q = new THREE.Quaternion();
     const pos: number[] = [];
     const nor: number[] = [];
     const uv: number[] = [];
-    const wood: boolean[] = [];
+    const wood: number[] = [];
     const v = new THREE.Vector3();
     const n = new THREE.Vector3();
-    for (const h of hs) {
+    const spread = THREE.MathUtils.lerp(0.72, 0.2, THREE.MathUtils.smoothstep(D, 0.25, 0.75));
+    for (const h of clean) {
       const c = spec.center(h);
-      const bend = intact ? 0 : w.lean * THREE.MathUtils.smoothstep(h, cutM, cutM + 0.12);
+      const bend = bendOn ? w.lean * THREE.MathUtils.smoothstep(h, cutM, cutM + 0.12) : 0;
       q.setFromAxisAngle(axisM, bend);
       for (let m = 0; m <= M; m++) {
         const j = Math.floor(m / S);
@@ -443,21 +475,19 @@ export class Forest {
         const dy = h - cutM;
         let s = rr;
         if (D > 0) {
-          // Jagged edges: the wedge's reach wavers around the trunk and along it.
-          const jag = 0.5 * Math.sin(th * 5 + w.ph[0]) + 0.3 * Math.sin(th * 11 + h * 37 + w.ph[1]) + 0.2 * Math.sin(h * 71 + th * 3 + w.ph[2]);
-          const dyE = Math.abs(dy) * (1 + 0.22 * jag);
-          // The bite is narrow at first and widens as it deepens (never a full half-ring).
-          const spread = THREE.MathUtils.lerp(0.72, 0.2, THREE.MathUtils.smoothstep(D, 0.25, 0.75));
+          // The bite's reach wavers smoothly around the trunk (axe strokes), not ring by ring.
+          const jag = 0.6 * Math.sin(th * 5 + w.ph[0]) + 0.4 * Math.sin(th * 11 + w.ph[1]);
+          const dyE = Math.abs(dy) * (1 + 0.18 * jag);
           const T = R - depth * THREE.MathUtils.smoothstep(cos, spread, 0.97) + dyE / K;
           if (cos > 0.02) {
             if (rr * cos > T) s = Math.max(T / cos, R * 0.05);
           } else if (T < 0 && rr * cos > T) s = R * 0.05;
           // Hourglass: the last blows bite all the way round, leaving a thin core.
-          s = Math.min(s, core + dyE / 0.6);
-          if (s < rr - 1e-4) s *= 1 + 0.05 * Math.sin(th * 17 + h * 93 + w.ph[3]);
+          if (core < R) s = Math.min(s, core + (R - core) * (dyE / hM));
+          if (s < rr - 1e-4) s *= 1 + 0.035 * Math.sin(th * 17 + dy * 60 + w.ph[3]);
           s = Math.min(s, rr);
         }
-        const isWood = rr - s > 0.006;
+        const isWood = THREE.MathUtils.clamp((rr - s - 0.002) / 0.008, 0, 1);
         v.set(c.x + ux * s, p.y, c.z + uz * s);
         n.set(ux, 0, uz);
         if (bend) {
@@ -473,33 +503,58 @@ export class Forest {
       }
     }
     const row = M + 1;
-    const barkIdx: number[] = [];
-    const woodIdx: number[] = [];
-    for (let i = 0; i < hs.length - 1; i++) {
+    const idx: number[] = [];
+    for (let i = 0; i < clean.length - 1; i++) {
       for (let j = 0; j < M; j++) {
         const a = i * row + j;
         const b = (i + 1) * row + j;
-        const tris = [
-          [a, b, a + 1],
-          [b, b + 1, a + 1],
-        ];
-        for (const t of tris) (t.some((k) => wood[k]) ? woodIdx : barkIdx).push(...t);
+        idx.push(a, b, a + 1, b, b + 1, a + 1);
       }
+    }
+    // Where it parts, close the end with split wood: a low fibrous point, never a flat disc.
+    if (opt.cap) {
+      const top = opt.cap === 'top';
+      const ringStart = top ? (clean.length - 1) * row : 0;
+      let cx = 0;
+      let cy = 0;
+      let cz = 0;
+      for (let m = 0; m < M; m++) {
+        cx += pos[(ringStart + m) * 3];
+        cy += pos[(ringStart + m) * 3 + 1];
+        cz += pos[(ringStart + m) * 3 + 2];
+      }
+      const ci = pos.length / 3;
+      // A small splintered tip a little proud of the ring (up on the stump, down on the butt).
+      pos.push(cx / M, cy / M + (top ? 0.012 : -0.012), cz / M);
+      nor.push(0, top ? 1 : -1, 0);
+      uv.push(0.5, 0.5);
+      wood.push(1);
+      for (let m = 0; m < M; m++) {
+        const a = ringStart + m;
+        const b = ringStart + m + 1;
+        if (top) idx.push(a, b, ci);
+        else idx.push(a, ci, b);
+        // The rim where it parted is split wood too.
+        wood[a] = 1;
+      }
+      wood[ringStart + M] = 1;
     }
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
     g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
     g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
-    g.setIndex([...barkIdx, ...woodIdx]);
-    g.addGroup(0, barkIdx.length, 0);
-    g.addGroup(barkIdx.length, woodIdx.length, 1);
+    g.setAttribute('aWood', new THREE.Float32BufferAttribute(wood, 1));
+    g.setIndex(idx);
     // Bitten faces take their own shading; the intact bark keeps the trunk's radial normals.
-    if (woodIdx.length) {
+    if (wood.some((x) => x > 0)) {
       const smooth = g.clone();
       smooth.computeVertexNormals();
       const sn = smooth.attributes.normal;
       const gn = g.attributes.normal;
-      for (let k = 0; k < wood.length; k++) if (wood[k] || (k >= row && wood[k - row]) || (k + row < wood.length && wood[k + row])) gn.setXYZ(k, sn.getX(k), sn.getY(k), sn.getZ(k));
+      for (let k = 0; k < wood.length; k++) {
+        const near = wood[k] > 0 || (k >= row && wood[k - row] > 0) || (k + row < wood.length && wood[k + row] > 0);
+        if (near) gn.setXYZ(k, sn.getX(k), sn.getY(k), sn.getZ(k));
+      }
       smooth.dispose();
     }
     return g;
@@ -545,7 +600,6 @@ export class Forest {
     }
     pivot.add(upper);
     const footFrame = frame(0);
-    const bark = parts[0].material as THREE.Material;
     const rCut = this.trunkSpecs[t.variant].ring(cutM, 0).sub(spec.center(cutM));
     const r = mulberry32(i * 7 + 3);
     const w: Wounded = {
@@ -553,7 +607,7 @@ export class Forest {
       group,
       pivot,
       upper,
-      foot: new THREE.Mesh(new THREE.BufferGeometry(), [bark, this.freshWood(t.kind)]),
+      foot: new THREE.Mesh(new THREE.BufferGeometry(), this.footMaterial(t.kind)),
       spec,
       away,
       axis,
@@ -578,6 +632,38 @@ export class Forest {
     this.group.add(group);
     this.wounded.set(i, w);
     return w;
+  }
+
+  private footMats: Partial<Record<'pine' | 'palm', THREE.MeshStandardMaterial>> = {};
+  /**
+   * The bark of the rebuilt foot, blending into fresh split wood by a per-vertex weight
+   * (aWood) with a soft threshold, so the edge between bark and bitten wood follows the
+   * bite as a clean, torn line instead of stepping triangle by triangle.
+   */
+  private footMaterial(kind: 'pine' | 'palm'): THREE.MeshStandardMaterial {
+    let m = this.footMats[kind];
+    if (m) return m;
+    const bark = (kind === 'palm' ? palmMaterials().trunk : barkMaterial()).clone();
+    const woodMap = this.freshWood(kind).map!;
+    bark.onBeforeCompile = (sh) => {
+      sh.uniforms.woodMap = { value: woodMap };
+      sh.vertexShader = 'attribute float aWood;\nvarying float vWood;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n  vWood = aWood;');
+      sh.fragmentShader =
+        'uniform sampler2D woodMap;\nvarying float vWood;\n' +
+        sh.fragmentShader
+          .replace(
+            '#include <map_fragment>',
+            `#include <map_fragment>
+  float woodK = smoothstep(0.42, 0.58, vWood);
+  vec3 woodC = texture2D(woodMap, vMapUv * vec2(2.0, 3.0)).rgb;
+  diffuseColor.rgb = mix(diffuseColor.rgb, woodC, woodK);`,
+          )
+          .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n  totalEmissiveRadiance += woodC * 0.1 * woodK;')
+          .replace('#include <normal_fragment_maps>', 'if (vWood < 0.42) {\n#include <normal_fragment_maps>\n}');
+    };
+    bark.customProgramCacheKey = () => `foot-blend-${kind}`;
+    this.footMats[kind] = bark;
+    return bark;
   }
 
   private freshWoodMats: Partial<Record<'pine' | 'palm', THREE.MeshStandardMaterial>> = {};
@@ -729,17 +815,21 @@ export class Forest {
     // The thin core snaps: the foot becomes the stump, its top at the cut, and the tree
     // above falls hinging there, from the lean it already had. Its butt is the trunk from
     // the cut up to the foot's top ring, closed by a clean cut cap.
-    this.writeStump(i, w.cutM);
-    w.group.remove(w.foot.parent!);
+    // The thin core snaps where it is thinnest: the bitten foot is split there. Its lower
+    // half stays as the stump (a low, split-wood point), its upper half goes with the tree
+    // as the butt (pointed and splintered too), so nothing straightens out as it falls.
+    const footFrame = w.foot.parent!;
+    w.group.remove(footFrame);
     w.foot.geometry.dispose();
-    const butt = new THREE.Mesh(this.buildFoot(w, w.cutM, w.yTop, true), [w.foot.material as THREE.Material[]][0]);
+    w.foot.geometry = this.buildFoot(w, { to: w.cutM, bend: false, cap: 'top' });
+    const stump = new THREE.Group();
+    stump.position.set(t.x, t.y, t.z);
+    stump.add(footFrame);
+    this.group.add(stump);
+    this.choppedStumps.set(i, stump);
+    const butt = new THREE.Mesh(this.buildFoot(w, { from: w.cutM, bend: false, cap: 'bottom' }), w.foot.material);
     butt.castShadow = true;
     w.upper.add(butt);
-    const c0 = w.spec.center(w.cutM);
-    const cap = new THREE.Mesh(new THREE.CircleGeometry(w.r * 1.06, 18), t.kind === 'palm' ? palmMaterials().cut : pineCutMaterial());
-    cap.rotation.x = Math.PI / 2;
-    cap.position.set(c0.x, w.cutM, c0.z);
-    w.upper.add(cap);
     const cut = w.cut;
     const base = new THREE.Vector3(t.x, t.y + cut, t.z);
     const { group, pivot } = w;

@@ -403,9 +403,10 @@ export class SoundEngine {
     this.tone({ type: 'triangle', f0: 1300, f1: 700, gain: 0.08, decay: 0.06, when: 0.11 });
   }
 
-  treeCreak(): void {
+  /** `level` 0..1: full for a falling tree, low for one nearly cut through. */
+  treeCreak(level = 1): void {
     if (!this.ctx) return;
-    if (this.play('creak', { gain: 0.85, vary: 0.02 })) return;
+    if (this.play('creak', { gain: 0.85 * level, vary: 0.02 })) return;
     const ctx = this.ctx;
     const t = ctx.currentTime;
     const o = ctx.createOscillator();

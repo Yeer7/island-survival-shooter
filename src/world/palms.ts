@@ -13,6 +13,8 @@ import { detailTextures } from './textures';
 export const PALM_CUT = 0.85;
 const STRAIGHT = 0.7;
 
+import type { TrunkSpec } from './pines';
+
 export interface PalmVariant {
   /** Whole palm for the instanced forest. */
   standing: InstancePart[];
@@ -22,6 +24,7 @@ export interface PalmVariant {
   spine: { p: THREE.Vector3; r: number }[];
   /** Trunk axis point, radius and polygon side count at height h (model space). */
   trunkAt(h: number): { c: THREE.Vector3; r: number; sides: number };
+  trunk: TrunkSpec;
   height: number;
 }
 
@@ -223,6 +226,23 @@ export function buildPalmVariants(): PalmVariant[] {
       spine,
       height: H,
       trunkAt: (h: number) => ({ c: spineAt(h).clone(), r: palmRadius(h), sides: 10 }),
+      trunk: {
+        sides: 10,
+        ring: (h: number, j: number) => {
+          const c = spineAt(h);
+          const t = tangentAt(h);
+          const n2 = new THREE.Vector3(t.y, -t.x, 0);
+          const phi = (j / 10) * Math.PI * 2;
+          const rad = palmRadius(h);
+          return c.addScaledVector(n2, Math.cos(phi) * rad).add(new THREE.Vector3(0, 0, Math.sin(phi) * rad));
+        },
+        center: (h: number) => spineAt(h),
+        uv: (j: number, h: number) => [j / 10, h / 0.6],
+        rows: (() => {
+          const n = Math.ceil(H / 0.1);
+          return Array.from({ length: n + 1 }, (_, i) => (H * i) / n);
+        })(),
+      },
     };
   });
 }

@@ -7,7 +7,7 @@ import { LAKE_CENTER, LAKE_LEVEL, LAKE_RADIUS, Terrain } from './terrain';
 import { detailTextures } from './textures';
 import { buildBushVariants, bushMaterials } from './bushes';
 import { PALM_CUT, buildPalmVariants, palmMaterials, palmStumpGeometry } from './palms';
-import { PINE_CUT, barkMaterial, buildPineVariants, needleMaterial, pineCutMaterial, pineStumpGeometry } from './pines';
+import { PINE_CUT, TrunkSpec, barkMaterial, buildPineVariants, needleMaterial, pineCutMaterial, pineStumpGeometry } from './pines';
 import { SEA_LEVEL } from './terrain';
 
 export interface Exclusion {
@@ -128,44 +128,38 @@ interface FallingTree {
 /** A tree being chopped: drawn on its own so its notch can deepen and the tree can shake. */
 interface Wounded {
   tree: Tree;
+  /** At the tree's foot: shakes as a whole. */
   group: THREE.Group;
+  /** At the cut: carries the part above, leans and finally falls. */
   pivot: THREE.Group;
-  /** Everything above the cut (on the pivot) and the foot below it (static). */
   upper: THREE.Group;
-  lower: THREE.Group;
-  faceUp: THREE.Mesh;
-  faceDown: THREE.Mesh;
-  coreUp: THREE.Mesh;
-  notch: NotchUniforms;
-  /** Horizontal direction (world) the tree leans and shakes away from the player. */
+  /** The rebuilt foot of the trunk (bark + bitten wood). */
+  foot: THREE.Mesh;
+  spec: TrunkSpec;
+  /** Horizontal direction (world) the tree leans away from the player, and its axis. */
   away: THREE.Vector3;
   axis: THREE.Vector3;
+  axisModel: THREE.Vector3;
   lean: number;
   leanTarget: number;
+  /** Lean the foot mesh was last bent to. */
+  builtLean: number;
   shakeT: number;
   shakeAmp: number;
-  /** Notch frame in model space: trunk centre at the cut, direction to the player, radius. */
-  cx: number;
-  cz: number;
+  /** Direction to the player in model space (the side the axe bites). */
   dx: number;
   dz: number;
-  /** Radius just inside the bark at the cut, and the bark's typical radius there. */
+  /** Trunk radius at the cut (model space), and jag phases. */
   r: number;
-  outer: number;
-  /** Cut height in model space and in metres above the foot. */
+  ph: number[];
+  /** Cut height in model space and in metres; top of the rebuilt foot (a trunk ring). */
   cutM: number;
   cut: number;
+  yTop: number;
 }
 
-interface NotchUniforms {
-  uNotch: { value: THREE.Vector4 };
-  uNotchDir: { value: THREE.Vector2 };
-  uNotchDepth: { value: number };
-  uNotchK: { value: number };
-}
-
-/** Slope of each face of the V notch (rise per metre of depth). */
-const NOTCH_K = 0.62;
+/** Height (m) where every tree is felled: a low, natural stump. */
+const CUT_HEIGHT = 0.78;
 
 export interface ForestEvents {
   onFallStart(tree: Tree): void;
@@ -189,7 +183,8 @@ export class Forest {
   private palmStumps: InstancedSet;
   private falling: FallingTree[] = [];
   private wounded = new Map<number, Wounded>();
-  private trunkFns: ((h: number) => { c: THREE.Vector3; r: number; sides: number })[] = [];
+  private trunkSpecs: TrunkSpec[] = [];
+  private barkAboveCache = new Map<string, THREE.BufferGeometry>();
   private dummy = new THREE.Object3D();
   private q = new THREE.Quaternion();
   private zero = new THREE.Matrix4().makeScale(0, 0, 0);
@@ -200,7 +195,7 @@ export class Forest {
     const pinesV = buildPineVariants();
     this.variants = [...pinesV.map((v) => v.standing), ...palmsV.map((v) => v.standing)];
     this.fallParts = [...pinesV.map((v) => v.falling), ...palmsV.map((v) => v.falling)];
-    this.trunkFns = [...pinesV.map((v) => v.trunkAt), ...palmsV.map((v) => v.trunkAt)];
+    this.trunkSpecs = [...pinesV.map((v) => v.trunk), ...palmsV.map((v) => v.trunk)];
     const pineSpine: { p: THREE.Vector3; r: number }[] = [];
     for (let y = 1; y <= TREE_HEIGHT; y += 0.75) {
       const crown = y < 2 ? 0 : 2.3 * (1 - (y - 2) / (TREE_HEIGHT - 2));
@@ -315,7 +310,7 @@ export class Forest {
       const height = (palm ? PALM_HEIGHT : TREE_HEIGHT) * scale;
       const collider = colliders.add({ x: p.x, z: p.z, r: (palm ? 0.32 : 0.42) * scale, y0: y, y1: y + height, kind: 'tree', ref: i });
       // A palm comes down in 3 axe blows; a pine takes 4.
-      const hp = palm ? 75 : 100;
+      const hp = 100;
       const tree: Tree = { x: p.x, y, z: p.z, scale, rotY: rand() * Math.PI * 2, hp, maxHp: hp, state: 'alive', collider, variant, slot: 0, kind: p.kind };
       this.dummy.position.set(p.x, y, p.z);
       this.dummy.rotation.set(0, tree.rotY, 0);
@@ -354,219 +349,239 @@ export class Forest {
     for (const mm of set.meshes) mm.computeBoundingSphere();
   }
 
-  /** Builds the chopping and falling materials once so their shaders compile at load. */
+  /** Builds the chopping materials once so their shaders compile at load, not mid-play. */
   makeWarmupObject(): THREE.Object3D {
     const g = new THREE.Group();
-    const u = this.notchUniforms();
     for (const v of [0, this.variants.length - 1]) {
-      for (const p of this.variants[v]) g.add(new THREE.Mesh(p.geometry, this.notched(p.material as THREE.Material, u, 1)));
+      const bark = this.variants[v][0].material as THREE.Material;
+      g.add(new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.1), [bark, this.freshWood(v < 3 ? 'pine' : 'palm')]));
+      for (const p of this.variants[v]) g.add(new THREE.Mesh(p.geometry, p.material));
     }
-    for (const k of ['pine', 'palm'] as const) {
-      g.add(new THREE.Mesh(new THREE.PlaneGeometry(0.1, 0.1), this.freshWood(k)));
-      g.add(new THREE.Mesh(new THREE.PlaneGeometry(0.1, 0.1), this.notched(this.freshWood(k), u, 0)));
-    }
+    for (const m of [pineCutMaterial(), palmMaterials().cut]) g.add(new THREE.Mesh(new THREE.CircleGeometry(0.1, 6), m));
     return g;
   }
 
-  private notchUniforms(): NotchUniforms {
-    return {
-      uNotch: { value: new THREE.Vector4(0, 0, 0, 0.3) },
-      uNotchDir: { value: new THREE.Vector2(1, 0) },
-      uNotchDepth: { value: 0 },
-      uNotchK: { value: NOTCH_K },
-    };
-  }
-
-  /**
-   * A copy of a material that (in the model's own space) discards the V wedge of the
-   * felling notch, and optionally everything below (clip 1) or above (clip -1) the cut,
-   * so a standing trunk can be split into the piece that falls and the piece that stays.
-   * All copies share one shader program; the wedge uniforms are shared per tree.
-   */
-  private notched(base: THREE.Material, u: NotchUniforms, clip: number): THREE.Material {
-    const m = base.clone();
-    const prev = base.onBeforeCompile;
-    const key = base.customProgramCacheKey();
-    const uClip = { value: new THREE.Vector2(clip, u.uNotch.value.z) };
-    m.userData.clip = uClip;
-    m.onBeforeCompile = (sh, r) => {
-      prev.call(m, sh, r);
-      Object.assign(sh.uniforms, u, { uClip });
-      sh.vertexShader = 'varying vec3 vNotchP;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n  vNotchP = position;');
-      sh.fragmentShader =
-        'uniform vec4 uNotch;\nuniform vec2 uNotchDir;\nuniform float uNotchDepth;\nuniform float uNotchK;\nuniform vec2 uClip;\nvarying vec3 vNotchP;\n' +
-        sh.fragmentShader.replace(
-          'void main() {',
-          `void main() {
-  {
-    if (uClip.x > 0.5 && vNotchP.y < uClip.y) discard;
-    if (uClip.x < -0.5 && vNotchP.y > uClip.y) discard;
-    float nd = dot(vNotchP.xz - uNotch.xy, uNotchDir);
-    float nv = vNotchP.y - uNotch.z;
-    if (uNotchDepth > 0.0 && abs(nv) < (nd - uNotch.w + uNotchDepth) * uNotchK) discard;
-  }`,
-        );
-    };
-    m.customProgramCacheKey = () => key + '-notch2';
-    return m;
-  }
-
-  /**
-   * Trunk axis and radius (model space) at a height, from the trunk's own construction:
-   * `inner` sits just inside the flat facets of the bark polygon (so the notch's wood never
-   * shows outside it), `outer` is the bark's radius at its corners.
-   */
-  private trunkAt(variant: number, yM: number): { cx: number; cz: number; inner: number; outer: number } {
-    const at = this.trunkFns[variant](yM);
-    // Thinnest bark over the whole height the V and its wood core can span, so neither
-    // pokes out where the trunk narrows or its bark ripples.
-    // The axis drifts with the trunk's curve, so a straight core must also clear that drift.
-    const facet = Math.cos(Math.PI / at.sides);
-    let lo = at.r * facet;
-    for (let h = yM - 0.45; h <= yM + 0.45; h += 0.02) {
-      const q = this.trunkFns[variant](h);
-      lo = Math.min(lo, q.r * facet - Math.hypot(q.c.x - at.c.x, q.c.z - at.c.z));
+  /** The standing bark mesh with everything below `yTop` removed (cached per variant/height). */
+  private barkAbove(variant: number, yTop: number): THREE.BufferGeometry {
+    const key = `${variant}:${yTop.toFixed(4)}`;
+    const known = this.barkAboveCache.get(key);
+    if (known) return known;
+    const src = this.variants[variant][0].geometry;
+    const g = src.index ? src.toNonIndexed() : src.clone();
+    const p = g.attributes.position;
+    const keep: number[] = [];
+    for (let t = 0; t < p.count; t += 3) {
+      if (Math.min(p.getY(t), p.getY(t + 1), p.getY(t + 2)) >= yTop - 0.02) keep.push(t);
     }
-    return { cx: at.c.x, cz: at.c.z, inner: lo * 0.985, outer: at.r };
+    const out = new THREE.BufferGeometry();
+    for (const name of Object.keys(g.attributes)) {
+      const a = g.attributes[name];
+      const n = a.itemSize;
+      const arr = new Float32Array(keep.length * 3 * n);
+      keep.forEach((t, k) => arr.set((a.array as Float32Array).subarray(t * n, (t + 3) * n), k * 3 * n));
+      out.setAttribute(name, new THREE.BufferAttribute(arr, n));
+    }
+    this.barkAboveCache.set(key, out);
+    return out;
   }
 
   /**
-   * One face of the V notch, in model space: the plane from the apex line (depth into the
-   * trunk) out to the bark at slope NOTCH_K, up (side 1) or down (side -1), clipped to the
-   * trunk's inner circle so it never pokes out of the bark.
+   * Rebuild the foot of a tree being chopped as one closed tube of dense rings, matching
+   * the trunk ring for ring at the top so it joins seamlessly. Rings near the cut are
+   * pulled in toward the axis: a wedge bitten from the side facing the player, deepening
+   * with damage, then an hourglass down to a thin core; the edges are jagged, and the
+   * faces pulled in show pale split wood. Above the cut it bends with the tree's lean.
    */
-  private notchFace(w: Wounded, depth: number, side: 1 | -1): THREE.BufferGeometry {
+  private buildFoot(w: Wounded, from = 0, to = w.yTop, intact = false): THREE.BufferGeometry {
+    const spec = w.spec;
+    const S = 6;
+    const M = spec.sides * S;
+    const cutM = w.cutM;
+    // Rings: sparse at the foot, dense through the cut, then up to the trunk ring at yTop.
+    const hs: number[] = [];
+    const push = (h: number) => {
+      if (h >= from - 1e-6 && h <= to + 1e-6 && (!hs.length || h > hs[hs.length - 1] + 1e-4)) hs.push(h);
+    };
+    push(from);
+    for (let h = 0.25; h < cutM - 0.42; h += 0.25) push(h);
+    for (let h = cutM - 0.42; h <= cutM + 0.42 + 1e-6; h += 0.02) push(h);
+    for (let h = cutM + 0.6; h < to - 0.05; h += 0.2) push(h);
+    push(to);
+
+    const frac = THREE.MathUtils.clamp(1 - Math.max(0, w.tree.hp) / w.tree.maxHp, 0, 1);
+    const D = intact ? 0 : Forest.depthFrac(frac);
     const R = w.r;
-    const a = R - depth;
-    const Nd = 8;
-    const Ns = 10;
+    const depth = 2 * R * D;
+    const K = 0.62;
+    const core = R * (1 - 0.74 * THREE.MathUtils.smoothstep(D, 0.6, 0.85));
+    const axisM = w.axisModel;
+    const pivot = new THREE.Vector3(0, cutM, 0);
+    const q = new THREE.Quaternion();
     const pos: number[] = [];
-    const uv: number[] = [];
     const nor: number[] = [];
-    const idx: number[] = [];
-    const n = new THREE.Vector3(NOTCH_K * w.dx, -side, NOTCH_K * w.dz).normalize();
-    for (let i = 0; i <= Nd; i++) {
-      const d = a + (R - a) * (i / Nd);
-      const half = Math.sqrt(Math.max(0, R * R - d * d));
-      for (let j = 0; j <= Ns; j++) {
-        const sv = -half + (2 * half * j) / Ns;
-        pos.push(w.cx + w.dx * d - w.dz * sv, w.cutM + side * (d - a) * NOTCH_K, w.cz + w.dz * d + w.dx * sv);
-        // Fibres run along the trunk: u across the cut, v along the depth.
-        uv.push(0.5 + sv / (2 * R), (d - a) / (2 * R));
+    const uv: number[] = [];
+    const wood: boolean[] = [];
+    const v = new THREE.Vector3();
+    const n = new THREE.Vector3();
+    for (const h of hs) {
+      const c = spec.center(h);
+      const bend = intact ? 0 : w.lean * THREE.MathUtils.smoothstep(h, cutM, cutM + 0.12);
+      q.setFromAxisAngle(axisM, bend);
+      for (let m = 0; m <= M; m++) {
+        const j = Math.floor(m / S);
+        const f = (m % S) / S;
+        const a = spec.ring(h, j);
+        const b = spec.ring(h, Math.min(spec.sides, j + 1));
+        const p = a.lerp(b, f);
+        const rx = p.x - c.x;
+        const rz = p.z - c.z;
+        const rr = Math.hypot(rx, rz) || 1e-6;
+        const ux = rx / rr;
+        const uz = rz / rr;
+        const cos = ux * w.dx + uz * w.dz;
+        const th = Math.atan2(uz, ux);
+        const dy = h - cutM;
+        let s = rr;
+        if (D > 0) {
+          // Jagged edges: the wedge's reach wavers around the trunk and along it.
+          const jag = 0.5 * Math.sin(th * 5 + w.ph[0]) + 0.3 * Math.sin(th * 11 + h * 37 + w.ph[1]) + 0.2 * Math.sin(h * 71 + th * 3 + w.ph[2]);
+          const dyE = Math.abs(dy) * (1 + 0.22 * jag);
+          // The bite is narrow at first and widens as it deepens (never a full half-ring).
+          const spread = THREE.MathUtils.lerp(0.72, 0.2, THREE.MathUtils.smoothstep(D, 0.25, 0.75));
+          const T = R - depth * THREE.MathUtils.smoothstep(cos, spread, 0.97) + dyE / K;
+          if (cos > 0.02) {
+            if (rr * cos > T) s = Math.max(T / cos, R * 0.05);
+          } else if (T < 0 && rr * cos > T) s = R * 0.05;
+          // Hourglass: the last blows bite all the way round, leaving a thin core.
+          s = Math.min(s, core + dyE / 0.6);
+          if (s < rr - 1e-4) s *= 1 + 0.05 * Math.sin(th * 17 + h * 93 + w.ph[3]);
+          s = Math.min(s, rr);
+        }
+        const isWood = rr - s > 0.006;
+        v.set(c.x + ux * s, p.y, c.z + uz * s);
+        n.set(ux, 0, uz);
+        if (bend) {
+          v.sub(pivot).applyQuaternion(q).add(pivot);
+          n.applyQuaternion(q);
+        }
+        pos.push(v.x, v.y, v.z);
         nor.push(n.x, n.y, n.z);
+        const [u0, v0] = spec.uv(j, h);
+        const [u1] = spec.uv(Math.min(spec.sides, j + 1), h);
+        uv.push(u0 + (u1 - u0) * f, v0);
+        wood.push(isWood);
       }
     }
-    for (let i = 0; i < Nd; i++) {
-      for (let j = 0; j < Ns; j++) {
-        const q = i * (Ns + 1) + j;
-        idx.push(q, q + Ns + 1, q + 1, q + 1, q + Ns + 1, q + Ns + 2);
+    const row = M + 1;
+    const barkIdx: number[] = [];
+    const woodIdx: number[] = [];
+    for (let i = 0; i < hs.length - 1; i++) {
+      for (let j = 0; j < M; j++) {
+        const a = i * row + j;
+        const b = (i + 1) * row + j;
+        const tris = [
+          [a, b, a + 1],
+          [b, b + 1, a + 1],
+        ];
+        for (const t of tris) (t.some((k) => wood[k]) ? woodIdx : barkIdx).push(...t);
       }
     }
-    const p0 = new THREE.Vector3(pos[0], pos[1], pos[2]);
-    const p1 = new THREE.Vector3(pos[(Ns + 1) * 3], pos[(Ns + 1) * 3 + 1], pos[(Ns + 1) * 3 + 2]);
-    const p2 = new THREE.Vector3(pos[3], pos[4], pos[5]);
-    if (p1.sub(p0).cross(p2.sub(p0)).dot(n) < 0) for (let k = 0; k < idx.length; k += 3) [idx[k + 1], idx[k + 2]] = [idx[k + 2], idx[k + 1]];
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
     g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
     g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
-    g.setIndex(idx);
+    g.setIndex([...barkIdx, ...woodIdx]);
+    g.addGroup(0, barkIdx.length, 0);
+    g.addGroup(barkIdx.length, woodIdx.length, 1);
+    // Bitten faces take their own shading; the intact bark keeps the trunk's radial normals.
+    if (woodIdx.length) {
+      const smooth = g.clone();
+      smooth.computeVertexNormals();
+      const sn = smooth.attributes.normal;
+      const gn = g.attributes.normal;
+      for (let k = 0; k < wood.length; k++) if (wood[k] || (k >= row && wood[k - row]) || (k + row < wood.length && wood[k + row])) gn.setXYZ(k, sn.getX(k), sn.getY(k), sn.getZ(k));
+      smooth.dispose();
+    }
     return g;
   }
 
   /**
-   * At the first blow, swap the instance for the tree's own two pieces, split at the
-   * height the axe struck: the foot (static) and everything above (on a pivot that shakes,
-   * leans and finally falls). The trunk stays whole to the eye; only the V wedge is cut.
+   * At the first blow, swap the instance for the tree's own mesh: the trunk above yTop as
+   * it was, and its foot rebuilt as a solid tube that the axe bites into at a fixed, low,
+   * natural cut height. The whole tree sits on a group that shakes from the foot; the part
+   * above the cut sits on a pivot that leans and, at the last blow, falls.
    */
-  private wound(i: number, from: THREE.Vector3, hitY: number): Wounded {
+  private wound(i: number, from: THREE.Vector3): Wounded {
     const t = this.trees[i];
     this.sets[t.variant].set(t.slot, this.zero);
     for (const m of this.sets[t.variant].meshes) m.computeBoundingSphere();
-    const cut = THREE.MathUtils.clamp(hitY - t.y, 0.85, 1.35);
+    const spec = this.trunkSpecs[t.variant];
+    const cut = CUT_HEIGHT;
     const cutM = cut / t.scale;
-    const info = this.trunkAt(t.variant, cutM);
-    const u = this.notchUniforms();
+    const yTop = spec.rows.find((h) => h >= cutM + 0.45) ?? spec.rows[spec.rows.length - 1];
     const toPlayer = new THREE.Vector3(from.x - t.x, 0, from.z - t.z);
     if (toPlayer.lengthSq() < 1e-4) toPlayer.set(1, 0, 0);
     toPlayer.normalize();
     const local = toPlayer.clone().applyAxisAngle(this.yAxis, -t.rotY);
-    u.uNotch.value.set(info.cx, info.cz, cutM, info.inner);
-    u.uNotchDir.value.set(local.x, local.z);
-
-    const frame = () => {
+    const away = toPlayer.clone().negate();
+    const axis = new THREE.Vector3(away.z, 0, -away.x);
+    const frame = (y: number) => {
       const g = new THREE.Group();
       g.rotation.y = t.rotY;
       g.scale.setScalar(t.scale);
-      g.position.y = -cut;
+      g.position.y = y;
       return g;
     };
     const group = new THREE.Group();
-    group.position.set(t.x, t.y + cut, t.z);
+    group.position.set(t.x, t.y, t.z);
     const pivot = new THREE.Group();
-    const upper = frame();
-    const lower = frame();
-    for (const p of this.variants[t.variant]) {
-      const bark = p === this.variants[t.variant][0];
-      const mu = new THREE.Mesh(p.geometry, bark ? this.notched(p.material as THREE.Material, u, 1) : p.material);
-      mu.castShadow = true;
-      upper.add(mu);
-      if (bark) {
-        const ml = new THREE.Mesh(p.geometry, this.notched(p.material as THREE.Material, u, -1));
-        ml.castShadow = true;
-        lower.add(ml);
-      }
+    pivot.position.y = cut;
+    const upper = frame(-cut);
+    const parts = this.variants[t.variant];
+    for (const p of parts) {
+      const m = new THREE.Mesh(p === parts[0] ? this.barkAbove(t.variant, yTop) : p.geometry, p.material);
+      m.castShadow = true;
+      upper.add(m);
     }
     pivot.add(upper);
-    group.add(pivot, lower);
-    this.group.add(group);
-
-    const wood = this.freshWood(t.kind);
-    // A wood core just inside the bark, cut by the same wedge: any sliver between the bark's
-    // opening and the V faces shows solid wood, never the hollow inside of the trunk.
-    const coreH = 2 * info.inner * NOTCH_K + 0.05;
-    // (Built in model space: the wedge shader reads the raw vertex position.)
-    const coreMat = this.notched(wood, u, 0);
-    const coreGeo = (dy: number) => new THREE.CylinderGeometry(info.inner, info.inner, coreH, 20, 1, true).translate(info.cx, cutM + dy, info.cz);
-    const coreUp = new THREE.Mesh(coreGeo(coreH / 2), coreMat);
-    const coreDown = new THREE.Mesh(coreGeo(-coreH / 2), coreMat);
-    upper.add(coreUp);
-    lower.add(coreDown);
-
-    const away = toPlayer.clone().negate();
+    const footFrame = frame(0);
+    const bark = parts[0].material as THREE.Material;
+    const rCut = this.trunkSpecs[t.variant].ring(cutM, 0).sub(spec.center(cutM));
+    const r = mulberry32(i * 7 + 3);
     const w: Wounded = {
       tree: t,
       group,
       pivot,
       upper,
-      lower,
-      faceUp: new THREE.Mesh(new THREE.BufferGeometry(), wood),
-      faceDown: new THREE.Mesh(new THREE.BufferGeometry(), wood),
-      coreUp,
-      notch: u,
+      foot: new THREE.Mesh(new THREE.BufferGeometry(), [bark, this.freshWood(t.kind)]),
+      spec,
       away,
-      axis: new THREE.Vector3(away.z, 0, -away.x),
+      axis,
+      axisModel: axis.clone().applyAxisAngle(this.yAxis, -t.rotY),
       lean: 0,
       leanTarget: 0,
+      builtLean: -1,
       shakeT: 10,
       shakeAmp: 0,
-      cx: info.cx,
-      cz: info.cz,
       dx: local.x,
       dz: local.z,
-      r: info.inner,
-      outer: info.outer,
+      r: Math.hypot(rCut.x, rCut.z),
+      ph: [r() * 6, r() * 6, r() * 6, r() * 6],
       cutM,
       cut,
+      yTop,
     };
-    upper.add(w.faceUp);
-    lower.add(w.faceDown);
+    w.foot.castShadow = true;
+    w.foot.receiveShadow = true;
+    footFrame.add(w.foot);
+    group.add(footFrame, pivot);
+    this.group.add(group);
     this.wounded.set(i, w);
     return w;
   }
 
   private freshWoodMats: Partial<Record<'pine' | 'palm', THREE.MeshStandardMaterial>> = {};
-  /** Freshly split wood for the notch: pale, fibrous and torn along the grain. */
+  /** Freshly split wood for the bite: pale, fibrous and torn along the grain. */
   private freshWood(kind: 'pine' | 'palm'): THREE.MeshStandardMaterial {
     let m = this.freshWoodMats[kind];
     if (!m) {
@@ -575,16 +590,16 @@ export class Forest {
       cv.width = cv.height = S;
       const c = cv.getContext('2d')!;
       const r = mulberry32(kind === 'palm' ? 71 : 37);
-      c.fillStyle = kind === 'palm' ? '#d8c39a' : '#e6c690';
+      c.fillStyle = kind === 'palm' ? '#dcc69c' : '#ead0a0';
       c.fillRect(0, 0, S, S);
-      // Long fibres along the grain (v), lighter and darker, with torn splinter edges.
+      // Long fibres along the grain (v), lighter and darker, with torn splinter marks.
       for (let k = 0; k < 90; k++) {
         const x = r() * S;
-        const w = 0.6 + r() * 1.6;
-        c.fillStyle = r() < 0.5 ? `rgba(120,80,40,${0.08 + r() * 0.16})` : `rgba(255,240,210,${0.1 + r() * 0.2})`;
-        c.fillRect(x, 0, w, S);
+        const wd = 0.6 + r() * 1.6;
+        c.fillStyle = r() < 0.5 ? `rgba(120,80,40,${0.08 + r() * 0.16})` : `rgba(255,244,220,${0.1 + r() * 0.2})`;
+        c.fillRect(x, 0, wd, S);
       }
-      for (let k = 0; k < 14; k++) {
+      for (let k = 0; k < 18; k++) {
         c.strokeStyle = `rgba(90,60,30,${0.25 + r() * 0.25})`;
         c.lineWidth = 1;
         c.beginPath();
@@ -597,19 +612,22 @@ export class Forest {
       const tex = new THREE.CanvasTexture(cv);
       tex.colorSpace = THREE.SRGBColorSpace;
       tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+      tex.repeat.set(2, 3);
       tex.anisotropy = 4;
-      m = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.9, side: THREE.DoubleSide, emissive: 0x4a3520, emissiveIntensity: 0.45, emissiveMap: tex });
+      m = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.9, emissive: 0x4a3520, emissiveIntensity: 0.2, emissiveMap: tex });
       this.freshWoodMats[kind] = m;
     }
     return m;
   }
 
-  /** Map damage to notch depth: ~25 %, ~55 %, ~80 % of the trunk over three blows. */
+  /** Map damage to bite depth: ~25 %, ~55 %, ~80 % of the trunk over three blows. */
   private static depthFrac(frac: number): number {
     const pts = [
       [0, 0],
       [0.25, 0.25],
+      [0.34, 0.33],
       [0.5, 0.55],
+      [0.67, 0.75],
       [0.75, 0.8],
       [1, 0.9],
     ];
@@ -623,22 +641,20 @@ export class Forest {
     return 0.9;
   }
 
-  /** Deepen the notch to the damage done; shake the tree, and lean it when nearly through. */
+  /** Bite deeper to the damage done; a dry elastic shudder, and a lean when nearly through. */
   private chop(w: Wounded): void {
     const t = w.tree;
-    const frac = THREE.MathUtils.clamp(1 - Math.max(0, t.hp) / t.maxHp, 0, 1);
-    const depth = 2 * w.r * Forest.depthFrac(frac);
-    w.notch.uNotchDepth.value = depth;
-    for (const [mesh, side] of [
-      [w.faceUp, 1],
-      [w.faceDown, -1],
-    ] as const) {
-      mesh.geometry.dispose();
-      mesh.geometry = this.notchFace(w, depth, side);
-    }
     w.shakeT = 0;
-    w.shakeAmp = t.kind === 'palm' ? 0.03 : 0.022;
-    w.leanTarget = t.hp > 0 && t.hp / t.maxHp <= 0.3 ? 0.07 : 0;
+    w.shakeAmp = t.kind === 'palm' ? 0.022 : 0.016;
+    w.leanTarget = t.hp > 0 && t.hp / t.maxHp <= 0.3 ? 0.06 : 0;
+    w.foot.geometry.dispose();
+    w.foot.geometry = this.buildFoot(w);
+    w.builtLean = w.lean;
+  }
+
+  /** True when this tree has just been brought to its last blow (it creaks). */
+  nearlyThrough(t: Tree): boolean {
+    return t.state === 'alive' && t.hp > 0 && t.hp / t.maxHp <= 0.3;
   }
 
   /** Every tree being chopped (for leaf fall and checks). */
@@ -682,11 +698,11 @@ export class Forest {
   }
 
   /** Returns true when this hit felled the tree. */
-  damage(i: number, amount: number, from: THREE.Vector3, hitY = this.trees[i].y + 1.1): boolean {
+  damage(i: number, amount: number, from: THREE.Vector3): boolean {
     const t = this.trees[i];
     if (t.state !== 'alive') return false;
     t.hp -= amount;
-    const w = this.wounded.get(i) ?? this.wound(i, from, hitY);
+    const w = this.wounded.get(i) ?? this.wound(i, from);
     this.chop(w);
     if (t.hp > 0) return false;
     t.state = 'falling';
@@ -710,18 +726,26 @@ export class Forest {
     // It parts at the notch: the foot becomes the stump, its top exactly at the cut, and
     // the piece above falls hinging there, from the lean it already had, a clean cut cap
     // closing its base.
+    // The thin core snaps: the foot becomes the stump, its top at the cut, and the tree
+    // above falls hinging there, from the lean it already had. Its butt is the trunk from
+    // the cut up to the foot's top ring, closed by a clean cut cap.
     this.writeStump(i, w.cutM);
-    w.group.remove(w.lower);
-    w.upper.remove(w.faceUp, w.coreUp);
-    w.notch.uNotchDepth.value = 0;
-    const cap = new THREE.Mesh(new THREE.CircleGeometry(w.outer * 1.04, 18), t.kind === 'palm' ? palmMaterials().cut : pineCutMaterial());
+    w.group.remove(w.foot.parent!);
+    w.foot.geometry.dispose();
+    const butt = new THREE.Mesh(this.buildFoot(w, w.cutM, w.yTop, true), [w.foot.material as THREE.Material[]][0]);
+    butt.castShadow = true;
+    w.upper.add(butt);
+    const c0 = w.spec.center(w.cutM);
+    const cap = new THREE.Mesh(new THREE.CircleGeometry(w.r * 1.06, 18), t.kind === 'palm' ? palmMaterials().cut : pineCutMaterial());
     cap.rotation.x = Math.PI / 2;
-    cap.position.set(w.cx, w.cutM, w.cz);
+    cap.position.set(c0.x, w.cutM, c0.z);
     w.upper.add(cap);
     const cut = w.cut;
     const base = new THREE.Vector3(t.x, t.y + cut, t.z);
     const { group, pivot } = w;
     group.position.copy(base);
+    group.quaternion.identity();
+    pivot.position.set(0, 0, 0);
     const axis = new THREE.Vector3(dir.z, 0, -dir.x);
     const f: FallingTree = { tree: t, group, pivot, axis, dir, base, rest: Math.PI / 2, cut, cutM: w.cutM, angle: 0.02 + w.lean * 0.8, vel: 0.25, landed: -1, bounces: 0 };
     f.rest = this.restAngle(f);
@@ -779,11 +803,20 @@ export class Forest {
 
   update(dt: number): void {
     for (const w of this.wounded.values()) {
-      w.lean += (w.leanTarget - w.lean) * Math.min(1, dt * 3);
+      // A dry, elastic shudder from the foot after each blow, dying out fast.
       w.shakeT += dt;
-      const shake = w.shakeAmp * Math.exp(-5 * w.shakeT) * Math.sin(w.shakeT * 30);
-      this.q.setFromAxisAngle(w.axis, w.lean + shake);
+      const shake = w.shakeAmp * Math.exp(-7 * w.shakeT) * Math.sin(w.shakeT * 26);
+      this.q.setFromAxisAngle(w.axis, shake);
+      w.group.quaternion.copy(this.q);
+      // Nearly through: the part above the cut leans, the foot bending with it.
+      w.lean += (w.leanTarget - w.lean) * Math.min(1, dt * 2.5);
+      this.q.setFromAxisAngle(w.axis, w.lean);
       w.pivot.quaternion.copy(this.q);
+      if (Math.abs(w.lean - w.builtLean) > 0.002) {
+        w.foot.geometry.dispose();
+        w.foot.geometry = this.buildFoot(w);
+        w.builtLean = w.lean;
+      }
     }
     for (let k = this.falling.length - 1; k >= 0; k--) {
       const f = this.falling[k];

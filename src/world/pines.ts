@@ -116,12 +116,28 @@ const VARIANTS = [
   { height: 10.6, seed: 29, branches: 15 },
 ];
 
+
+/** How a trunk is built, so a chopped tree can rebuild its foot ring for ring. */
+export interface TrunkSpec {
+  /** Polygon sides of the trunk. */
+  sides: number;
+  /** Corner j (0..sides) of the trunk ring at height h, exactly as the trunk mesh places it. */
+  ring(h: number, j: number): THREE.Vector3;
+  /** Axis point at height h. */
+  center(h: number): THREE.Vector3;
+  /** Bark texture coordinates of corner j at height h. */
+  uv(j: number, h: number): [number, number];
+  /** Heights of the trunk mesh's rings, bottom to top. */
+  rows: number[];
+}
+
 export interface PineVariant {
   standing: InstancePart[];
   falling: InstancePart[];
   height: number;
   /** Trunk axis point, radius and polygon side count at height h (model space). */
   trunkAt(h: number): { c: THREE.Vector3; r: number; sides: number };
+  trunk: TrunkSpec;
 }
 
 /** Trunk radius at height h of a tree of height H. */
@@ -252,6 +268,21 @@ export function buildPineVariants(): PineVariant[] {
       ],
       height: H,
       trunkAt: (h: number) => ({ c: spine(h).clone(), r: radius(h), sides: 9 }),
+      trunk: {
+        sides: 9,
+        ring: (h: number, j: number) => {
+          const c = spine(h);
+          const phi = (j / 9) * Math.PI * 2;
+          const rad = radius(h);
+          return new THREE.Vector3(c.x + Math.cos(phi) * rad, h, c.z + Math.sin(phi) * rad);
+        },
+        center: (h: number) => spine(h),
+        uv: (j: number, h: number) => [(j / 9) * 2, h / 1.4],
+        rows: (() => {
+          const n = Math.ceil(H / 0.25);
+          return Array.from({ length: n + 1 }, (_, i) => (H * i) / n);
+        })(),
+      },
     };
   });
 }

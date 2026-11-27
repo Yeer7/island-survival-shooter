@@ -53,6 +53,10 @@ export interface Suitcase {
   color: number;
   contents: ItemType[];
   broken: boolean;
+  /** Hinged lid of the crash-site luggage: when broken it swings open instead of vanishing. */
+  lid?: THREE.Object3D;
+  /** Opening progress 0..1 once broken (luggage with a lid only). */
+  openT?: number;
 }
 
 // Luggage holds only survival supplies; sticks come from the forest floor.
@@ -134,7 +138,6 @@ const wingPlan = (side: number): Planform => ({
 const STUB_F = 0.19;
 const ENGINE_F = 5 / 14;
 
-const CASE_COLORS = [0x2f4f7f, 0x7a2e2e, 0x2d2d2d, 0x6b5b3e, 0x3e6b4f, 0x8a6a2a, 0x5a3f6b, 0x404a52];
 
 /** The broken airliner in its forest clearing: wake-up point, smoke, fire and luggage. */
 export class CrashSite {
@@ -853,21 +856,13 @@ export class CrashSite {
       [11.5, -8.0],
     ];
     casePositions.forEach(([lx, lz], i) => {
-      const color = CASE_COLORS[i];
-      const g = new THREE.Group();
-      const body = new THREE.Mesh(new THREE.BoxGeometry(0.72, 0.26, 0.5), std(color, 0.7));
-      body.castShadow = true;
-      const trim = new THREE.Mesh(new THREE.BoxGeometry(0.74, 0.04, 0.52), std(0x1a1a1a, 0.6));
-      const handle = new THREE.Mesh(new THREE.TorusGeometry(0.07, 0.015, 4, 8, Math.PI), std(0x111111, 0.6));
-      handle.position.set(0, 0, 0.27);
-      handle.rotation.x = Math.PI / 2;
-      const tag = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.005, 0.09), std(0xf4e04d, 0.5));
-      tag.position.set(0.2, 0.135, 0.1);
-      g.add(body, trim, handle, tag);
-      const pos = this.localToGround(lx, lz, 0.13);
-      g.position.copy(pos);
-      g.rotation.set((rand() - 0.5) * 0.15, rand() * 6, (rand() - 0.5) * 0.15);
-      this.suitcases.push({ mesh: g, pos, hp: 50, color, contents: CONTENTS[i], broken: false });
+      const color = CASE_STYLES[i].base;
+      const { group: g, lid } = buildSuitcase(i, rand);
+      const ground = this.localToGround(lx, lz, 0);
+      g.position.copy(ground);
+      g.rotation.set((rand() - 0.5) * 0.1, rand() * 6, (rand() - 0.5) * 0.1);
+      const pos = ground.clone().setY(ground.y + 0.14);
+      this.suitcases.push({ mesh: g, pos, hp: 50, color, contents: CONTENTS[i], broken: false, lid, openT: 0 });
     });
 
     // Wake up in the aisle near the rear, looking forward through the torn mouth.
@@ -1157,6 +1152,15 @@ export class CrashSite {
     if (this.emergencyLight) this.emergencyLight.intensity = 1.2 + 4.5 * Math.pow(0.5 + 0.5 * Math.sin(this.flicker * 2.2), 2);
     if (this.screenMat) this.screenMat.emissiveIntensity = Math.random() < 0.04 ? 0.05 : 0.45 + Math.sin(this.flicker * 13) * 0.1;
     this.fan.rotation.x += dt * 0.5;
+    // Broken luggage: the lid swings back on its hinge with a small bounce and settles.
+    for (const c of this.suitcases) {
+      if (!c.broken || !c.lid || (c.openT ?? 0) >= 1) continue;
+      c.openT = Math.min(1, (c.openT ?? 0) + dt / 0.55);
+      const t = c.openT;
+      const k = 1.70158;
+      const e = 1 + (k + 1) * Math.pow(t - 1, 3) + k * Math.pow(t - 1, 2);
+      c.lid.rotation.x = CASE_OPEN * e;
+    }
     this.sparkT -= dt;
     if (this.sparkT <= 0) {
       this.sparkT = 1.5 + Math.random() * 3.5;
@@ -1236,4 +1240,309 @@ export class Dock {
     if (along < -0.8 || along > this.length + 0.2 || Math.abs(across) > this.halfWidth) return null;
     return this.top;
   }
+}
+
+// ---------------------------------------------------------------------------------------
+// Hardshell luggage: two hollow, well-rounded polycarbonate halves joined by a black
+// zipper channel, with latches, a moulded side handle, a telescopic trolley handle at one
+// end, four spinner wheels at the other and a luggage tag. Each case has its own canvas
+// skin (pattern, moulded ribs as a bump map, scratches, scuffs and crash dirt). When the axe
+// breaks one, the lid swings back on its hinge to show the dark, empty lining.
+// ---------------------------------------------------------------------------------------
+
+type CaseStyle = { base: number; accent: number; pattern: 'gingham' | 'ribsV' | 'ribsH' | 'plain' | 'diamond'; metal?: number };
+const CASE_STYLES: CaseStyle[] = [
+  { base: 0xc98fb4, accent: 0xf6eef4, pattern: 'gingham' }, // pink / lilac check
+  { base: 0x2aa6a4, accent: 0x1d7f7e, pattern: 'ribsV' }, // turquoise with moulded ribs
+  { base: 0x1f2f55, accent: 0x2c4170, pattern: 'ribsH' }, // navy
+  { base: 0x6e1f2b, accent: 0x8a2d3a, pattern: 'diamond' }, // wine
+  { base: 0x7d838a, accent: 0x5c6268, pattern: 'ribsV', metal: 0.3 }, // silver graphite
+  { base: 0xc99a2e, accent: 0xa87d1e, pattern: 'plain' }, // mustard
+  { base: 0x5b6436, accent: 0x474f29, pattern: 'ribsH' }, // olive green
+  { base: 0x1c1c1e, accent: 0x2e2e31, pattern: 'diamond' }, // black
+];
+
+const hex = (c: number, a = 1) => `rgba(${(c >> 16) & 255},${(c >> 8) & 255},${c & 255},${a})`;
+
+/** Colour + bump skins for one case: pattern, ribs, scratches, scuffs and crash dirt. */
+function caseSkin(style: CaseStyle, seed: number): { map: THREE.CanvasTexture; bump: THREE.CanvasTexture } {
+  const S = 256;
+  const r = mulberry32(seed);
+  const cv = document.createElement('canvas');
+  const bv = document.createElement('canvas');
+  cv.width = cv.height = bv.width = bv.height = S;
+  const c = cv.getContext('2d')!;
+  const b = bv.getContext('2d')!;
+  c.fillStyle = hex(style.base);
+  c.fillRect(0, 0, S, S);
+  b.fillStyle = '#808080';
+  b.fillRect(0, 0, S, S);
+  // A soft sheen gradient so a flat face is never a flat colour.
+  const sheen = c.createLinearGradient(0, 0, S, S);
+  sheen.addColorStop(0, 'rgba(255,255,255,0.07)');
+  sheen.addColorStop(1, 'rgba(0,0,0,0.10)');
+  c.fillStyle = sheen;
+  c.fillRect(0, 0, S, S);
+  if (style.pattern === 'gingham') {
+    const n = 22;
+    const cell = S / n;
+    for (let i = 0; i < n; i++) {
+      for (let j = 0; j < n; j++) {
+        const a = (i % 2) + (j % 2);
+        if (a === 0) continue;
+        c.fillStyle = hex(style.accent, a === 2 ? 0.85 : 0.32);
+        c.fillRect(i * cell + 1, j * cell + 1, cell - 2, cell - 2);
+      }
+    }
+  } else if (style.pattern === 'ribsV' || style.pattern === 'ribsH') {
+    const n = 9;
+    for (let k = 0; k < n; k++) {
+      const t = ((k + 0.5) / n) * S;
+      const g = style.pattern === 'ribsV' ? b.createLinearGradient(t - 9, 0, t + 9, 0) : b.createLinearGradient(0, t - 9, 0, t + 9);
+      g.addColorStop(0, '#808080');
+      g.addColorStop(0.35, '#d8d8d8');
+      g.addColorStop(0.65, '#d8d8d8');
+      g.addColorStop(1, '#808080');
+      b.fillStyle = g;
+      if (style.pattern === 'ribsV') b.fillRect(t - 9, 0, 18, S);
+      else b.fillRect(0, t - 9, S, 18);
+      c.fillStyle = hex(style.accent, 0.55);
+      if (style.pattern === 'ribsV') c.fillRect(t + 7, 0, 3, S);
+      else c.fillRect(0, t + 7, S, 3);
+      c.fillStyle = 'rgba(255,255,255,0.10)';
+      if (style.pattern === 'ribsV') c.fillRect(t - 5, 0, 3, S);
+      else c.fillRect(0, t - 5, S, 3);
+    }
+  } else if (style.pattern === 'diamond') {
+    b.strokeStyle = '#c8c8c8';
+    b.lineWidth = 5;
+    c.strokeStyle = hex(style.accent, 0.8);
+    c.lineWidth = 2;
+    for (let k = -S; k < S * 2; k += 32) {
+      for (const ctx of [b, c]) {
+        ctx.beginPath();
+        ctx.moveTo(k, 0);
+        ctx.lineTo(k + S, S);
+        ctx.moveTo(k, S);
+        ctx.lineTo(k + S, 0);
+        ctx.stroke();
+      }
+    }
+  } else {
+    // Orange-peel grain of moulded polycarbonate.
+    for (let k = 0; k < 900; k++) {
+      b.fillStyle = r() < 0.5 ? '#8c8c8c' : '#747474';
+      b.fillRect(r() * S, r() * S, 2, 2);
+    }
+  }
+  // Scratches: pale on the colour (scuffed plastic), grooves in the bump.
+  for (let k = 0; k < 26; k++) {
+    const x = r() * S;
+    const y = r() * S;
+    const a = r() * Math.PI;
+    const l = 8 + r() * 40;
+    c.strokeStyle = `rgba(255,255,255,${0.12 + r() * 0.2})`;
+    c.lineWidth = 0.6 + r() * 0.8;
+    c.beginPath();
+    c.moveTo(x, y);
+    c.lineTo(x + Math.cos(a) * l, y + Math.sin(a) * l);
+    c.stroke();
+    b.strokeStyle = '#5a5a5a';
+    b.lineWidth = 1;
+    b.beginPath();
+    b.moveTo(x, y);
+    b.lineTo(x + Math.cos(a) * l, y + Math.sin(a) * l);
+    b.stroke();
+  }
+  // Dark scuffs and dents from the crash.
+  for (let k = 0; k < 7; k++) {
+    const x = r() * S;
+    const y = r() * S;
+    const g = c.createRadialGradient(x, y, 0, x, y, 6 + r() * 12);
+    g.addColorStop(0, 'rgba(20,16,12,0.35)');
+    g.addColorStop(1, 'rgba(20,16,12,0)');
+    c.fillStyle = g;
+    c.fillRect(0, 0, S, S);
+  }
+  // Earth from the ploughed clearing: heavier toward one edge (where it slid), plus splatter.
+  for (let k = 0; k < 22; k++) {
+    const x = r() * S;
+    const y = S * (0.45 + r() * 0.6);
+    const rad = 10 + r() * 34;
+    const g = c.createRadialGradient(x, y, 0, x, y, rad);
+    const a = 0.18 + r() * 0.3;
+    g.addColorStop(0, `rgba(74,52,32,${a})`);
+    g.addColorStop(0.6, `rgba(74,52,32,${a * 0.5})`);
+    g.addColorStop(1, 'rgba(74,52,32,0)');
+    c.fillStyle = g;
+    c.fillRect(0, 0, S, S);
+  }
+  for (let k = 0; k < 140; k++) {
+    c.fillStyle = `rgba(60,42,26,${0.25 + r() * 0.4})`;
+    const s = 1 + r() * 2.5;
+    c.fillRect(r() * S, S * (0.3 + r() * 0.7), s, s);
+  }
+  const map = new THREE.CanvasTexture(cv);
+  map.colorSpace = THREE.SRGBColorSpace;
+  map.anisotropy = 4;
+  const bump = new THREE.CanvasTexture(bv);
+  bump.anisotropy = 4;
+  return { map, bump };
+}
+
+let liningTex: THREE.CanvasTexture | null = null;
+/** Dark quilted lining fabric. */
+function lining(): THREE.CanvasTexture {
+  if (liningTex) return liningTex;
+  const S = 128;
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = S;
+  const c = cv.getContext('2d')!;
+  c.fillStyle = '#4a4252';
+  c.fillRect(0, 0, S, S);
+  c.strokeStyle = 'rgba(0,0,0,0.55)';
+  c.lineWidth = 2;
+  for (let k = -S; k < S * 2; k += 16) {
+    c.beginPath();
+    c.moveTo(k, 0);
+    c.lineTo(k + S, S);
+    c.moveTo(k, S);
+    c.lineTo(k + S, 0);
+    c.stroke();
+  }
+  c.strokeStyle = 'rgba(255,255,255,0.05)';
+  c.lineWidth = 1;
+  for (let k = -S; k < S * 2; k += 16) {
+    c.beginPath();
+    c.moveTo(k + 2, 0);
+    c.lineTo(k + 2 + S, S);
+    c.stroke();
+  }
+  liningTex = new THREE.CanvasTexture(cv);
+  liningTex.colorSpace = THREE.SRGBColorSpace;
+  liningTex.wrapS = liningTex.wrapT = THREE.RepeatWrapping;
+  liningTex.repeat.set(3, 3);
+  return liningTex;
+}
+
+/**
+ * A slice of a well-rounded box: every vertex is clamped into [ylo, yhi] and the caps the
+ * clamping flattens are dropped, so the result is an open shell (the lower or upper half
+ * of a suitcase, cut at its widest section) or a thin band round it (the zipper channel).
+ */
+function roundedSlice(w: number, h: number, d: number, radius: number, ylo: number, yhi: number): THREE.BufferGeometry {
+  const g = new RoundedBoxGeometry(w, h, d, 5, radius).toNonIndexed();
+  const p = g.attributes.position;
+  for (let i = 0; i < p.count; i++) p.setY(i, THREE.MathUtils.clamp(p.getY(i), ylo, yhi));
+  const keep: number[] = [];
+  for (let t = 0; t < p.count; t += 3) {
+    const ys = [p.getY(t), p.getY(t + 1), p.getY(t + 2)];
+    // (Compared with a tolerance: the clamped value went through a Float32 buffer.)
+    if (ys.every((y) => Math.abs(y - ylo) < 1e-6) || ys.every((y) => Math.abs(y - yhi) < 1e-6)) continue;
+    keep.push(t);
+  }
+  const out = new THREE.BufferGeometry();
+  for (const name of Object.keys(g.attributes)) {
+    const a = g.attributes[name];
+    const n = a.itemSize;
+    const arr = new Float32Array(keep.length * 3 * n);
+    keep.forEach((t, i) => arr.set((a.array as Float32Array).subarray(t * n, (t + 3) * n), i * 3 * n));
+    out.setAttribute(name, new THREE.BufferAttribute(arr, n));
+  }
+  return out;
+}
+
+const CASE_L = 0.7;
+const CASE_D = 0.46;
+const CASE_HB = 0.155;
+const CASE_HL = 0.125;
+const CASE_R = 0.09;
+const CASE_OPEN = -1.88; // ~108 degrees back on the hinge
+
+let caseShared: { dark: THREE.MeshStandardMaterial; metal: THREE.MeshStandardMaterial; lining: THREE.MeshStandardMaterial; tag: THREE.MeshStandardMaterial } | null = null;
+
+/** One hardshell suitcase lying on its back; the group's origin is on the ground. */
+function buildSuitcase(i: number, rand: () => number): { group: THREE.Group; lid: THREE.Group } {
+  caseShared ??= {
+    dark: new THREE.MeshStandardMaterial({ color: 0x161616, roughness: 0.5, metalness: 0.05 }),
+    metal: new THREE.MeshStandardMaterial({ color: 0xa4a9ae, roughness: 0.32, metalness: 0.85 }),
+    lining: new THREE.MeshStandardMaterial({ map: lining(), roughness: 0.95, side: THREE.BackSide }),
+    tag: new THREE.MeshStandardMaterial({ color: 0xeee6cf, roughness: 0.7 }),
+  };
+  const sh = caseShared;
+  const style = CASE_STYLES[i % CASE_STYLES.length];
+  const skin = caseSkin(style, 101 + i * 17);
+  const shell = new THREE.MeshStandardMaterial({ map: skin.map, bumpMap: skin.bump, bumpScale: 2.2, roughness: 0.42, metalness: style.metal ?? 0.08 });
+  const L = CASE_L;
+  const D = CASE_D;
+  const HB = CASE_HB;
+  const HL = CASE_HL;
+  const R = CASE_R;
+  const group = new THREE.Group();
+  const add = (parent: THREE.Object3D, geo: THREE.BufferGeometry, mat: THREE.Material, x: number, y: number, z: number, shadow = true) => {
+    const m = new THREE.Mesh(geo, mat);
+    m.position.set(x, y, z);
+    m.castShadow = shadow;
+    m.receiveShadow = true;
+    parent.add(m);
+    return m;
+  };
+
+  // Base half: the lower half of a deep-rounded box, open at its widest section, lined.
+  add(group, roundedSlice(L, HB * 2, D, R, -1, 0), shell, 0, HB, 0);
+  add(group, roundedSlice(L - 0.016, HB * 2 - 0.016, D - 0.016, R - 0.008, -1, 0), sh.lining, 0, HB, 0, false);
+  // Zipper channel: a black band all round the seam, standing just proud of the shell.
+  add(group, roundedSlice(L + 0.012, 0.8, D + 0.012, R + 0.006, -0.012, 0.012), sh.dark, 0, HB, 0, false);
+
+  // Lid: the upper half, on a hinge along the back edge.
+  const lid = new THREE.Group();
+  lid.position.set(0, HB, -D / 2);
+  group.add(lid);
+  add(lid, roundedSlice(L, HL * 2, D, R, 0, 1), shell, 0, 0, D / 2);
+  add(lid, roundedSlice(L - 0.016, HL * 2 - 0.016, D - 0.016, R - 0.008, 0, 1), sh.lining, 0, 0, D / 2, false);
+
+  // Latches on the front seam.
+  for (const x of [-0.2, 0.2]) {
+    add(group, new RoundedBoxGeometry(0.06, 0.05, 0.018, 2, 0.006), sh.dark, x, HB, D / 2 + 0.008);
+    add(group, new THREE.BoxGeometry(0.022, 0.014, 0.006), sh.metal, x, HB + 0.004, D / 2 + 0.018, false);
+  }
+  // Moulded side handle on the front of the base, between the latches.
+  const handle = add(group, new THREE.TorusGeometry(0.07, 0.013, 6, 14, Math.PI), sh.dark, 0, HB * 0.48, D / 2 + 0.004);
+  handle.rotation.set(Math.PI / 2, 0, 0);
+  handle.scale.set(1, 1, 0.6);
+  add(group, new RoundedBoxGeometry(0.2, 0.03, 0.012, 2, 0.005), sh.dark, 0, HB * 0.48, D / 2 - 0.001, false);
+
+  // Telescopic trolley handle at the -X end: recessed housing, two metal tubes, a grip.
+  const H = HB + HL;
+  add(group, new RoundedBoxGeometry(0.02, H * 0.6, 0.3, 2, 0.008), sh.dark, -L / 2 - 0.004, H * 0.42, 0, false);
+  const pulled = i % 3 === 1;
+  const trolley = new THREE.Group();
+  trolley.position.set(-L / 2, H * 0.42, 0);
+  group.add(trolley);
+  const ext = pulled ? 0.22 + rand() * 0.12 : 0.012;
+  for (const z of [-0.11, 0.11]) {
+    const tube = add(trolley, new THREE.CylinderGeometry(0.008, 0.008, ext + 0.02, 8), sh.metal, -ext / 2, 0, z);
+    tube.rotation.z = Math.PI / 2;
+  }
+  add(trolley, new RoundedBoxGeometry(0.03, 0.03, 0.27, 2, 0.012), sh.dark, -ext - 0.012, 0, 0);
+  if (pulled) {
+    // Bent by the impact: the pulled-out handle sags and twists.
+    trolley.rotation.set((rand() - 0.5) * 0.5, (rand() - 0.5) * 0.5, -0.25 - rand() * 0.3);
+  }
+
+  // Four spinner wheels at the +X end.
+  for (const y of [0.045, H - 0.045]) {
+    for (const z of [-(D / 2 - 0.06), D / 2 - 0.06]) {
+      add(group, new RoundedBoxGeometry(0.03, 0.05, 0.05, 2, 0.01), sh.dark, L / 2 + 0.008, y, z, false);
+      const w = add(group, new THREE.CylinderGeometry(0.024, 0.024, 0.022, 12), sh.dark, L / 2 + 0.03, y, z);
+      w.rotation.x = Math.PI / 2;
+    }
+  }
+
+  // Luggage tag on the lid: a small plate on a short strap.
+  const tag = add(lid, new RoundedBoxGeometry(0.075, 0.006, 0.05, 2, 0.003), sh.tag, 0.18, HL + 0.003, D / 2 - 0.08, false);
+  tag.rotation.y = 0.3 + rand() * 0.4;
+  add(lid, new THREE.BoxGeometry(0.012, 0.004, 0.06), sh.dark, 0.14, HL + 0.002, D / 2 - 0.05, false);
+
+  return { group, lid };
 }

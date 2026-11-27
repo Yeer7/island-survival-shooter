@@ -1488,7 +1488,9 @@ export class Game implements CombatWorld {
     }
     s.broken = true;
     this.flags.caseBroken = true;
-    this.scene.remove(s.mesh);
+    // Crash-site luggage opens its lid (update() swings it); crates and barrels vanish.
+    if (s.lid) s.openT = 0;
+    else this.scene.remove(s.mesh);
     this.sound.breakCase();
     this.debris.burst(s.pos, this.v3.set(0, 1, 0), 22, s.color, { speed: 3.5, size: 0.1, floor: s.pos.y - 0.1 });
     this.debris.burst(s.pos, this.v3.set(0, 1, 0), 10, 0xe8e2d2, { speed: 2.5, size: 0.08, floor: s.pos.y - 0.1 });

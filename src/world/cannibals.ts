@@ -5,6 +5,7 @@ import { clamp, wrapAngle } from '../core/math';
 import { buildBone, buildFeather, buildHorn } from '../weapons/models';
 import { ColliderGrid, SPIKE_REF } from './colliders';
 import { Terrain } from './terrain';
+import { AlphaWolf, buildAlphaWolf } from './alphaWolf';
 
 /**
  * scout: Day 1 night watcher that keeps 30-45 m away and runs if approached.
@@ -25,7 +26,8 @@ export interface SafeZone {
 type ClipKey = 'idle' | 'walk' | 'run' | 'attack' | 'death';
 
 interface RoleCfg {
-  asset: AssetName;
+  /** A library model, or 'alphaWolf' for the beast built in code. */
+  asset: AssetName | 'alphaWolf';
   height: number;
   hp: number;
   walk: number;
@@ -39,14 +41,13 @@ interface RoleCfg {
   aggro: number;
   leash: number;
   name: string;
-  clips: Record<ClipKey, RegExp>;
+  clips?: Record<ClipKey, RegExp>;
 }
 
 const HUMAN_CLIPS: Record<ClipKey, RegExp> = { idle: /\|Idle$/, walk: /\|Walk$/, run: /\|Run$/, attack: /\|Punch$/, death: /\|Death$/ };
 const SKELETON_CLIPS: Record<ClipKey, RegExp> = { idle: /Skeleton_Idle$/, walk: /Skeleton_Running$/, run: /Skeleton_Running$/, attack: /Skeleton_Attack$/, death: /Skeleton_Death$/ };
 const SPIDER_CLIPS: Record<ClipKey, RegExp> = { idle: /Spider_Idle$/, walk: /Spider_Walk$/, run: /Spider_Walk$/, attack: /Spider_Attack$/, death: /Spider_Death$/ };
 const GIANT_CLIPS: Record<ClipKey, RegExp> = { idle: /\|Idle$/, walk: /\|Walk$/, run: /\|Run$/, attack: /\|Attack$/, death: /\|Death$/ };
-const WOLF_CLIPS: Record<ClipKey, RegExp> = { idle: /^(AnimalArmature\|)?Idle$/, walk: /^(AnimalArmature\|)?Walk$/, run: /^(AnimalArmature\|)?Gallop$/, attack: /^(AnimalArmature\|)?Attack$/, death: /^(AnimalArmature\|)?Death$/ };
 
 // The player sprints at 10 m/s: every enemy is slower, so running away always works.
 const ROLE: Record<Role, RoleCfg> = {
@@ -59,7 +60,7 @@ const ROLE: Record<Role, RoleCfg> = {
   skeleton: { asset: 'enemySpider', height: 1.0, hp: 110, walk: 1.8, run: 4.6, damage: 14, reach: 2.3, radius: 0.85, windup: 0.45, attackTime: 1.0, aggro: 15, leash: 28, name: 'Aranha Gigante', clips: SPIDER_CLIPS },
   skelGuard: { asset: 'enemySkeleton', height: 1.95, hp: 130, walk: 1.3, run: 4.0, damage: 16, reach: 2.0, radius: 0.42, windup: 0.55, attackTime: 1.1, aggro: 16, leash: 26, name: 'Esqueleto Guarda', clips: SKELETON_CLIPS },
   deepLord: { asset: 'enemyDeepLord', height: 3.3, hp: 340, walk: 1.4, run: 3.8, damage: 28, reach: 3.0, radius: 0.9, windup: 0.75, attackTime: 1.4, aggro: 18, leash: 26, name: 'Senhor das Profundezas', clips: GIANT_CLIPS },
-  alpha: { asset: 'enemyWolf', height: 2.3, hp: 650, walk: 1.8, run: 6.5, damage: 34, reach: 3.0, radius: 0.9, windup: 0.6, attackTime: 1.2, aggro: 26, leash: 45, name: 'Fera Alfa', clips: WOLF_CLIPS },
+  alpha: { asset: 'alphaWolf', height: 2.3, hp: 650, walk: 1.8, run: 6.5, damage: 34, reach: 3.0, radius: 0.9, windup: 0.6, attackTime: 1.2, aggro: 26, leash: 45, name: 'Fera Alfa' },
 };
 /** Enemy names follow the current language (the Portuguese ones stay in the table). */
 const NAME_EN: Record<string, string> = {
@@ -124,6 +125,8 @@ export interface Cannibal {
   fallAng: number;
   /** Lives inside the cave: walks its floor, kept by its walls, only active while the player is in. */
   cave: boolean;
+  /** The Alpha Wolf's procedural rig (no clips). */
+  wolf: AlphaWolf | null;
 }
 
 let maskTex: THREE.CanvasTexture | null = null;
@@ -471,11 +474,14 @@ export class Tribe {
   private spawn(role: Role, at: THREE.Vector3, night: boolean, cave = false): Cannibal {
     const cfg = ROLE[role];
     const root = new THREE.Group();
-    const model = this.lib.instance(cfg.asset, { by: 'height', value: cfg.height });
+    const wolf = cfg.asset === 'alphaWolf' ? buildAlphaWolf() : null;
+    const asset = cfg.asset === 'alphaWolf' ? null : cfg.asset;
+    const model = wolf ? wolf.root : this.lib.instance(asset!, { by: 'height', value: cfg.height });
     root.add(model);
     // Own materials per enemy so the hit flash only lights the one that was hit.
-    const mats: THREE.MeshStandardMaterial[] = [];
-    model.traverse((o) => {
+    const mats: THREE.MeshStandardMaterial[] = wolf ? [...wolf.mats] : [];
+    if (wolf) for (const f of wolf.fx) this.group.add(f.points);
+    if (!wolf) model.traverse((o) => {
       const m = o as THREE.Mesh;
       if (!m.isMesh) return;
       m.castShadow = true;
@@ -485,9 +491,6 @@ export class Tribe {
         if (cfg.asset === 'enemyHuman') {
           c.color.setHex(0x6b4432);
           c.roughness = 0.75;
-        } else if (cfg.asset === 'enemyWolf') {
-          c.color.multiplyScalar(0.42);
-          c.roughness = 0.9;
         } else if (cfg.asset === 'enemySpider') {
           // Near-black carapace with a dull red mark.
           c.color.multiplyScalar(0.55);
@@ -512,7 +515,9 @@ export class Tribe {
     root.updateMatrixWorld(true);
     model.updateMatrixWorld(true);
 
-    if (cfg.asset === 'enemyHuman') {
+    if (wolf) {
+      // Built with its own eyes, marks and rig.
+    } else if (cfg.asset === 'enemyHuman') {
       const props = tribalProps(role);
       const s = cfg.height / 1.75;
       attach(model.getObjectByName('Head'), props.mask, s, [0, 0.1, 0.03]);
@@ -522,7 +527,7 @@ export class Tribe {
     } else {
       // Glowing eyes on the head bone: cyan for the guardian, red for the alpha.
       const head = model.getObjectByName('Head');
-      const glow = new THREE.MeshStandardMaterial({ color: 0x000000, emissive: cfg.asset === 'enemyWolf' ? 0xff2a10 : role === 'deepLord' ? 0xb45cff : 0x6fe0ff, emissiveIntensity: role === 'deepLord' ? 3.2 : 2.5 });
+      const glow = new THREE.MeshStandardMaterial({ color: 0x000000, emissive: role === 'deepLord' ? 0xb45cff : 0x6fe0ff, emissiveIntensity: role === 'deepLord' ? 3.2 : 2.5 });
       const eyes = new THREE.Group();
       for (const x of [-0.07, 0.07]) {
         const e = new THREE.Mesh(new THREE.SphereGeometry(0.035, 8, 6), glow);
@@ -561,15 +566,16 @@ export class Tribe {
         attach(model.getObjectByName('ArmR'), lord.pauldronR, cfg.height / 3.92, [0, 0.1, 0]);
         attach(model.getObjectByName('ArmR_end') ?? model.getObjectByName('ArmR'), lord.maul, cfg.height / 3.92, [0, 0, 0]);
       } else {
-        attach(head, eyes, cfg.height / (cfg.asset === 'enemyWolf' ? 1.6 : 1.8), cfg.asset === 'enemyWolf' ? [0, 0.12, 0.22] : [0, 0.14, 0.12]);
+        attach(head, eyes, cfg.height / 1.8, [0, 0.14, 0.12]);
       }
     }
 
     const mixer = new THREE.AnimationMixer(model.children[0] ?? model);
-    const clips = this.lib.raw(cfg.asset).animations;
+    const clips = asset ? this.lib.raw(asset).animations : [];
     const actions: Partial<Record<ClipKey, THREE.AnimationAction>> = {};
-    for (const key of Object.keys(cfg.clips) as ClipKey[]) {
-      const clip = clips.find((cl) => cfg.clips[key].test(cl.name));
+    const want = cfg.clips ?? ({} as Record<ClipKey, RegExp>);
+    for (const key of Object.keys(want) as ClipKey[]) {
+      const clip = clips.find((cl) => want[key].test(cl.name));
       if (!clip) continue;
       const act = mixer.clipAction(clip);
       if (key === 'death' || key === 'attack') {
@@ -618,6 +624,7 @@ export class Tribe {
       lastZ: at.z,
       fallAng: -1,
       cave,
+      wolf,
     };
     if (role === 'boss' || role === 'guardian' || role === 'alpha' || role === 'deepLord') {
       const cv = document.createElement('canvas');
@@ -642,6 +649,10 @@ export class Tribe {
 
   private play(c: Cannibal, key: ClipKey, fade = 0.25): void {
     if (c.clip === key) return;
+    if (c.wolf) {
+      c.clip = key;
+      return;
+    }
     const next = c.actions[key] ?? (key === 'run' ? c.actions.walk : undefined);
     if (!next) return;
     const prev = c.clip ? c.actions[c.clip] : null;
@@ -702,13 +713,13 @@ export class Tribe {
       const c = this.list[i];
       if (c.state === 'dead') continue;
       const h = c.cfg.height;
-      const quad = c.cfg.asset === 'enemyWolf';
-      // Spheres along the body: upright figures stack them, the beast lays them along its length.
-      const spheres: [number, number, number][] = quad
+      // Spheres along the body: upright figures stack them, the wolf lays them along its
+      // length (head and mane, chest, hindquarters).
+      const spheres: [number, number, number][] = c.wolf
         ? [
-            [0.55, h * 0.45, c.cfg.radius * 0.9],
-            [0, h * 0.5, c.cfg.radius],
-            [-0.55, h * 0.45, c.cfg.radius * 0.9],
+            [0.62, h * 0.82, 0.5],
+            [0.2, h * 0.62, 0.78],
+            [-0.35, h * 0.6, 0.6],
           ]
         : [
             [0, h * 0.3, c.cfg.radius * 0.8],
@@ -762,6 +773,11 @@ export class Tribe {
    * death clip plays once from the start at full weight, holding its last pose.
    */
   private die(c: Cannibal): void {
+    if (c.wolf) {
+      c.clip = 'death';
+      c.fallAng = -1;
+      return;
+    }
     for (const key of Object.keys(c.actions) as ClipKey[]) {
       const a = c.actions[key];
       if (!a || key === 'death') continue;
@@ -895,7 +911,8 @@ export class Tribe {
             if (a && key !== 'death' && a.isRunning()) a.stop();
           }
         }
-        c.mixer.update(dt);
+        if (c.wolf) c.wolf.updateAnim(dt, { mode: 'death', speed: 0 });
+        else c.mixer.update(dt);
         if (c.fallAng >= 0) {
           // No usable death clip: topple over backwards onto the ground.
           c.fallAng = Math.min(Math.PI / 2, c.fallAng + dt * (1.5 + c.fallAng * 4));
@@ -909,6 +926,7 @@ export class Tribe {
         if (c.deadT > 6) c.root.position.y = c.pos.y - (c.deadT - 6) * 0.55;
         if (c.deadT > 7.6) {
           this.group.remove(c.root);
+          if (c.wolf) for (const f of c.wolf.fx) this.group.remove(f.points);
           this.list.splice(i, 1);
         }
         continue;
@@ -1009,6 +1027,12 @@ export class Tribe {
         }
       }
       c.roarT -= dt;
+      // The wolf stops to roar (chest up, jaws wide) before it charges: the telegraph.
+      if (c.wolf && c.roarT > 7.6 && c.state !== 'attack') {
+        targetSpeed = 0;
+        targetHeading = toPlayer;
+        wantAttack = false;
+      }
       // First time it turns on the player: a tense sting (scouts only watch, they never hunt).
       const hunting = !c.leaving && ctx.alive && !away && c.role !== 'scout' && targetSpeed > 0 && Math.abs(wrapAngle(targetHeading - toPlayer)) < 0.6 && dist < 45 && (c.role !== 'stalker' || c.provoked);
       if (hunting && !c.alerted) {
@@ -1096,6 +1120,18 @@ export class Tribe {
           c.pos.z += (oz / d) * (min - d);
         }
       }
+      // The wolf's head is ~2 m ahead of its centre: it pulls up at bite range instead of
+      // running its chest through the player.
+      const wx = c.pos.x - player.x;
+      const wz = c.pos.z - player.z;
+      if (c.wolf && !away && Math.hypot(wx, wz) < 2.7) {
+        const ox = wx;
+        const oz = wz;
+        const d = Math.max(1e-4, Math.hypot(ox, oz));
+        c.pos.x = player.x + (ox / d) * 2.7;
+        c.pos.z = player.z + (oz / d) * 2.7;
+        c.speed = Math.min(c.speed, 1);
+      }
       c.pos.y = c.cave ? 0 : this.terrain.height(c.pos.x, c.pos.z);
       // Pinned: it moved far less than its speed says it should have.
       const expected = c.speed * dt;
@@ -1114,7 +1150,13 @@ export class Tribe {
       }
       const visible = dist < 140;
       c.root.visible = visible;
-      if (visible && dist < 100) c.mixer.update(dt);
+      if (visible && dist < 100) {
+        if (c.wolf) {
+          const mode = c.state === 'attack' ? 'attack' : c.roarT > 7.6 ? 'roar' : c.clip === 'run' ? 'run' : c.clip === 'walk' ? 'walk' : 'idle';
+          c.wolf.updateAnim(dt, { mode, speed: c.speed, attack: c.attackT / cfg.attackTime, bite: cfg.windup / cfg.attackTime });
+        } else c.mixer.update(dt);
+      }
+      if (c.wolf) for (const f of c.wolf.fx) f.points.visible = visible;
       c.root.position.copy(c.pos);
       c.root.rotation.y = c.heading;
 

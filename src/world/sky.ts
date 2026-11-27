@@ -200,7 +200,8 @@ export class DayNight {
     this.hemi.intensity = lerp(0.55, 0.85, this.daylight);
 
     this.fog.color.copy(this.horizon);
-    this.fog.density = lerp(0.0034, 0.0022, this.daylight);
+    // Daytime haze gives depth between distant trunks without greying the forest.
+    this.fog.density = lerp(0.0036, 0.0031, this.daylight);
     if (this.indoor) {
       // Inside the cave: dense blue-black fog, no sun or moon, a faint cold fill.
       this.fog.color.setHex(0x10161e);

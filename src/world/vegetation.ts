@@ -6,6 +6,7 @@ import { ColliderGrid, Circle } from './colliders';
 import { LAKE_CENTER, LAKE_LEVEL, LAKE_RADIUS, Terrain } from './terrain';
 import { detailTextures } from './textures';
 import { buildBushVariants, bushMaterials } from './bushes';
+import { buildBroadleafVariants, broadleafLeafMaterial } from './broadleaf';
 import { PALM_CUT, buildPalmVariants, palmMaterials, palmStumpGeometry } from './palms';
 import { PINE_CUT, TrunkSpec, barkMaterial, buildPineVariants, needleMaterial, pineCutMaterial, pineStumpGeometry } from './pines';
 import { SEA_LEVEL } from './terrain';
@@ -104,6 +105,8 @@ export interface Tree {
   variant: number;
   slot: number;
   kind: 'pine' | 'palm';
+  /** A tall broadleaf (chopped like a pine; drops leaves rather than needles). */
+  broad?: boolean;
 }
 
 interface FallingTree {
@@ -178,7 +181,10 @@ export class Forest {
   private fallParts: InstancePart[][];
   /** Spine samples per variant (model space) used to rest a fallen tree on the ground. */
   private spines: { p: THREE.Vector3; r: number }[][];
-  private sets: InstancedSet[];
+  /** Instanced sets per variant and map cell, so far cells are culled (and kept out of the shadow pass). */
+  private sets: InstancedSet[] = [];
+  private treeSet: InstancedSet[] = [];
+  private heights: number[] = [];
   private stumps: InstancedSet;
   private palmStumps: InstancedSet;
   private falling: FallingTree[] = [];
@@ -192,24 +198,33 @@ export class Forest {
   private zero = new THREE.Matrix4().makeScale(0, 0, 0);
 
   constructor(private terrain: Terrain, colliders: ColliderGrid, exclusions: Exclusion[], private events: ForestEvents, lib: AssetLibrary, count = 350, groves: { x: number; z: number; r0: number; r1: number; count: number }[] = []) {
-    // Variants 0-2 are the CC0 pines; 3-5 are coconut palms built in code (choppable too).
+    // Variants: 0-1 tall pines, 2-3 tall broadleaves, 4-6 coconut palms; all built in code.
     const palmsV = buildPalmVariants();
     const pinesV = buildPineVariants();
-    this.variants = [...pinesV.map((v) => v.standing), ...palmsV.map((v) => v.standing)];
-    this.fallParts = [...pinesV.map((v) => v.falling), ...palmsV.map((v) => v.falling)];
-    this.trunkSpecs = [...pinesV.map((v) => v.trunk), ...palmsV.map((v) => v.trunk)];
-    const pineSpine: { p: THREE.Vector3; r: number }[] = [];
-    for (let y = 1; y <= TREE_HEIGHT; y += 0.75) {
-      const crown = y < 2 ? 0 : 2.3 * (1 - (y - 2) / (TREE_HEIGHT - 2));
-      pineSpine.push({ p: new THREE.Vector3(0, y, 0), r: 0.3 + crown * 0.18 });
-    }
-    this.spines = [pineSpine, pineSpine, pineSpine, ...palmsV.map((v) => v.spine)];
+    const broadV = buildBroadleafVariants();
+    const tall = [...pinesV, ...broadV];
+    this.variants = [...tall.map((v) => v.standing), ...palmsV.map((v) => v.standing)];
+    this.fallParts = [...tall.map((v) => v.falling), ...palmsV.map((v) => v.falling)];
+    this.trunkSpecs = [...tall.map((v) => v.trunk), ...palmsV.map((v) => v.trunk)];
+    this.spines = [...tall.map((v) => v.spine), ...palmsV.map((v) => v.spine)];
+    this.heights = [...tall.map((v) => v.height), ...palmsV.map(() => PALM_HEIGHT)];
+    const TALL = tall.length;
     this.variants.forEach((parts, v) => {
       for (const p of parts) {
         const sm = p.material as THREE.MeshStandardMaterial;
-        if (sm.alphaTest > 0) addWind(sm, v < 3 ? 3.0 : 5.0, v < 3 ? 0.012 : 0.02);
+        if (sm.alphaTest > 0) addWind(sm, 5.0, v < TALL ? 0.008 : 0.02);
       }
     });
+    {
+      // Broadleaf leaf clusters are double-sided cards too.
+      const lm = broadleafLeafMaterial();
+      const windCompile = lm.onBeforeCompile;
+      lm.onBeforeCompile = (shader, renderer) => {
+        windCompile.call(lm, shader, renderer);
+        shader.fragmentShader = shader.fragmentShader.replace('#include <normal_fragment_begin>', THREE.ShaderChunk.normal_fragment_begin.replace('normal *= faceDirection;', ''));
+      };
+      lm.customProgramCacheKey = () => 'broadleaf-wind';
+    }
     // Needle sprays are double-sided cards: keep their up-leaning normal on both faces so
     // the underside of a spray never turns black.
     {
@@ -224,7 +239,23 @@ export class Forest {
 
     const rand = mulberry32(4242);
     const placed: { x: number; z: number; kind: 'pine' | 'palm' }[] = [];
-    const minDist = 6.5;
+    const minDist = 4.4;
+    // A coarse grid so the spacing test stays cheap with ~900 trees.
+    const cellOf = (x: number, z: number) => `${Math.floor(x / 8)}:${Math.floor(z / 8)}`;
+    const grid = new Map<string, { x: number; z: number }[]>();
+    const near = (x: number, z: number, d: number) => {
+      const gx = Math.floor(x / 8);
+      const gz = Math.floor(z / 8);
+      for (let i = -1; i <= 1; i++)
+        for (let j = -1; j <= 1; j++) for (const p of grid.get(`${gx + i}:${gz + j}`) ?? []) if ((p.x - x) ** 2 + (p.z - z) ** 2 < d * d) return true;
+      return false;
+    };
+    const place = (p: { x: number; z: number; kind: 'pine' | 'palm' }) => {
+      placed.push(p);
+      const k = cellOf(p.x, p.z);
+      if (!grid.has(k)) grid.set(k, []);
+      grid.get(k)!.push(p);
+    };
     let attempts = 0;
     // Dense groves first (e.g. the pines walling in the crash clearing).
     for (const gv of groves) {
@@ -234,33 +265,25 @@ export class Forest {
         const r = gv.r0 + rand() * (gv.r1 - gv.r0);
         const x = gv.x + Math.cos(a) * r;
         const z = gv.z + Math.sin(a) * r;
-        if (terrain.slope(x, z) > 0.3 || terrain.height(x, z) < 3) continue;
-        if (placed.some((p) => (p.x - x) ** 2 + (p.z - z) ** 2 < 4.5 * 4.5)) continue;
-        placed.push({ x, z, kind: 'pine' });
+        if (terrain.slope(x, z) > 0.34 || terrain.height(x, z) < 3) continue;
+        if (near(x, z, 4.2)) continue;
+        place({ x, z, kind: 'pine' });
         n++;
       }
     }
-    while (placed.length < count && attempts < 60000) {
+    while (placed.length < count && attempts < 160000) {
       attempts++;
       const x = (rand() - 0.5) * 520;
       const z = (rand() - 0.5) * 520;
       const h = terrain.height(x, z);
       const beachTop = terrain.beachTopAt(z);
       if (h < beachTop + 0.8 || h > 34) continue;
-      if (terrain.slope(x, z) > 0.27) continue;
+      if (terrain.slope(x, z) > 0.34) continue;
       if (Math.hypot(x - LAKE_CENTER.x, z - LAKE_CENTER.z) < LAKE_RADIUS * 1.2) continue;
       if (exclusions.some((e) => Math.hypot(x - e.x, z - e.z) < e.r)) continue;
       const density = terrain.noise.noise(x * 0.012 + 70, z * 0.012 - 30) * 0.5 + 0.5;
-      if (rand() > 0.25 + density * 0.9) continue;
-      let ok = true;
-      for (let i = 0; i < placed.length; i++) {
-        const p = placed[i];
-        if ((p.x - x) ** 2 + (p.z - z) ** 2 < minDist * minDist) {
-          ok = false;
-          break;
-        }
-      }
-      if (ok) placed.push({ x, z, kind: 'pine' });
+      if (rand() > 0.45 + density * 0.8) continue;
+      if (!near(x, z, minDist)) place({ x, z, kind: 'pine' });
     }
 
     // Palms along the southern beach, on the sand strip.
@@ -275,12 +298,29 @@ export class Forest {
       const h = terrain.height(x, z);
       if (h < 0.7 || h > 4 || z < 40 || terrain.slope(x, z) > 0.2) continue;
       if (exclusions.some((e) => Math.hypot(x - e.x, z - e.z) < e.r)) continue;
-      if (placed.some((p) => (p.x - x) ** 2 + (p.z - z) ** 2 < 25)) continue;
-      placed.push({ x, z, kind: 'palm' });
+      if (near(x, z, 5)) continue;
+      place({ x, z, kind: 'palm' });
       palms++;
     }
 
-    this.sets = this.variants.map((parts) => new InstancedSet(parts, placed.length, true));
+    // Variant per tree first (pine or broadleaf in patches; palms on the beach), then one
+    // instanced set per variant and 96 m map cell.
+    const CELL = 64;
+    const plan = placed.map((p) => {
+      const palm = p.kind === 'palm';
+      const broadPatch = terrain.noise.noise(p.x * 0.006 - 11, p.z * 0.006 + 37) + (rand() - 0.5) * 0.5 > 0;
+      const variant = palm ? TALL + Math.floor(rand() * 3) : (broadPatch ? 2 : 0) + (rand() < 0.5 ? 0 : 1);
+      return { ...p, variant, cell: `${variant}:${Math.floor(p.x / CELL)}:${Math.floor(p.z / CELL)}` };
+    });
+    const counts = new Map<string, number>();
+    for (const p of plan) counts.set(p.cell, (counts.get(p.cell) ?? 0) + 1);
+    const setByCell = new Map<string, InstancedSet>();
+    for (const [key, n] of counts) {
+      const v = Number(key.split(':')[0]);
+      const set = new InstancedSet(this.variants[v], n, true);
+      setByCell.set(key, set);
+      this.sets.push(set);
+    }
     // Cut stump: dark bark on the side (same as the logs) and a pale ring-cut top.
     const tex = detailTextures();
     // Pine stump: the trunk's own foot in the same Poly Haven bark, ring-cut top at PINE_CUT.
@@ -304,23 +344,26 @@ export class Forest {
     palmStumpMesh.material = [pm.trunk, pm.cut, pm.trunk];
     palmStumpMesh.frustumCulled = false;
     const tint = new THREE.Color();
-    placed.forEach((p, i) => {
+    plan.forEach((p, i) => {
       const palm = p.kind === 'palm';
-      const scale = palm ? 0.8 + rand() * 0.45 : 0.8 + rand() * 0.5;
-      const variant = palm ? 3 + Math.floor(rand() * 3) : Math.floor(rand() * 3);
+      const scale = palm ? 0.8 + rand() * 0.45 : 0.9 + rand() * 0.22;
+      const variant = p.variant;
       const y = terrain.height(p.x, p.z) - 0.1;
-      const height = (palm ? PALM_HEIGHT : TREE_HEIGHT) * scale;
-      const collider = colliders.add({ x: p.x, z: p.z, r: (palm ? 0.32 : 0.42) * scale, y0: y, y1: y + height, kind: 'tree', ref: i });
+      const height = this.heights[variant] * scale;
+      const broad = variant >= 2 && variant < TALL;
+      const collider = colliders.add({ x: p.x, z: p.z, r: (palm ? 0.32 : 0.5) * scale, y0: y, y1: y + height, kind: 'tree', ref: i });
       // A palm comes down in 3 axe blows; a pine takes 4.
       const hp = 100;
-      const tree: Tree = { x: p.x, y, z: p.z, scale, rotY: rand() * Math.PI * 2, hp, maxHp: hp, state: 'alive', collider, variant, slot: 0, kind: p.kind };
+      const tree: Tree = { x: p.x, y, z: p.z, scale, rotY: rand() * Math.PI * 2, hp, maxHp: hp, state: 'alive', collider, variant, slot: 0, kind: p.kind, broad };
       this.dummy.position.set(p.x, y, p.z);
       this.dummy.rotation.set(0, tree.rotY, 0);
       this.dummy.scale.setScalar(scale);
       this.dummy.updateMatrix();
       if (palm) tint.setRGB(1, 1, 1);
       else tint.setScalar(0.88 + rand() * 0.22);
-      tree.slot = this.sets[variant].push(this.dummy.matrix, tint);
+      const set = setByCell.get(p.cell)!;
+      tree.slot = set.push(this.dummy.matrix, tint);
+      this.treeSet[i] = set;
       this.stumps.push(this.zero);
       this.palmStumps.push(this.zero);
       this.trees.push(tree);
@@ -330,10 +373,14 @@ export class Forest {
     this.palmStumps.finish(this.group);
   }
 
+  private setOf(t: Tree): InstancedSet {
+    return this.treeSet[this.trees.indexOf(t)];
+  }
+
   /** Hide the standing instance and show the stump; `cutM` (model space) sets its top. */
   private writeStump(i: number, cutM?: number): void {
     const t = this.trees[i];
-    this.sets[t.variant].set(t.slot, this.zero);
+    this.setOf(t).set(t.slot, this.zero);
     // The stump is the trunk's own foot: same place, yaw and scale, top exactly at the cut.
     const set = t.kind === 'palm' ? this.palmStumps : this.stumps;
     this.dummy.position.set(t.x, t.y, t.z);
@@ -354,12 +401,12 @@ export class Forest {
   /** Builds the chopping materials once so their shaders compile at load, not mid-play. */
   makeWarmupObject(): THREE.Object3D {
     const g = new THREE.Group();
-    for (const v of [0, this.variants.length - 1]) {
+    for (const v of [0, 2, this.variants.length - 1]) {
       const bark = this.variants[v][0].material as THREE.Material;
       void bark;
       const box = new THREE.BoxGeometry(0.1, 0.1, 0.1);
       box.setAttribute('aWood', new THREE.Float32BufferAttribute(new Float32Array(box.attributes.position.count), 1));
-      g.add(new THREE.Mesh(box, this.footMaterial(v < 3 ? 'pine' : 'palm')));
+      g.add(new THREE.Mesh(box, this.footMaterial(v < 4 ? 'pine' : 'palm', bark)));
       for (const p of this.variants[v]) g.add(new THREE.Mesh(p.geometry, p.material));
     }
     for (const m of [pineCutMaterial(), palmMaterials().cut]) g.add(new THREE.Mesh(new THREE.CircleGeometry(0.1, 6), m));
@@ -570,8 +617,9 @@ export class Forest {
    */
   private wound(i: number, from: THREE.Vector3): Wounded {
     const t = this.trees[i];
-    this.sets[t.variant].set(t.slot, this.zero);
-    for (const m of this.sets[t.variant].meshes) m.computeBoundingSphere();
+    const set = this.setOf(t);
+    set.set(t.slot, this.zero);
+    for (const m of set.meshes) m.computeBoundingSphere();
     const spec = this.trunkSpecs[t.variant];
     const cut = CUT_HEIGHT;
     const cutM = cut / t.scale;
@@ -609,7 +657,7 @@ export class Forest {
       group,
       pivot,
       upper,
-      foot: new THREE.Mesh(new THREE.BufferGeometry(), this.footMaterial(t.kind)),
+      foot: new THREE.Mesh(new THREE.BufferGeometry(), this.footMaterial(t.kind, parts[0].material as THREE.Material)),
       spec,
       away,
       axis,
@@ -636,16 +684,16 @@ export class Forest {
     return w;
   }
 
-  private footMats: Partial<Record<'pine' | 'palm', THREE.MeshStandardMaterial>> = {};
+  private footMats = new Map<THREE.Material, THREE.MeshStandardMaterial>();
   /**
    * The bark of the rebuilt foot, blending into fresh split wood by a per-vertex weight
    * (aWood) with a soft threshold, so the edge between bark and bitten wood follows the
    * bite as a clean, torn line instead of stepping triangle by triangle.
    */
-  private footMaterial(kind: 'pine' | 'palm'): THREE.MeshStandardMaterial {
-    let m = this.footMats[kind];
+  private footMaterial(kind: 'pine' | 'palm', source: THREE.Material): THREE.MeshStandardMaterial {
+    const m = this.footMats.get(source);
     if (m) return m;
-    const bark = (kind === 'palm' ? palmMaterials().trunk : barkMaterial()).clone();
+    const bark = (source as THREE.MeshStandardMaterial).clone();
     const woodMap = this.freshWood(kind).map!;
     bark.onBeforeCompile = (sh) => {
       sh.uniforms.woodMap = { value: woodMap };
@@ -664,7 +712,7 @@ export class Forest {
           .replace('#include <normal_fragment_maps>', 'if (vWood < 0.42) {\n#include <normal_fragment_maps>\n}');
     };
     bark.customProgramCacheKey = () => `foot-blend-${kind}`;
-    this.footMats[kind] = bark;
+    this.footMats.set(source, bark);
     return bark;
   }
 
@@ -778,7 +826,7 @@ export class Forest {
       if (t < 0) t = c < 0 ? 0 : -1;
       if (t < 0 || t > best) continue;
       const y = o.y + d.y * t;
-      if (y < tr.y - 0.2 || y > tr.y + (tr.kind === 'palm' ? PALM_HEIGHT : TREE_HEIGHT) * tr.scale) continue;
+      if (y < tr.y - 0.2 || y > tr.y + this.heights[tr.variant] * tr.scale) continue;
       best = t;
       hit = i;
     }
@@ -1067,7 +1115,8 @@ export class Props {
     const BUSHES_PER_VARIANT = 270;
     const bushSets = buildBushVariants().map((parts) => new InstancedSet(parts, BUSHES_PER_VARIANT, false));
     this.bushSets = bushSets;
-    const fernSet = new InstancedSet(lib.parts('fern', { by: 'height', value: 0.8 }), 260, false);
+    const FERNS = 500;
+    const fernSet = new InstancedSet(lib.parts('fern', { by: 'height', value: 0.8 }), FERNS, false);
     for (const set of [...bushSets, fernSet]) for (const m of set.meshes) addWind(m.material as THREE.Material, 0.1, 0.06);
     {
       // Leaf sprays are double-sided cards: keep their up-leaning normal on both faces.
@@ -1081,7 +1130,7 @@ export class Props {
     }
     const bushCount = () => bushSets.reduce((s2, b2) => s2 + b2.count, 0);
     tries = 0;
-    while ((bushCount() < BUSHES_PER_VARIANT * 2 || fernSet.count < 260) && tries < 60000) {
+    while ((bushCount() < BUSHES_PER_VARIANT * 2 || fernSet.count < FERNS) && tries < 90000) {
       tries++;
       // Some shrubs crowd the edge of the wreck's clearing; the rest spread over the island.
       const inGrove = grove && rand() < 0.12;
@@ -1091,12 +1140,12 @@ export class Props {
       const z = inGrove ? grove.z + Math.sin(ga) * gr : (rand() - 0.5) * 500;
       if (terrain.surfaceAt(x, z) !== 'grass' || (!inGrove && excluded(x, z))) continue;
       const h = terrain.height(x, z);
-      const fern = inGrove ? false : nearTree(x, z, 5) ? rand() < 0.5 : rand() < 0.2;
+      const fern = inGrove ? false : nearTree(x, z, 4) ? rand() < 0.65 : rand() < 0.12;
       // Shrubs keep off the wreck's dirt, the luggage and the ramp, and out of tree trunks.
       if (!fern && (blocked(x, z) || nearTree(x, z, 1.2))) continue;
       const variant = rand() < 0.5 ? 0 : 1;
       const set = fern ? fernSet : bushSets[variant];
-      if (set.count >= (fern ? 260 : BUSHES_PER_VARIANT)) continue;
+      if (set.count >= (fern ? FERNS : BUSHES_PER_VARIANT)) continue;
       const s = fern ? 0.7 + rand() * 0.7 : 0.95 + rand() * 0.6;
       d.position.set(x, h - 0.05, z);
       d.rotation.set(0, rand() * 6, 0);

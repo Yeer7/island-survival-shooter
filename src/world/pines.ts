@@ -110,10 +110,10 @@ export function needleMaterial(): THREE.MeshStandardMaterial {
   return needles;
 }
 
+/** Tall forest pines: a clean trunk to ~5 m, a few dead stubs, then a high, wide crown. */
 const VARIANTS = [
-  { height: 9.0, seed: 5, branches: 13 },
-  { height: 9.8, seed: 13, branches: 14 },
-  { height: 10.6, seed: 29, branches: 15 },
+  { height: 17.0, seed: 5, branches: 18, clear: 5.0 },
+  { height: 19.5, seed: 13, branches: 20, clear: 5.4 },
 ];
 
 
@@ -138,6 +138,8 @@ export interface PineVariant {
   /** Trunk axis point, radius and polygon side count at height h (model space). */
   trunkAt(h: number): { c: THREE.Vector3; r: number; sides: number };
   trunk: TrunkSpec;
+  /** Clearance samples (model space, root to crown) for resting a fallen tree on the ground. */
+  spine: { p: THREE.Vector3; r: number }[];
 }
 
 /** Trunk radius at height h of a tree of height H. */
@@ -158,11 +160,18 @@ export function buildPineVariants(): PineVariant[] {
       const k = THREE.MathUtils.smoothstep(h, 0.6, 2.0);
       return new THREE.Vector3(0.06 * Math.sin(h * 0.8 + ph) * k, h, 0.06 * Math.cos(h * 0.65 + ph) * k);
     };
-    const radius = (h: number) => pineRadius(h, H) * (1 + 0.035 * Math.sin(h * 7 + ph));
+    // Thicker for their height: a tall forest trunk.
+    const girth = Math.pow(H / 9.8, 0.55);
+    const radius = (h: number) => pineRadius(h, H) * girth * (1 + 0.035 * Math.sin(h * 7 + ph));
+    // Rings: dense at the foot (where the axe bites), sparse up the long clean trunk.
+    const rows: number[] = [];
+    for (let h = 0; h < 3; h += 0.25) rows.push(h);
+    for (let h = 3; h < H; h += 1.2) rows.push(h);
+    rows.push(H);
     const trunk = (h0: number) => {
-      const rows = Math.ceil((H - h0) / 0.25);
-      const geo = gridGeometry(rows, 9, (i, j) => {
-        const h = h0 + ((H - h0) * i) / rows;
+      const hs = [h0, ...rows.filter((h) => h > h0 + 1e-3)];
+      const geo = gridGeometry(hs.length - 1, 9, (i, j) => {
+        const h = hs[i];
         const c = spine(h);
         const phi = (j / 9) * Math.PI * 2;
         const rad = radius(h);
@@ -171,45 +180,48 @@ export function buildPineVariants(): PineVariant[] {
       geo.deleteAttribute('color');
       return geo;
     };
-    // Branches: golden-angle spiral; the lowest few are dry, thin and bare.
+    // Branches: golden-angle spiral from the clear trunk up. A few dead stubs just above
+    // the clear height (high, never in the face); the crown is wide through its upper part
+    // so neighbouring crowns nearly meet overhead.
     const branchGeos: THREE.BufferGeometry[] = [];
     const quads: { c: THREE.Vector3; a: THREE.Vector3; s: THREE.Vector3; len: number; w: number }[] = [];
     const twig = (from: THREE.Vector3, dir: THREE.Vector3, len: number, r0: number) => {
-      const g = new THREE.CylinderGeometry(r0 * 0.25, r0, len, 5, 1);
+      // Open-ended and four-sided: the branch ends are hidden in the trunk and the needles.
+      const g = new THREE.CylinderGeometry(r0 * 0.25, r0, len, 4, 1, true);
       g.translate(0, len / 2, 0);
       g.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(up, dir));
       g.translate(from.x, from.y, from.z);
       branchGeos.push(g);
     };
-    const yLow = 1.5;
+    const yLow = v.clear;
+    const yLive = yLow + 2.2;
+    const crownW = (u: number) => 0.7 + 3.6 * Math.pow(1 - u, 0.7) * (0.55 + 0.45 * THREE.MathUtils.smoothstep(u, 0, 0.35));
     for (let k = 0; k < v.branches * 3; k++) {
       const level = Math.floor(k / 3);
       const t = level / (v.branches - 1);
-      const y = yLow + (H - 0.9 - yLow) * Math.pow(t, 0.9) + (r() - 0.5) * 0.12;
+      const y = yLow + (H - 1.0 - yLow) * Math.pow(t, 0.85) + (r() - 0.5) * 0.15;
       const az = (k % 3) * 2.094 + level * 0.9 + (r() - 0.5) * 0.5;
-      const dead = y < 2.9;
-      const live = 1 - (y - yLow) / (H - yLow);
-      const len = dead ? 0.9 + r() * 0.8 : 0.6 + 2.5 * Math.pow(live, 0.85) + r() * 0.3;
-      const droop = dead ? -0.1 - r() * 0.4 : -0.12 - r() * 0.15 + (1 - live) * 0.2;
+      const dead = y < yLive;
+      if (dead && r() < 0.6) continue;
+      const u = Math.max(0, (y - yLive) / (H - yLive));
+      const len = dead ? 0.7 + r() * 0.7 : crownW(u) * (0.85 + r() * 0.3);
+      const droop = dead ? -0.05 - r() * 0.3 : -0.1 - r() * 0.15 + u * 0.2;
       const dir = new THREE.Vector3(Math.cos(az), droop, Math.sin(az)).normalize();
       const c = spine(y);
       const from = c.clone().addScaledVector(new THREE.Vector3(Math.cos(az), 0, Math.sin(az)), radius(y) * 0.7);
-      twig(from, dir, len, dead ? 0.035 : 0.05 + 0.04 * live);
-      if (dead) {
-        for (let q = 0; q < 2; q++) {
-          const at = from.clone().addScaledVector(dir, len * (0.35 + q * 0.3));
-          const d2 = dir.clone().applyAxisAngle(up, (q ? 1 : -1) * (0.6 + r() * 0.4)).add(new THREE.Vector3(0, 0.25, 0)).normalize();
-          twig(at, d2, 0.35 + r() * 0.3, 0.014);
-        }
-        continue;
-      }
-      // Needle sprays along the branch: a fan of tilted cards.
+      twig(from, dir, len, dead ? 0.04 : 0.06 + 0.05 * (1 - u));
+      if (dead) continue;
+      // Needle sprays along the branch: a fan of tilted cards, two rows on long branches.
       const side = new THREE.Vector3().crossVectors(dir, up).normalize();
       const norm = new THREE.Vector3().crossVectors(side, dir).normalize();
-      for (const tilt of [-0.85, -0.25, 0.3, 0.9]) {
-        const tt = tilt + (r() - 0.5) * 0.25;
-        const s = side.clone().multiplyScalar(Math.cos(tt)).addScaledVector(norm, Math.sin(tt));
-        quads.push({ c: from.clone().addScaledVector(dir, len * 0.55), a: dir.clone(), s, len: len * 0.95 + 0.45, w: 0.85 + len * 0.3 });
+      const rowsAlong = len > 2.2 ? [0.4, 0.78] : [0.55];
+      for (const along of rowsAlong) {
+        for (const tilt of [-0.85, -0.25, 0.3, 0.9]) {
+          const tt = tilt + (r() - 0.5) * 0.25;
+          const s2 = side.clone().multiplyScalar(Math.cos(tt)).addScaledVector(norm, Math.sin(tt));
+          const seg = len / rowsAlong.length;
+          quads.push({ c: from.clone().addScaledVector(dir, len * along), a: dir.clone(), s: s2, len: seg * 1.05 + 0.5, w: 0.9 + len * 0.28 });
+        }
       }
     }
     // The leader at the top: a spire of cards.
@@ -217,9 +229,11 @@ export function buildPineVariants(): PineVariant[] {
     for (let k = 0; k < 5; k++) {
       const az = (k / 5) * Math.PI * 2;
       const dir = new THREE.Vector3(Math.cos(az) * 0.35, 1, Math.sin(az) * 0.35).normalize();
-      const s = new THREE.Vector3(-Math.sin(az), 0, Math.cos(az));
-      quads.push({ c: top.clone().addScaledVector(dir, 0.3), a: dir, s, len: 1.3, w: 0.7 });
+      const s2 = new THREE.Vector3(-Math.sin(az), 0, Math.cos(az));
+      quads.push({ c: top.clone().addScaledVector(dir, 0.3), a: dir, s: s2, len: 1.5, w: 0.8 });
     }
+    const spineSamples: { p: THREE.Vector3; r: number }[] = [];
+    for (let y = 1; y <= H; y += 0.9) spineSamples.push({ p: spine(y), r: y < yLive ? radius(y) + 0.1 : 0.3 + crownW(Math.max(0, (y - yLive) / (H - yLive))) * 0.6 });
     // Cards as one geometry; normals lean up so the sprays light like a canopy.
     const pos: number[] = [];
     const nor: number[] = [];
@@ -267,6 +281,7 @@ export function buildPineVariants(): PineVariant[] {
         { geometry: cutCap, material: cut },
       ],
       height: H,
+      spine: spineSamples,
       trunkAt: (h: number) => ({ c: spine(h).clone(), r: radius(h), sides: 9 }),
       trunk: {
         sides: 9,
@@ -278,10 +293,7 @@ export function buildPineVariants(): PineVariant[] {
         },
         center: (h: number) => spine(h),
         uv: (j: number, h: number) => [(j / 9) * 2, h / 1.4],
-        rows: (() => {
-          const n = Math.ceil(H / 0.25);
-          return Array.from({ length: n + 1 }, (_, i) => (H * i) / n);
-        })(),
+        rows,
       },
     };
   });

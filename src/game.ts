@@ -228,7 +228,7 @@ export class Game implements CombatWorld {
       onFallStart: (t) => this.onTreeFallStart(t),
       onLanded: (t, d, c) => this.onTreeLanded(t, d, c),
       onSettled: (t, d, a) => this.onTreeSettled(t, d, a),
-    }, lib, 330, [{ x: this.crash.center.x, z: this.crash.center.z, r0: 26, r1: 58, count: 70 }]);
+    }, lib, 900, [{ x: this.crash.center.x, z: this.crash.center.z, r0: 25, r1: 60, count: 140 }]);
     this.scene.add(this.forest.group);
     this.props = new Props(this.terrain, this.colliders, exclusions, this.forest, lib, (x, z) => this.crash.grassBlocked(x, z), { x: this.crash.center.x, z: this.crash.center.z, r0: 9, r1: 34 });
     this.scene.add(this.props.group);
@@ -1517,17 +1517,17 @@ export class Game implements CombatWorld {
   }
 
   /** A blow shakes a few needles or leaf bits loose from the crown; they flutter down. */
-  private dropLeaves(tree: { x: number; y: number; z: number; scale: number; kind: 'pine' | 'palm' }, count: number): void {
-    const top = tree.y + (tree.kind === 'palm' ? 6.5 : 5) * tree.scale;
+  private dropLeaves(tree: { x: number; y: number; z: number; scale: number; kind: 'pine' | 'palm'; broad?: boolean }, count: number): void {
+    const top = tree.y + (tree.kind === 'palm' ? 6.5 : 9) * tree.scale;
     for (let k = 0; k < count; k++) {
       const a = Math.random() * Math.PI * 2;
       const r = 0.4 + Math.random() * (tree.kind === 'palm' ? 1.8 : 1.4);
       const x = tree.x + Math.cos(a) * r;
       const z = tree.z + Math.sin(a) * r;
-      this.debris.burst(this.v4.set(x, top - Math.random() * 1.5, z), this.v5.set(Math.cos(a), 0, Math.sin(a)), 1, tree.kind === 'palm' ? 0x5f8f3a : 0x46703a, {
+      this.debris.burst(this.v4.set(x, top - Math.random() * 1.5, z), this.v5.set(Math.cos(a), 0, Math.sin(a)), 1, tree.kind === 'palm' ? 0x5f8f3a : tree.broad ? 0x6f9a40 : 0x46703a, {
         speed: 0.5,
         size: 0.03,
-        life: 3.2,
+        life: 7,
         gravity: 2.2,
         flat: true,
         floor: this.terrain.height(x, z) + 0.02,
